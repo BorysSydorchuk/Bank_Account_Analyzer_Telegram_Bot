@@ -4,7 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="e852dbd0-220a-474a-bd20-c06451d0d1fb" name="Changes" comment="" />
+    <list default="true" id="e852dbd0-220a-474a-bd20-c06451d0d1fb" name="Changes" comment="prototype of the project">
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/analysis.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/analysis.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/bot.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/cache.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/cache.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/display.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/display.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/enablebanking.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/enablebanking.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/telegram_output.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/telegram_output.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -13,6 +21,18 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {
+    "state": "OPEN",
+    "assignee": "BorysSydorchuk"
+  }
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/BorysSydorchuk/Bank_Account_Analyzer_Telegram_Bot.git",
+    "accountId": "9131b1d7-2c1d-48b8-a22a-7957625c0863"
+  }
+}]]></component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 6,
   &quot;fromUser&quot;: false
@@ -84,10 +104,23 @@
       <workItem from="1778856089255" duration="6000" />
       <workItem from="1778856201952" duration="11000" />
     </task>
+    <task id="LOCAL-00001" summary="prototype of the project">
+      <option name="closed" value="true" />
+      <created>1779056195256</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1779056195256</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="prototype of the project" />
+    <option name="LAST_COMMIT_MESSAGE" value="prototype of the project" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

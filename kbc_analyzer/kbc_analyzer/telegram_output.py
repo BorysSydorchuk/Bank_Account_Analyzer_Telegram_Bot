@@ -1,18 +1,37 @@
-"""Format Analysis and ComparisonResult as Telegram HTML message chunks."""
+"""Format Analysis and ComparisonResult as Telegram HTML message chunks.
+
+Telegram has a 4096-character per-message limit. This module converts the structured
+analysis data into HTML-formatted strings and splits them into chunks that fit within
+that limit. Telegram supports a subset of HTML: <b>, <i>, <code>, <pre>, <a>.
+"""
 import html
 
 from .analysis import Analysis, ComparisonResult
 
-CHUNK_SIZE = 3800  # Telegram max is 4096; leave headroom
+# Safety margin below Telegram's 4096-char limit — leaves room for any formatting overhead
+CHUNK_SIZE = 3800
 
 
 def _e(text: str) -> str:
+    """Escape a string for safe inclusion in HTML (converts < > & to entities).
+
+    Any user-controlled text (merchant names, descriptions, etc.) must be escaped
+    before being placed inside HTML tags to prevent malformed messages.
+    """
     return html.escape(str(text))
 
 
 def format_analysis(analysis: Analysis, month_label: str) -> list[str]:
+    """Convert a single-month Analysis into a list of Telegram HTML message strings.
+
+    Each string in the returned list is one Telegram message (≤ CHUNK_SIZE chars).
+    The caller sends them in order.
+    """
+    # Build the message as a list of self-contained "parts" (sections).
+    # _chunk() will then group them into Telegram-sized messages.
     parts: list[str] = []
 
+    # Header
     parts.append(f"<b>📊 KBC Expenditure — {_e(month_label)}</b>")
 
     # Weekly summary
@@ -27,45 +46,54 @@ def format_analysis(analysis: Analysis, month_label: str) -> list[str]:
             )
         parts.append("\n".join(lines))
 
-    # Category totals
-    cats = [(c, v) for c, v in sorted(analysis.category_totals.items(), key=lambda x: x[1], reverse=True) if v > 0]
+    # Category totals — filter to only categories that have a non-zero total, sorted by size
+    cats = [
+        (c, v) for c, v in sorted(analysis.category_totals.items(), key=lambda x: x[1], reverse=True)
+        if v > 0
+    ]
     if cats:
         lines = ["<b>🏷 Spending by Category</b>"]
         for cat, total in cats:
             lines.append(f"  {_e(cat)}: €{total:.2f}")
         parts.append("\n".join(lines))
 
-    # Other subcategories
+    # "Other" subcategory breakdown (e.g. Entertainment, Health, Shopping…)
     if analysis.other_subcategory_totals:
         lines = ["<b>Other — Breakdown</b>"]
-        for sub, total in sorted(analysis.other_subcategory_totals.items(), key=lambda x: x[1], reverse=True):
+        for sub, total in sorted(
+            analysis.other_subcategory_totals.items(), key=lambda x: x[1], reverse=True
+        ):
             if total > 0:
                 lines.append(f"  {_e(sub)}: €{total:.2f}")
         parts.append("\n".join(lines))
 
-    # Traveling subcategories
+    # "Traveling" subcategory breakdown (e.g. Transport, Housing, Food…)
     if analysis.traveling_subcategory_totals:
         lines = ["<b>✈️ Traveling — Breakdown</b>"]
-        for sub, total in sorted(analysis.traveling_subcategory_totals.items(), key=lambda x: x[1], reverse=True):
+        for sub, total in sorted(
+            analysis.traveling_subcategory_totals.items(), key=lambda x: x[1], reverse=True
+        ):
             if total > 0:
                 lines.append(f"  {_e(sub)}: €{total:.2f}")
         parts.append("\n".join(lines))
 
-    # Flagged transactions
+    # Flagged transactions (anomalies detected by Gemini)
     if analysis.flagged_transactions:
         lines = ["<b>⚑ Flagged Transactions</b>"]
         for ft in sorted(analysis.flagged_transactions, key=lambda x: x.date):
             lines.append(
                 f"  {ft.date}  <b>{_e(ft.description[:28])}</b>  {ft.amount:+.2f}€\n"
-                f"  ↳ {_e(ft.reason)}"
+                f"  ↳ {_e(ft.reason)}"   # ↳ is an arrow indicating the reason line
             )
         parts.append("\n".join(lines))
 
-    # Daily breakdown
+    # Daily breakdown (compact one-liner per day with top 2 transactions)
     lines = ["<b>📆 Daily Breakdown</b>"]
     for day in sorted(analysis.daily_summary, key=lambda d: d.date):
+        # Skip days with no activity (can happen if date range extends to future)
         if day.total_spent == 0 and day.total_received == 0:
             continue
+        # Show top 2 transactions by absolute value to stay within line length
         top = sorted(day.transactions, key=lambda t: abs(t.amount), reverse=True)[:2]
         top_text = " | ".join(
             f"{'⚑ ' if t.flagged else ''}{_e(t.description[:20])} ({t.amount:+.2f}€)"
@@ -76,9 +104,9 @@ def format_analysis(analysis: Analysis, month_label: str) -> list[str]:
             lines.append(f"  {top_text}")
     parts.append("\n".join(lines))
 
-    # Summary
+    # Summary totals
     net = analysis.total_received - analysis.total_spent
-    sign = "+" if net >= 0 else ""
+    sign = "+" if net >= 0 else ""  # manually add + sign since Python doesn't for positive floats
     parts.append(
         f"<b>💰 Summary</b>\n"
         f"  Spent:    €{analysis.total_spent:.2f}\n"
@@ -86,20 +114,23 @@ def format_analysis(analysis: Analysis, month_label: str) -> list[str]:
         f"  Net:      {sign}€{net:.2f}"
     )
 
-    # Insights
+    # Gemini insights (numbered list)
     lines = ["<b>💡 Insights</b>"]
     for i, insight in enumerate(analysis.insights, 1):
         lines.append(f"  {i}. {_e(insight)}")
     parts.append("\n".join(lines))
 
+    # Split into Telegram-sized messages and return
     return _chunk(parts)
 
 
 def format_comparison(result: ComparisonResult) -> list[str]:
+    """Convert a ComparisonResult (multiple months) into a list of Telegram HTML messages."""
     parts: list[str] = []
 
     parts.append("<b>📊 Monthly Comparison</b>")
 
+    # One block showing totals for each month side by side
     lines = ["<b>💰 Totals per Month</b>"]
     for m in result.month_summaries:
         net = m.total_received - m.total_spent
@@ -110,10 +141,17 @@ def format_comparison(result: ComparisonResult) -> list[str]:
         )
     parts.append("\n".join(lines))
 
-    all_cats = sorted({cat for m in result.month_summaries for cat in m.category_totals if m.category_totals[cat] > 0})
+    # Collect all categories that appear in any month (for the comparison grid)
+    all_cats = sorted({
+        cat
+        for m in result.month_summaries
+        for cat in m.category_totals
+        if m.category_totals[cat] > 0
+    })
     if all_cats:
         lines = ["<b>🏷 Category Breakdown</b>"]
         for cat in all_cats:
+            # Build one row per category showing each month's spend (or "—" if absent)
             row = "  " + _e(cat)
             for m in result.month_summaries:
                 total = m.category_totals.get(cat, 0)
@@ -121,6 +159,7 @@ def format_comparison(result: ComparisonResult) -> list[str]:
             lines.append(row)
         parts.append("\n".join(lines))
 
+    # Cross-month insights from Gemini
     lines = ["<b>💡 Insights</b>"]
     for i, insight in enumerate(result.insights, 1):
         lines.append(f"  {i}. {_e(insight)}")
@@ -130,16 +169,23 @@ def format_comparison(result: ComparisonResult) -> list[str]:
 
 
 def _chunk(parts: list[str]) -> list[str]:
+    """Pack a list of text sections into Telegram-sized messages (≤ CHUNK_SIZE chars).
+
+    Each section is separated by a blank line. If adding the next section would exceed
+    the limit, we start a new message. A section that is itself larger than CHUNK_SIZE
+    will be sent alone (no further splitting is done at the character level).
+    """
     chunks: list[str] = []
     current = ""
     for part in parts:
+        # Try appending this section (with a blank line separator) to the current message
         candidate = (current + "\n\n" + part).strip()
         if len(candidate) <= CHUNK_SIZE:
-            current = candidate
+            current = candidate          # fits — keep building this message
         else:
             if current:
-                chunks.append(current)
-            current = part
+                chunks.append(current)   # save the current message before starting a new one
+            current = part               # start a fresh message with this section
     if current:
-        chunks.append(current)
+        chunks.append(current)           # don't forget the last message
     return chunks
