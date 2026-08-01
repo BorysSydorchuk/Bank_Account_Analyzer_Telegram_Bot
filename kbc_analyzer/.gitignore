@@ -32,3 +32,8 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Frontend (Node/Vite)
+node_modules/
+frontend/dist/
+frontend/.vite/

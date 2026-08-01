@@ -4,14 +4,24 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="e852dbd0-220a-474a-bd20-c06451d0d1fb" name="Changes" comment="prototype of the project">
-      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/analysis.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/analysis.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/bot.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/cache.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/cache.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/display.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/display.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/enablebanking.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/enablebanking.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/telegram_output.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/telegram_output.py" afterDir="false" />
+    <list default="true" id="e852dbd0-220a-474a-bd20-c06451d0d1fb" name="Changes" comment="Moved README.md to the main folder to make it visible in the right way for GitHub">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/.env.example" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/kbc_analyzer/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/analysis.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/kbc_analyzer/analysis.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/kbc_analyzer/bot.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/cache.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/kbc_analyzer/cache.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/display.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/kbc_analyzer/display.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/enablebanking.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/kbc_analyzer/enablebanking.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/kbc_analyzer/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/kbc_analyzer/telegram_output.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/kbc_analyzer/telegram_output.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/pyproject.toml" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/pyproject.toml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/scripts/debug_fetch.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/scripts/debug_fetch.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/scripts/inspect_transactions.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/scripts/inspect_transactions.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kbc_analyzer/tests/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/kbc_analyzer/backend/tests/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -21,18 +31,18 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
-  "lastFilter": {
-    "state": "OPEN",
-    "assignee": "BorysSydorchuk"
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;BorysSydorchuk&quot;
   }
-}]]></component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/BorysSydorchuk/Bank_Account_Analyzer_Telegram_Bot.git",
-    "accountId": "9131b1d7-2c1d-48b8-a22a-7957625c0863"
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/BorysSydorchuk/Bank_Account_Analyzer_Telegram_Bot.git&quot;,
+    &quot;accountId&quot;: &quot;9131b1d7-2c1d-48b8-a22a-7957625c0863&quot;
   }
-}]]></component>
+}</component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 6,
   &quot;fromUser&quot;: false
@@ -44,22 +54,31 @@
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
+    "ASKED_MARK_IGNORED_FILES_AS_EXCLUDED": "true",
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
     "codeWithMe.voiceChat.enabledByDefault": "false",
     "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
     "git-widget-placeholder": "master",
     "junie.onboarding.icon.badge.shown": "true",
+    "last_opened_file_path": "D:/Python/PythonProject",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
     "to.speed.mode.migration.done": "true",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\Python\PythonProject" />
+    </key>
+  </component>
   <component name="RunManager">
     <configuration name="main" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="PythonProject" />
@@ -112,7 +131,23 @@
       <option name="project" value="LOCAL" />
       <updated>1779056195256</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="All 7 source files now have inline comments. Here's a summary of what was added to each:&#10;&#10;  - cache.py — explains the three-table schema, why each table exists, INSERT OR REPLACE semantics, the row_factory trick, and the 180-day purge logic.&#10;  - enablebanking.py — explains PSD2/OAuth concepts, the RS256 JWT structure (kid, iat, exp), the two-step OAuth flow (start/complete), why localhost is used as the redirect, pagination in&#10;  fetch_transactions, and the credit_debit_indicator sign convention in _normalize.&#10;  - analysis.py — explains the Gemini response_schema limitation and the list[_KVPair] workaround, the role of SYSTEM_PROMPT, all Pydantic model fields, _format_transactions output format, and the&#10;  dict-conversion at the end of analyze/compare.&#10;  - display.py — explains box.ROUNDED vs box.SIMPLE, the ⚑ flag symbol, sorting logic, the net-amount color logic, and the [:2] top-transactions slice.&#10;  - telegram_output.py — explains the 4096-char Telegram limit and the CHUNK_SIZE safety margin, the _e() HTML-escaping requirement, the _chunk() packing algorithm, and the sign = &quot;+&quot; manual prefix.&#10;  - main.py — explains load_dotenv(), the fail-fast env check, asyncio.to_thread() rationale, the cached-vs-fresh branch, and extra_note or None.&#10;  - bot.py — explains the conversation state machine (integer states, what each state waits for), the _authorized() security gate, asyncio.to_thread() for blocking I/O, the after_auth branching&#10;  between analyze and compare flows, and the monthrange last-day calculation.">
+      <option name="closed" value="true" />
+      <created>1779056624583</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1779056624583</updated>
+    </task>
+    <task id="LOCAL-00003" summary="Moved README.md to the main folder to make it visible in the right way for GitHub">
+      <option name="closed" value="true" />
+      <created>1779056700828</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1779056700828</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -120,14 +155,15 @@
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="prototype of the project" />
-    <option name="LAST_COMMIT_MESSAGE" value="prototype of the project" />
+    <MESSAGE value="All 7 source files now have inline comments. Here's a summary of what was added to each:&#10;&#10;  - cache.py — explains the three-table schema, why each table exists, INSERT OR REPLACE semantics, the row_factory trick, and the 180-day purge logic.&#10;  - enablebanking.py — explains PSD2/OAuth concepts, the RS256 JWT structure (kid, iat, exp), the two-step OAuth flow (start/complete), why localhost is used as the redirect, pagination in&#10;  fetch_transactions, and the credit_debit_indicator sign convention in _normalize.&#10;  - analysis.py — explains the Gemini response_schema limitation and the list[_KVPair] workaround, the role of SYSTEM_PROMPT, all Pydantic model fields, _format_transactions output format, and the&#10;  dict-conversion at the end of analyze/compare.&#10;  - display.py — explains box.ROUNDED vs box.SIMPLE, the ⚑ flag symbol, sorting logic, the net-amount color logic, and the [:2] top-transactions slice.&#10;  - telegram_output.py — explains the 4096-char Telegram limit and the CHUNK_SIZE safety margin, the _e() HTML-escaping requirement, the _chunk() packing algorithm, and the sign = &quot;+&quot; manual prefix.&#10;  - main.py — explains load_dotenv(), the fail-fast env check, asyncio.to_thread() rationale, the cached-vs-fresh branch, and extra_note or None.&#10;  - bot.py — explains the conversation state machine (integer states, what each state waits for), the _authorized() security gate, asyncio.to_thread() for blocking I/O, the after_auth branching&#10;  between analyze and compare flows, and the monthrange last-day calculation." />
+    <MESSAGE value="Moved README.md to the main folder to make it visible in the right way for GitHub" />
+    <option name="LAST_COMMIT_MESSAGE" value="Moved README.md to the main folder to make it visible in the right way for GitHub" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/main.py</url>
-          <line>8</line>
           <option name="timeStamp" value="1" />
         </line-breakpoint>
       </breakpoints>
