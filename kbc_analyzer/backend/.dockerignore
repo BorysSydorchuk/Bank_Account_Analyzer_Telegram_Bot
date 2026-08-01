@@ -1,0 +1,7 @@
+__pycache__
+*.pyc
+.env
+eb_session.json
+kbc_transactions.db
+*.egg-info
+.git
