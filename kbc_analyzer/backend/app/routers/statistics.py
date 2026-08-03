@@ -1,0 +1,22 @@
+"""GET /api/statistics."""
+from datetime import date
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from .. import crud
+from ..db import get_db
+from ..schemas import StatisticsResponse
+from ..statistics import compute_statistics
+
+router = APIRouter(prefix="/api/statistics", tags=["statistics"])
+
+
+@router.get("", response_model=StatisticsResponse)
+def get_statistics(
+    date_from: date,
+    date_to: date,
+    db: Session = Depends(get_db),
+) -> StatisticsResponse:
+    transactions = crud.list_transactions(db, date_from, date_to)
+    return compute_statistics(transactions, date_from, date_to)
