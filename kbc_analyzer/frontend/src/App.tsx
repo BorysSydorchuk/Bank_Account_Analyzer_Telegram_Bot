@@ -2,6 +2,7 @@ import { CategoryBreakdown } from "@/components/dashboard/CategoryBreakdown"
 import { SpendingOverTime } from "@/components/dashboard/SpendingOverTime"
 import { SummaryCards } from "@/components/dashboard/SummaryCards"
 import { Sidebar } from "@/components/layout/Sidebar"
+import { SessionBanner } from "@/components/layout/SessionBanner"
 import { TopBar } from "@/components/layout/TopBar"
 import { useDashboard } from "@/hooks/useDashboard"
 
@@ -20,6 +21,7 @@ function App() {
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar dashboard={dashboard} />
+          <SessionBanner />
           <main className="flex-1 overflow-y-auto bg-background p-6">
             <SummaryCards
               dateFrom={dashboard.dateFrom}

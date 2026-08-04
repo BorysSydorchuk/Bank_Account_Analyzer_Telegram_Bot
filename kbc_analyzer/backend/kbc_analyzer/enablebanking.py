@@ -149,6 +149,17 @@ class EnableBankingClient:
         with open(SESSION_FILE) as f:
             return json.load(f)["account_uids"]
 
+    def get_session_info(self) -> dict | None:
+        """Return the raw cached session dict (session_id, account_uids, valid_until),
+        or None if no session has ever been created. Used to report session status to
+        the web UI — unlike session_valid(), this doesn't apply the 1-day safety buffer,
+        since the UI wants the real expiry date, not a buffered "is it safe to use" answer.
+        """
+        if not os.path.exists(SESSION_FILE):
+            return None
+        with open(SESSION_FILE) as f:
+            return json.load(f)
+
     # ── Non-interactive auth (used by the Telegram bot) ────────────────────────
 
     def start_auth(self) -> str:
@@ -204,8 +215,17 @@ class EnableBankingClient:
                 "Make sure you copied the full address bar URL after being redirected."
             )
 
+        return self.complete_auth_with_code(params["code"][0])
+
+    def complete_auth_with_code(self, code: str) -> list[str]:
+        """The back half of complete_auth(), starting from an already-extracted code.
+
+        Split out so the web callback endpoint (S2-02) — which receives {code, state}
+        as JSON, not a full redirect URL — can reuse the exact same session-exchange
+        and caching logic the terminal/bot flows already rely on.
+        """
         # Exchange the authorization code for a session object containing account UIDs
-        session = self._post("/sessions", {"code": params["code"][0]})
+        session = self._post("/sessions", {"code": code})
 
         # Extract UIDs for all linked accounts (could be current + savings account)
         account_uids = [acc["uid"] for acc in session.get("accounts", [])]

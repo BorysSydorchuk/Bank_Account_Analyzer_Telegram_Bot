@@ -1,5 +1,6 @@
 """Pydantic request/response models for the transactions API."""
 from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -78,3 +79,19 @@ class StatisticsResponse(BaseModel):
     by_category: list[CategoryStat]
     by_day: list[DayStat]
     by_week: list[WeekStat]
+
+
+class EnableBankingStatus(BaseModel):
+    status: Literal["active", "expired"]
+    expires_at: datetime | None
+
+
+class ReauthorizeResponse(BaseModel):
+    auth_url: str
+
+
+class CallbackRequest(BaseModel):
+    code: str
+    # Accepted (the redirect URL always carries it) but not currently validated —
+    # matches start_auth()'s own comment: required by the PSD2 spec, not checked by us.
+    state: str | None = None

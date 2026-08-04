@@ -50,3 +50,12 @@ export interface StatisticsResponse {
   by_day: DayStat[]
   by_week: WeekStat[]
 }
+
+export interface EnableBankingStatusResponse {
+  status: "active" | "expired"
+  expires_at: string | null
+}
+
+export interface ReauthorizeResponse {
+  auth_url: string
+}

@@ -12,6 +12,7 @@
        from one source instead of two that could drift apart. */
     --color-success: var(--success);
     --color-danger: var(--danger);
+    --color-warning: var(--warning);
     --color-text-primary: var(--foreground);
     --color-text-secondary: var(--muted-foreground);
     --color-sidebar-ring: var(--sidebar-ring);
@@ -88,6 +89,7 @@
     --destructive: oklch(0.577 0.245 27.325);
     --success: #16A34A;
     --danger: #DC2626;
+    --warning: #F59E0B;
     --border: #E2E8F0;
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);

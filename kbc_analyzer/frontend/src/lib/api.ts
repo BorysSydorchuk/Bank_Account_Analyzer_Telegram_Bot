@@ -1,4 +1,9 @@
-import type { StatisticsResponse, SyncResponse } from "./types"
+import type {
+  EnableBankingStatusResponse,
+  ReauthorizeResponse,
+  StatisticsResponse,
+  SyncResponse,
+} from "./types"
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000"
 
@@ -35,4 +40,19 @@ export function syncTransactions(dateFrom: string, dateTo: string) {
 export function getStatistics(dateFrom: string, dateTo: string) {
   const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo })
   return request<StatisticsResponse>(`/api/statistics?${params.toString()}`)
+}
+
+export function getEnableBankingStatus() {
+  return request<EnableBankingStatusResponse>("/api/auth/enable-banking/status")
+}
+
+export function reauthorizeEnableBanking() {
+  return request<ReauthorizeResponse>("/api/auth/enable-banking/reauthorize", { method: "POST" })
+}
+
+export function completeEnableBankingCallback(code: string, state: string | null) {
+  return request<EnableBankingStatusResponse>("/api/auth/enable-banking/callback", {
+    method: "POST",
+    body: JSON.stringify({ code, state }),
+  })
 }
