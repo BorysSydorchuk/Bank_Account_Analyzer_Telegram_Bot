@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useStatistics } from "@/hooks/useStatistics"
 import { assignCategoryColors } from "@/lib/categoryColors"
+import { resolveCssVar } from "@/lib/cssVar"
 import { formatAmount } from "@/lib/format"
 import type { CategoryStat } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -25,18 +26,6 @@ const KNOWN_EXPANDABLE_CATEGORIES = new Set(["Other", "Traveling"])
 
 function isExpandable(category: CategoryStat) {
   return KNOWN_EXPANDABLE_CATEGORIES.has(category.category) || category.subcategories.length > 0
-}
-
-// Resolves a CSS custom property to its actual computed color so it can be
-// handed to Recharts' SVG <Cell fill>, which (unlike a plain DOM element's
-// style) can't reliably resolve var() itself. index.css stays the one place
-// the hex values are written.
-function resolveCssVar(name: string): string {
-  if (typeof window === "undefined") return "#94a3b8"
-  const match = /var\((--[\w-]+)\)/.exec(name)
-  if (!match) return name
-  const value = getComputedStyle(document.documentElement).getPropertyValue(match[1]).trim()
-  return value || "#94a3b8"
 }
 
 interface Slice extends CategoryStat {

@@ -1,4 +1,5 @@
 import { CategoryBreakdown } from "@/components/dashboard/CategoryBreakdown"
+import { SpendingOverTime } from "@/components/dashboard/SpendingOverTime"
 import { SummaryCards } from "@/components/dashboard/SummaryCards"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
@@ -30,7 +31,11 @@ function App() {
               dateTo={dashboard.dateTo}
               isSyncing={dashboard.isSyncing}
             />
-            {/* S1-08 mounts below this */}
+            <SpendingOverTime
+              dateFrom={dashboard.dateFrom}
+              dateTo={dashboard.dateTo}
+              isSyncing={dashboard.isSyncing}
+            />
           </main>
         </div>
       </div>
