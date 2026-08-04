@@ -9,8 +9,6 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
-      # Only runs against a fresh (empty) data directory — safe to re-run compose up.
-      - ./db/init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -29,6 +27,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Schema is now Alembic's job end to end (S2-01) — this runs on every
+    # container start (a no-op once already at head) so a genuinely fresh
+    # database gets migrated to the latest schema before the API accepts
+    # requests, same as an existing one just gets brought up to date.
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   frontend:
     build: ./frontend
