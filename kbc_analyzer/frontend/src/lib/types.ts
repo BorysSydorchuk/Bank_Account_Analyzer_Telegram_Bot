@@ -26,6 +26,9 @@ export interface CategoryStat {
   total: number
   count: number
   percentage: number
+  // Empty until the LLM categorization sprint backfills transactions.subcategory.
+  // Percentage here is the subcategory's share of its *parent* category's total.
+  subcategories: CategoryStat[]
 }
 
 export interface DayStat {

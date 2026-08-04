@@ -54,6 +54,10 @@ class CategoryStat(BaseModel):
     total: float
     count: int
     percentage: float
+    # Populated from transactions.subcategory; empty until the LLM
+    # categorization sprint backfills that column. Percentage here is each
+    # subcategory's share of its *parent* category's total, not the grand total.
+    subcategories: list["CategoryStat"] = []
 
 
 class DayStat(BaseModel):

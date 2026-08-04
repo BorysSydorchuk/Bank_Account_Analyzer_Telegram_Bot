@@ -1,3 +1,4 @@
+import { CategoryBreakdown } from "@/components/dashboard/CategoryBreakdown"
 import { SummaryCards } from "@/components/dashboard/SummaryCards"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
@@ -24,7 +25,12 @@ function App() {
               dateTo={dashboard.dateTo}
               isSyncing={dashboard.isSyncing}
             />
-            {/* S1-07 and S1-08 mount below this */}
+            <CategoryBreakdown
+              dateFrom={dashboard.dateFrom}
+              dateTo={dashboard.dateTo}
+              isSyncing={dashboard.isSyncing}
+            />
+            {/* S1-08 mounts below this */}
           </main>
         </div>
       </div>

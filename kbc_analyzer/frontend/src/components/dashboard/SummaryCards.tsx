@@ -5,21 +5,13 @@ import { useMutationState } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useStatistics } from "@/hooks/useStatistics"
+import { formatAmount } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 interface SummaryCardsProps {
   dateFrom: string
   dateTo: string
   isSyncing: boolean
-}
-
-const currencyFormatter = new Intl.NumberFormat("de-BE", {
-  style: "currency",
-  currency: "EUR",
-})
-
-function formatAmount(value: number | undefined) {
-  return currencyFormatter.format(value ?? 0)
 }
 
 function truncate(text: string, max: number) {

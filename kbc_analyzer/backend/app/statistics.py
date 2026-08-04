@@ -83,6 +83,8 @@ def compute_statistics(transactions: list[Transaction], date_from: date, date_to
 
     category_totals: dict[str, float] = defaultdict(float)
     category_counts: dict[str, int] = defaultdict(int)
+    subcategory_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    subcategory_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     by_day = {d: {"spent": 0.0, "received": 0.0} for d in _daterange(date_from, date_to)}
 
@@ -99,6 +101,9 @@ def compute_statistics(transactions: list[Transaction], date_from: date, date_to
             category = t.category or OTHER_CATEGORY
             category_totals[category] += spent
             category_counts[category] += 1
+            if t.subcategory:
+                subcategory_totals[category][t.subcategory] += spent
+                subcategory_counts[category][t.subcategory] += 1
         else:
             total_received += amount
 
@@ -110,15 +115,27 @@ def compute_statistics(transactions: list[Transaction], date_from: date, date_to
 
     percentages = _distribute_percentages(dict(category_totals), total_spent)
 
-    by_category = [
-        {
+    by_category = []
+    for cat in sorted(category_totals, key=lambda c: category_totals[c], reverse=True):
+        sub_totals = subcategory_totals.get(cat, {})
+        sub_percentages = _distribute_percentages(dict(sub_totals), category_totals[cat])
+        subcategories = [
+            {
+                "category": sub,
+                "total": round(sub_totals[sub], 2),
+                "count": subcategory_counts[cat][sub],
+                "percentage": sub_percentages[sub],
+                "subcategories": [],
+            }
+            for sub in sorted(sub_totals, key=lambda s: sub_totals[s], reverse=True)
+        ]
+        by_category.append({
             "category": cat,
             "total": round(category_totals[cat], 2),
             "count": category_counts[cat],
             "percentage": percentages[cat],
-        }
-        for cat in sorted(category_totals, key=lambda c: category_totals[c], reverse=True)
-    ]
+            "subcategories": subcategories,
+        })
 
     by_day_list = [
         {"date": d, "spent": round(v["spent"], 2), "received": round(v["received"], 2)}

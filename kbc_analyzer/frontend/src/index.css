@@ -27,6 +27,19 @@
     --color-chart-3: var(--chart-3);
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
+    /* S1-07 category palette — 8 hues, CVD-validated as a set (adjacent-pair
+       and normal-vision floors) against this app's own card surface in both
+       themes. Categories are assigned a slot by a stable hash of their name,
+       not by sort position, so a category keeps its color as totals/ranking
+       change between syncs. */
+    --color-category-1: var(--category-1);
+    --color-category-2: var(--category-2);
+    --color-category-3: var(--category-3);
+    --color-category-4: var(--category-4);
+    --color-category-5: var(--category-5);
+    --color-category-6: var(--category-6);
+    --color-category-7: var(--category-7);
+    --color-category-8: var(--category-8);
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
@@ -92,6 +105,16 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+
+    /* S1-07 category palette (light) */
+    --category-1: #2a78d6;
+    --category-2: #eb6834;
+    --category-3: #1baf7a;
+    --category-4: #eda100;
+    --category-5: #e87ba4;
+    --category-6: #008300;
+    --category-7: #4a3aa7;
+    --category-8: #e34948;
 }
 
 .dark {
@@ -126,6 +149,16 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+
+    /* S1-07 category palette (dark) — same 8 hues, stepped for the dark card surface */
+    --category-1: #3987e5;
+    --category-2: #d95926;
+    --category-3: #199e70;
+    --category-4: #c98500;
+    --category-5: #d55181;
+    --category-6: #008300;
+    --category-7: #9085e9;
+    --category-8: #e66767;
 }
 
 @layer base {
