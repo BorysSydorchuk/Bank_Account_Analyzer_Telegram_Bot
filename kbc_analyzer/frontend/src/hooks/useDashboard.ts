@@ -28,6 +28,10 @@ export function useDashboard() {
   const dateTo = urlTo ?? defaultRange.dateTo
 
   const syncMutation = useMutation({
+    // Named so read-only components (e.g. SummaryCards) can observe pending/
+    // error state via useMutationState instead of calling useDashboard()
+    // themselves, which would duplicate the auto-sync effect below.
+    mutationKey: ["syncStatistics"],
     mutationFn: async ({ dateFrom, dateTo }: SyncArgs) => {
       await syncTransactions(dateFrom, dateTo)
       return getStatistics(dateFrom, dateTo)

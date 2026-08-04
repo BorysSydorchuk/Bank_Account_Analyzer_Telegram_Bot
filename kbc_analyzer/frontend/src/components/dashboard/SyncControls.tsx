@@ -6,14 +6,18 @@ import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DATE_RANGE_PRESETS } from "@/lib/dateRangePresets"
-import { useDashboard } from "@/hooks/useDashboard"
+import type { useDashboard } from "@/hooks/useDashboard"
 
 function toDate(iso: string): Date {
   return parseISO(iso)
 }
 
-export function SyncControls() {
-  const { dateFrom, dateTo, updateRange, selectPreset, syncNow, isSyncing } = useDashboard()
+// Takes useDashboard's return value as props rather than calling the hook
+// itself — the hook owns a mount-time auto-sync effect, so a second instance
+// here would fire a second, duplicate POST /sync on every page load.
+type SyncControlsProps = ReturnType<typeof useDashboard>
+
+export function SyncControls({ dateFrom, dateTo, updateRange, selectPreset, syncNow, isSyncing }: SyncControlsProps) {
   const [fromOpen, setFromOpen] = useState(false)
   const [toOpen, setToOpen] = useState(false)
 

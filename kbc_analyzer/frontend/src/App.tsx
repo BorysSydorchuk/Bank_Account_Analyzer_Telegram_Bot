@@ -1,7 +1,14 @@
+import { SummaryCards } from "@/components/dashboard/SummaryCards"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
+import { useDashboard } from "@/hooks/useDashboard"
 
 function App() {
+  // Called once, here — TopBar/SyncControls and SummaryCards both receive
+  // this same instance as props so they read one shared date range and
+  // sync state instead of each running their own auto-sync effect.
+  const dashboard = useDashboard()
+
   return (
     <>
       {/* Sprint 1 targets 1024px+ only; below that, a plain message rather
@@ -10,9 +17,14 @@ function App() {
       <div className="hidden h-screen bg-background font-sans lg:flex">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
-          <TopBar />
+          <TopBar dashboard={dashboard} />
           <main className="flex-1 overflow-y-auto bg-background p-6">
-            {/* S1-05 through S1-08 mount here */}
+            <SummaryCards
+              dateFrom={dashboard.dateFrom}
+              dateTo={dashboard.dateTo}
+              isSyncing={dashboard.isSyncing}
+            />
+            {/* S1-07 and S1-08 mount below this */}
           </main>
         </div>
       </div>
