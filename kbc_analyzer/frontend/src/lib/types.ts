@@ -59,3 +59,17 @@ export interface EnableBankingStatusResponse {
 export interface ReauthorizeResponse {
   auth_url: string
 }
+
+export type LlmProvider = "gemini" | "claude"
+
+export interface SettingsResponse {
+  llm_provider: LlmProvider
+  // Masked ("••••••••") if a key is saved, "" if not — never the real key.
+  gemini_api_key: string
+  anthropic_api_key: string
+}
+
+export interface PatchSettingsResponse {
+  key: string
+  value: string
+}

@@ -95,3 +95,20 @@ class CallbackRequest(BaseModel):
     # Accepted (the redirect URL always carries it) but not currently validated —
     # matches start_auth()'s own comment: required by the PSD2 spec, not checked by us.
     state: str | None = None
+
+
+class SettingsResponse(BaseModel):
+    llm_provider: Literal["gemini", "claude"]
+    # Masked, never the decrypted key — see settings_service.mask_key(). "" means unset.
+    gemini_api_key: str
+    anthropic_api_key: str
+
+
+class PatchSettingsRequest(BaseModel):
+    key: Literal["llm_provider", "gemini_api_key", "anthropic_api_key"]
+    value: str
+
+
+class PatchSettingsResponse(BaseModel):
+    key: str
+    value: str

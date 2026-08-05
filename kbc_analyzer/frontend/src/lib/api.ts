@@ -1,6 +1,8 @@
 import type {
   EnableBankingStatusResponse,
+  PatchSettingsResponse,
   ReauthorizeResponse,
+  SettingsResponse,
   StatisticsResponse,
   SyncResponse,
 } from "./types"
@@ -54,5 +56,16 @@ export function completeEnableBankingCallback(code: string, state: string | null
   return request<EnableBankingStatusResponse>("/api/auth/enable-banking/callback", {
     method: "POST",
     body: JSON.stringify({ code, state }),
+  })
+}
+
+export function getSettings() {
+  return request<SettingsResponse>("/api/settings")
+}
+
+export function patchSettings(key: string, value: string) {
+  return request<PatchSettingsResponse>("/api/settings", {
+    method: "PATCH",
+    body: JSON.stringify({ key, value }),
   })
 }

@@ -1,11 +1,13 @@
+import { NavLink } from "react-router-dom"
+
 import { cn } from "@/lib/utils"
 
-// Real routing arrives with later tickets — for now these are visual
-// placeholders, with "Dashboard" shown active since it's the only page.
-const NAV_ITEMS = [
-  { label: "Dashboard", active: true },
-  { label: "Transactions", active: false },
-  { label: "Settings", active: false },
+// Transactions gets its real page in S2-07 — until then it's a styled
+// placeholder (no `to`), same look as before wiring in routes.
+const NAV_ITEMS: { label: string; to: string | null }[] = [
+  { label: "Dashboard", to: "/" },
+  { label: "Transactions", to: null },
+  { label: "Settings", to: "/settings" },
 ]
 
 export function Sidebar() {
@@ -15,21 +17,32 @@ export function Sidebar() {
         <span className="text-lg font-semibold text-primary">KBC Analyzer</span>
       </div>
       <nav className="flex flex-col gap-1 px-3">
-        {NAV_ITEMS.map((item) => (
-          <a
-            key={item.label}
-            href="#"
-            aria-current={item.active ? "page" : undefined}
-            className={cn(
-              "rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              item.active
-                ? "bg-primary text-primary-foreground"
-                : "text-text-secondary hover:bg-muted hover:text-text-primary",
-            )}
-          >
-            {item.label}
-          </a>
-        ))}
+        {NAV_ITEMS.map((item) =>
+          item.to ? (
+            <NavLink
+              key={item.label}
+              to={item.to}
+              end={item.to === "/"}
+              className={({ isActive }) =>
+                cn(
+                  "rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "text-text-secondary hover:bg-muted hover:text-text-primary"
+                )
+              }
+            >
+              {item.label}
+            </NavLink>
+          ) : (
+            <span
+              key={item.label}
+              className="rounded-lg px-3 py-2 text-sm font-medium text-text-secondary"
+            >
+              {item.label}
+            </span>
+          )
+        )}
       </nav>
     </aside>
   )

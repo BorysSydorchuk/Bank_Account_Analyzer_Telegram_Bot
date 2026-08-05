@@ -1,10 +1,9 @@
 import { useState } from "react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle, CheckCircle2, ExternalLink, OctagonAlert, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useEnableBankingReconnect } from "@/hooks/useEnableBankingReconnect"
 import { useEnableBankingStatus } from "@/hooks/useEnableBankingStatus"
-import { ApiError, completeEnableBankingCallback, reauthorizeEnableBanking } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 // Bump this to test the warning banner without waiting for a real session to
@@ -12,40 +11,12 @@ import { cn } from "@/lib/utils"
 // real session; put back to 7 before shipping.
 const WARNING_THRESHOLD_DAYS = 7
 
-type ReconnectPhase = "idle" | "awaiting-paste" | "verifying" | "error" | "success"
-
 export function SessionBanner() {
   const { data } = useEnableBankingStatus()
-  const queryClient = useQueryClient()
+  const { phase, pastedUrl, setPastedUrl, errorMessage, start, verify, cancel, isStarting } =
+    useEnableBankingReconnect()
 
   const [dismissed, setDismissed] = useState(false)
-  const [phase, setPhase] = useState<ReconnectPhase>("idle")
-  const [pastedUrl, setPastedUrl] = useState("")
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-
-  const reauthorizeMutation = useMutation({
-    mutationFn: reauthorizeEnableBanking,
-    onSuccess: (result) => {
-      window.open(result.auth_url, "_blank", "noopener,noreferrer")
-      setPhase("awaiting-paste")
-    },
-    onError: (error: unknown) => {
-      setErrorMessage(error instanceof ApiError ? error.message : "Couldn't start reconnection. Try again.")
-    },
-  })
-
-  const callbackMutation = useMutation({
-    mutationFn: ({ code, state }: { code: string; state: string | null }) =>
-      completeEnableBankingCallback(code, state),
-    onSuccess: () => {
-      setPhase("success")
-      queryClient.invalidateQueries({ queryKey: ["enableBankingStatus"] })
-    },
-    onError: (error: unknown) => {
-      setPhase("error")
-      setErrorMessage(error instanceof ApiError ? error.message : "Couldn't verify authorization. Try again.")
-    },
-  })
 
   if (dismissed || !data) return null
 
@@ -60,38 +31,6 @@ export function SessionBanner() {
   if (phase === "idle" && !isExpired && !isNearingExpiry) return null
 
   const variant = phase === "success" ? "success" : isExpired ? "danger" : "warning"
-
-  function startReconnect() {
-    setErrorMessage(null)
-    reauthorizeMutation.mutate()
-  }
-
-  function verifyPastedUrl() {
-    let code: string | null = null
-    let state: string | null = null
-    try {
-      const parsed = new URL(pastedUrl.trim())
-      code = parsed.searchParams.get("code")
-      state = parsed.searchParams.get("state")
-    } catch {
-      // not a valid URL — code stays null, handled below
-    }
-    if (!code) {
-      setErrorMessage(
-        "Couldn't find a code in that URL — make sure you copied the full address bar URL after authorizing."
-      )
-      return
-    }
-    setErrorMessage(null)
-    setPhase("verifying")
-    callbackMutation.mutate({ code, state })
-  }
-
-  function cancelReconnect() {
-    setPhase("idle")
-    setPastedUrl("")
-    setErrorMessage(null)
-  }
 
   const expiresAtLabel = data.expires_at
     ? new Date(data.expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
@@ -127,8 +66,8 @@ export function SessionBanner() {
         {(phase === "idle" || phase === "success") && (
           <div className="flex shrink-0 items-center gap-2">
             {phase === "idle" && (
-              <Button size="sm" onClick={startReconnect} disabled={reauthorizeMutation.isPending}>
-                {reauthorizeMutation.isPending ? "Starting…" : "Reconnect"}
+              <Button size="sm" onClick={start} disabled={isStarting}>
+                {isStarting ? "Starting…" : "Reconnect"}
               </Button>
             )}
             <button
@@ -159,10 +98,10 @@ export function SessionBanner() {
               placeholder="https://localhost/callback?code=...&state=..."
               className="h-8 flex-1 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             />
-            <Button size="sm" onClick={verifyPastedUrl} disabled={!pastedUrl || phase === "verifying"}>
+            <Button size="sm" onClick={verify} disabled={!pastedUrl || phase === "verifying"}>
               {phase === "verifying" ? "Verifying…" : "I've authorized"}
             </Button>
-            <Button size="sm" variant="outline" onClick={cancelReconnect}>
+            <Button size="sm" variant="outline" onClick={cancel}>
               Cancel
             </Button>
           </div>

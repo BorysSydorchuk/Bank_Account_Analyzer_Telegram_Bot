@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .models import Transaction
+from .models import Setting, Transaction
 
 
 def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[int, int]:
@@ -67,3 +67,15 @@ def list_transactions(db: Session, date_from: date, date_to: date) -> list[Trans
             .order_by(Transaction.booking_date)
         ).scalars()
     )
+
+
+def get_all_settings(db: Session) -> dict[str, str]:
+    rows = db.execute(select(Setting)).scalars()
+    return {row.key: row.value for row in rows}
+
+
+def upsert_setting(db: Session, key: str, value: str) -> None:
+    stmt = pg_insert(Setting).values(key=key, value=value)
+    stmt = stmt.on_conflict_do_update(index_elements=[Setting.key], set_={"value": stmt.excluded.value})
+    db.execute(stmt)
+    db.commit()
