@@ -15,6 +15,11 @@ class SyncResponse(BaseModel):
     fetched: int
     stored: int
     duplicates_skipped: int
+    categorized: int
+    categorization_provider: str | None = None
+    # Present only when categorization couldn't run at all (e.g. no API key
+    # configured yet) — sync itself still succeeds either way.
+    error_message: str | None = None
 
 
 class TransactionOut(BaseModel):
@@ -112,3 +117,16 @@ class PatchSettingsRequest(BaseModel):
 class PatchSettingsResponse(BaseModel):
     key: str
     value: str
+
+
+class CategorizeRequest(BaseModel):
+    date_from: date | None = None
+    date_to: date | None = None
+
+
+class CategorizeResponse(BaseModel):
+    categorized: int
+    skipped_already_categorized: int
+    failed: int
+    provider: str
+    error_message: str | None = None

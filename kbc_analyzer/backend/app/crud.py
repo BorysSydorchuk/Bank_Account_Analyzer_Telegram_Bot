@@ -4,7 +4,7 @@ kbc_analyzer.cache for anything reachable through the API.
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -67,6 +67,44 @@ def list_transactions(db: Session, date_from: date, date_to: date) -> list[Trans
             .order_by(Transaction.booking_date)
         ).scalars()
     )
+
+
+def get_uncategorized_transactions(
+    db: Session, date_from: date | None = None, date_to: date | None = None
+) -> list[Transaction]:
+    stmt = select(Transaction).where(Transaction.category.is_(None))
+    if date_from is not None:
+        stmt = stmt.where(Transaction.booking_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(Transaction.booking_date <= date_to)
+    return list(db.execute(stmt).scalars())
+
+
+def count_categorized_transactions(
+    db: Session, date_from: date | None = None, date_to: date | None = None
+) -> int:
+    stmt = select(func.count()).select_from(Transaction).where(Transaction.category.is_not(None))
+    if date_from is not None:
+        stmt = stmt.where(Transaction.booking_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(Transaction.booking_date <= date_to)
+    return db.execute(stmt).scalar_one()
+
+
+def update_transaction_categories(db: Session, updates: list[dict]) -> None:
+    """updates: [{"id": "<uuid str>", "category": "...", "subcategory": "..."|None}].
+
+    The WHERE clause re-checks category IS NULL rather than trusting that the rows
+    passed in are still uncategorized — never overwrites a category a Sprint 3
+    manual edit (or a concurrent categorize run) already set.
+    """
+    for u in updates:
+        db.execute(
+            update(Transaction)
+            .where(Transaction.id == u["id"], Transaction.category.is_(None))
+            .values(category=u["category"], subcategory=u.get("subcategory"))
+        )
+    db.commit()
 
 
 def get_all_settings(db: Session) -> dict[str, str]:
