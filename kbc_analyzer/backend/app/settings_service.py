@@ -1,15 +1,16 @@
-"""Business logic for the settings table (S2-03): defaults, masking, and the
+"""Business logic for the settings table: defaults, masking, and the
 encrypt-on-write / never-decrypt-for-display rule for API keys.
 
-Decrypting a stored key for actual LLM use is S2-04's job (the provider
-registry) — nothing here ever returns a decrypted key, by design.
+get_decrypted_api_key() is the one exception to "never decrypt" — used only by
+the LLM provider registry (S2-04) to actually call the configured provider,
+never by anything that returns a response to the frontend.
 """
 from sqlalchemy.orm import Session
 
 from . import crud
-from .crypto import encrypt
+from .crypto import decrypt, encrypt
 
-__all__ = ["InvalidSettingError", "get_settings", "patch_setting"]
+__all__ = ["InvalidSettingError", "get_settings", "patch_setting", "get_decrypted_api_key"]
 
 API_KEY_FIELDS = {"gemini_api_key", "anthropic_api_key"}
 VALID_PROVIDERS = {"gemini", "claude"}
@@ -48,3 +49,11 @@ def patch_setting(db: Session, key: str, value: str) -> dict:
     stored_value = encrypt(value) if key in API_KEY_FIELDS else value
     crud.upsert_setting(db, key, stored_value)
     return {"key": key, "value": _mask_if_key(key, value)}
+
+
+def get_decrypted_api_key(db: Session, provider: str) -> str:
+    """Return the real, usable API key for a provider ("gemini" or "claude").
+    Empty string if none is saved yet.
+    """
+    stored = crud.get_all_settings(db).get(f"{provider}_api_key", "")
+    return decrypt(stored)
