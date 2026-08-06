@@ -95,5 +95,9 @@ export function useDashboard() {
     selectPreset,
     syncNow,
     isSyncing: syncMutation.isPending,
+    // The raw sync response from the most recent completed sync — used by
+    // SyncControls (S2-08) to show a real "Done — N transactions, M
+    // insights" summary once syncing finishes, not a fabricated one.
+    lastSyncResult: syncMutation.data?.syncResult ?? null,
   }
 }

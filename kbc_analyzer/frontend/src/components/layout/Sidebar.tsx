@@ -22,10 +22,13 @@ export function Sidebar() {
             end={item.to === "/"}
             className={({ isActive }) =>
               cn(
-                "rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                "cursor-pointer rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 isActive
                   ? "bg-primary text-primary-foreground"
-                  : "text-text-secondary hover:bg-muted hover:text-text-primary"
+                  // bg-primary/10 (a tint of the existing --primary token,
+                  // not a new hardcoded hex) lands within a couple RGB
+                  // points of the ticket's literal #EFF6FF.
+                  : "text-text-secondary hover:bg-primary/10 hover:text-primary"
               )
             }
           >

@@ -1,3 +1,4 @@
+import { Monitor } from "lucide-react"
 import { BrowserRouter, Route, Routes } from "react-router-dom"
 
 import { Sidebar } from "@/components/layout/Sidebar"
@@ -23,9 +24,11 @@ function App() {
       </div>
 
       <div className="flex h-screen items-center justify-center bg-background p-6 text-center lg:hidden">
-        <p className="text-text-secondary">
-          This dashboard is best viewed on a desktop screen (1024px or wider).
-        </p>
+        <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-border bg-card p-8 shadow-sm">
+          <Monitor className="size-8 text-primary" />
+          <span className="text-lg font-semibold text-primary">KBC Analyzer</span>
+          <p className="text-sm text-text-secondary">KBC Analyzer is best viewed on a larger screen.</p>
+        </div>
       </div>
     </BrowserRouter>
   )
