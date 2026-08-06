@@ -54,6 +54,8 @@ class TransactionOut(BaseModel):
 class TransactionsListResponse(BaseModel):
     transactions: list[TransactionOut]
     total: int
+    page: int
+    pages: int
 
 
 class BiggestExpense(BaseModel):

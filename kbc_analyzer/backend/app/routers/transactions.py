@@ -1,7 +1,9 @@
 """POST /api/transactions/sync and GET /api/transactions."""
+import math
 from datetime import date
+from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -60,7 +62,16 @@ async def sync_transactions(
 def get_transactions(
     date_from: date,
     date_to: date,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    category: list[str] | None = Query(None),
+    amount_type: Literal["all", "spent", "received"] = "all",
     db: Session = Depends(get_db),
 ) -> TransactionsListResponse:
-    rows = crud.list_transactions(db, date_from, date_to)
-    return TransactionsListResponse(transactions=rows, total=len(rows))
+    rows, total = crud.list_transactions_paginated(db, date_from, date_to, page, limit, category, amount_type)
+    return TransactionsListResponse(
+        transactions=rows,
+        total=total,
+        page=page,
+        pages=max(1, math.ceil(total / limit)),
+    )

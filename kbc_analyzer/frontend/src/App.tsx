@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { DashboardPage } from "@/pages/DashboardPage"
 import { SettingsPage } from "@/pages/SettingsPage"
+import { TransactionsPage } from "@/pages/TransactionsPage"
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <div className="flex min-w-0 flex-1 flex-col">
           <Routes>
             <Route path="/" element={<DashboardPage />} />
+            <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </div>

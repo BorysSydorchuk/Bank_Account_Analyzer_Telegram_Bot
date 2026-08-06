@@ -69,6 +69,44 @@ def list_transactions(db: Session, date_from: date, date_to: date) -> list[Trans
     )
 
 
+def list_transactions_paginated(
+    db: Session,
+    date_from: date,
+    date_to: date,
+    page: int,
+    limit: int,
+    categories: list[str] | None = None,
+    amount_type: str = "all",
+) -> tuple[list[Transaction], int]:
+    """Newest-first, paginated — for the Transactions page (S2-07). Distinct from
+    list_transactions() above, which stays unpaginated/chronological for
+    statistics and insight generation, which need every row in date order.
+
+    category/amount_type filters happen here (not client-side) so pagination
+    stays correct — "page 2 of Groceries" has to mean the database's second
+    page of Groceries rows, not the second page of everything with any
+    non-Groceries rows stripped out afterwards.
+    """
+    stmt = select(Transaction).where(Transaction.booking_date >= date_from, Transaction.booking_date <= date_to)
+    if categories:
+        stmt = stmt.where(Transaction.category.in_(categories))
+    if amount_type == "spent":
+        stmt = stmt.where(Transaction.amount < 0)
+    elif amount_type == "received":
+        stmt = stmt.where(Transaction.amount > 0)
+
+    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+
+    rows = list(
+        db.execute(
+            stmt.order_by(Transaction.booking_date.desc(), Transaction.id.desc())
+            .limit(limit)
+            .offset((page - 1) * limit)
+        ).scalars()
+    )
+    return rows, total
+
+
 def get_uncategorized_transactions(
     db: Session, date_from: date | None = None, date_to: date | None = None
 ) -> list[Transaction]:

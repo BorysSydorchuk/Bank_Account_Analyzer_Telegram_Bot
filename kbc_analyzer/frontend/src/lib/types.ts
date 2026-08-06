@@ -99,3 +99,24 @@ export interface InsightsCacheEntry {
   generatedAt: string | null
   errorMessage: string | null
 }
+
+export type AmountFilter = "all" | "spent" | "received"
+
+export interface TransactionItem {
+  id: string
+  account_id: string
+  booking_date: string | null
+  amount: number
+  currency: string
+  description: string | null
+  category: string | null
+  subcategory: string | null
+  fetched_at: string
+}
+
+export interface TransactionsListResponse {
+  transactions: TransactionItem[]
+  total: number
+  page: number
+  pages: number
+}

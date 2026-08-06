@@ -1,10 +1,12 @@
 import type {
+  AmountFilter,
   EnableBankingStatusResponse,
   PatchSettingsResponse,
   ReauthorizeResponse,
   SettingsResponse,
   StatisticsResponse,
   SyncResponse,
+  TransactionsListResponse,
 } from "./types"
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000"
@@ -68,4 +70,23 @@ export function patchSettings(key: string, value: string) {
     method: "PATCH",
     body: JSON.stringify({ key, value }),
   })
+}
+
+export function getTransactionsList(
+  dateFrom: string,
+  dateTo: string,
+  page: number,
+  limit: number,
+  categories: string[],
+  amountType: AmountFilter
+) {
+  const params = new URLSearchParams({
+    date_from: dateFrom,
+    date_to: dateTo,
+    page: String(page),
+    limit: String(limit),
+    amount_type: amountType,
+  })
+  for (const category of categories) params.append("category", category)
+  return request<TransactionsListResponse>(`/api/transactions?${params.toString()}`)
 }
