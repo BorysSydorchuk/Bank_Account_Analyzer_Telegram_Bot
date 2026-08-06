@@ -41,6 +41,7 @@ async def sync_transactions(
     fetched, stored, duplicates_skipped = await run_in_threadpool(_fetch_and_store)
 
     categorization = await analysis_service.categorize_transactions(db, body.date_from, body.date_to)
+    insights = await analysis_service.generate_insights(db, body.date_from, body.date_to)
 
     return SyncResponse(
         fetched=fetched,
@@ -49,6 +50,9 @@ async def sync_transactions(
         categorized=categorization["categorized"],
         categorization_provider=categorization["provider"],
         error_message=categorization["error_message"],
+        insights=insights["insights"],
+        insights_generated_at=insights["generated_at"],
+        insights_error_message=insights["error_message"],
     )
 
 

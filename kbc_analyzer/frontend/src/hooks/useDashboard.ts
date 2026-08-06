@@ -4,7 +4,8 @@ import { toast } from "sonner"
 
 import { ApiError, getStatistics, syncTransactions } from "@/lib/api"
 import { getThisMonthRange, type DateRangePreset } from "@/lib/dateRangePresets"
-import { statisticsKey } from "@/lib/queryKeys"
+import { insightsKey, statisticsKey } from "@/lib/queryKeys"
+import type { InsightsCacheEntry } from "@/lib/types"
 import { useDateRangeParam } from "./useDateRangeParam"
 
 interface SyncArgs {
@@ -33,11 +34,22 @@ export function useDashboard() {
     // themselves, which would duplicate the auto-sync effect below.
     mutationKey: ["syncStatistics"],
     mutationFn: async ({ dateFrom, dateTo }: SyncArgs) => {
-      await syncTransactions(dateFrom, dateTo)
-      return getStatistics(dateFrom, dateTo)
+      const syncResult = await syncTransactions(dateFrom, dateTo)
+      const statistics = await getStatistics(dateFrom, dateTo)
+      return { syncResult, statistics }
     },
-    onSuccess: (data, variables) => {
-      queryClient.setQueryData(statisticsKey(variables.dateFrom, variables.dateTo), data)
+    onSuccess: ({ syncResult, statistics }, variables) => {
+      queryClient.setQueryData(statisticsKey(variables.dateFrom, variables.dateTo), statistics)
+      // Insights ride along in the sync response (S2-06) — never fetched on
+      // their own, same "cache written once by sync, read-only everywhere
+      // else" pattern as statistics.
+      const insightsEntry: InsightsCacheEntry = {
+        insights: syncResult.insights,
+        provider: syncResult.categorization_provider,
+        generatedAt: syncResult.insights_generated_at,
+        errorMessage: syncResult.insights_error_message,
+      }
+      queryClient.setQueryData(insightsKey(variables.dateFrom, variables.dateTo), insightsEntry)
     },
     onError: (error: unknown) => {
       toast.error(error instanceof ApiError ? error.message : "Something went wrong. Please try again.")

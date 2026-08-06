@@ -1,4 +1,5 @@
 import { CategoryBreakdown } from "@/components/dashboard/CategoryBreakdown"
+import { InsightsPanel } from "@/components/dashboard/InsightsPanel"
 import { SpendingOverTime } from "@/components/dashboard/SpendingOverTime"
 import { SummaryCards } from "@/components/dashboard/SummaryCards"
 import { SessionBanner } from "@/components/layout/SessionBanner"
@@ -24,6 +25,11 @@ export function DashboardPage() {
           isSyncing={dashboard.isSyncing}
         />
         <SpendingOverTime
+          dateFrom={dashboard.dateFrom}
+          dateTo={dashboard.dateTo}
+          isSyncing={dashboard.isSyncing}
+        />
+        <InsightsPanel
           dateFrom={dashboard.dateFrom}
           dateTo={dashboard.dateTo}
           isSyncing={dashboard.isSyncing}

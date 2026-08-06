@@ -1,10 +1,27 @@
 // Mirrors backend/app/schemas.py — kept hand-in-sync since there's no shared
 // schema generation between the FastAPI and TypeScript sides yet.
 
+export type InsightType = "pattern" | "anomaly" | "saving" | "rhythm" | "category"
+export type InsightSeverity = "info" | "warning" | "positive"
+
+export interface InsightItem {
+  type: InsightType
+  title: string
+  body: string
+  severity: InsightSeverity
+}
+
 export interface SyncResponse {
   fetched: number
   stored: number
   duplicates_skipped: number
+  categorized: number
+  categorization_provider: string | null
+  error_message: string | null
+  // Never persisted server-side (S2-06) — generated fresh on every sync.
+  insights: InsightItem[]
+  insights_generated_at: string | null
+  insights_error_message: string | null
 }
 
 export interface BiggestExpense {
@@ -72,4 +89,13 @@ export interface SettingsResponse {
 export interface PatchSettingsResponse {
   key: string
   value: string
+}
+
+// Client-side cache shape for insights — set only by useDashboard's sync
+// mutation (from SyncResponse's insights fields), read only by useInsights.
+export interface InsightsCacheEntry {
+  insights: InsightItem[]
+  provider: string | null
+  generatedAt: string | null
+  errorMessage: string | null
 }

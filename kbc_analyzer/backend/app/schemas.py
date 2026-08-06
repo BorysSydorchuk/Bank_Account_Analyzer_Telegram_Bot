@@ -11,6 +11,13 @@ class SyncRequest(BaseModel):
     date_to: date
 
 
+class InsightItem(BaseModel):
+    type: Literal["pattern", "anomaly", "saving", "rhythm", "category"]
+    title: str
+    body: str
+    severity: Literal["info", "warning", "positive"]
+
+
 class SyncResponse(BaseModel):
     fetched: int
     stored: int
@@ -20,6 +27,14 @@ class SyncResponse(BaseModel):
     # Present only when categorization couldn't run at all (e.g. no API key
     # configured yet) — sync itself still succeeds either way.
     error_message: str | None = None
+    # Insights are never persisted (S2-06) — generated fresh on every sync and
+    # handed back here; the frontend caches them client-side under the same
+    # date range as the statistics they were generated from.
+    insights: list[InsightItem] = []
+    insights_generated_at: datetime | None = None
+    # Separate from `error_message` above — categorization and insight
+    # generation can fail independently of each other.
+    insights_error_message: str | None = None
 
 
 class TransactionOut(BaseModel):
@@ -129,4 +144,16 @@ class CategorizeResponse(BaseModel):
     skipped_already_categorized: int
     failed: int
     provider: str
+    error_message: str | None = None
+
+
+class InsightsRequest(BaseModel):
+    date_from: date
+    date_to: date
+
+
+class InsightsResponse(BaseModel):
+    insights: list[InsightItem]
+    provider: str
+    generated_at: datetime
     error_message: str | None = None

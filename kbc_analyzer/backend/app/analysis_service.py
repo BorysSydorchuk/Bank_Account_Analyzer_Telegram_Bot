@@ -1,17 +1,19 @@
-"""Orchestrates the categorization agent against the database — shared by the
-standalone POST /api/analysis/categorize endpoint and the automatic
-categorization step at the end of POST /api/transactions/sync, so both go
-through the exact same logic instead of two copies that could drift.
+"""Orchestrates the categorization and insight agents against the database —
+shared by the standalone POST /api/analysis/* endpoints and the automatic
+steps at the end of POST /api/transactions/sync, so both go through the exact
+same logic instead of copies that could drift.
 """
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from . import crud
 from .agents.categorization import CategorizationAgent
+from .agents.insight import InsightAgent
 from .agents.registry import ProviderNotConfiguredError, get_provider
 from .settings_service import get_settings
+from .statistics import compute_statistics
 
 logger = logging.getLogger(__name__)
 
@@ -73,3 +75,36 @@ async def categorize_transactions(
         "provider": provider_name,
         "error_message": None,
     }
+
+
+async def generate_insights(db: Session, date_from: date, date_to: date) -> dict:
+    """Returns {insights, provider, generated_at, error_message}. Unlike
+    categorization, a single failed LLM call has no partial result to fall
+    back on, so `insights` is simply empty and error_message explains why —
+    the caller (sync) still succeeds regardless.
+    """
+    provider_name = get_settings(db)["llm_provider"]
+    generated_at = datetime.now(timezone.utc)
+
+    try:
+        provider = get_provider(db)
+    except ProviderNotConfiguredError as exc:
+        logger.warning("Insight generation skipped: %s", exc)
+        return {"insights": [], "provider": provider_name, "generated_at": generated_at, "error_message": str(exc)}
+
+    transactions = crud.list_transactions(db, date_from, date_to)
+    statistics = compute_statistics(transactions, date_from, date_to)
+
+    agent = InsightAgent(provider)
+    try:
+        insights = await agent.run(statistics)
+    except Exception:
+        logger.exception("Insight generation failed")
+        return {
+            "insights": [],
+            "provider": provider_name,
+            "generated_at": generated_at,
+            "error_message": "Could not generate insights right now.",
+        }
+
+    return {"insights": insights, "provider": provider_name, "generated_at": generated_at, "error_message": None}
