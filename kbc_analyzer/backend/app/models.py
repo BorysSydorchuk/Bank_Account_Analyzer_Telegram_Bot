@@ -45,4 +45,8 @@ class Category(Base):
     name = Column(Text, primary_key=True)
     color = Column(Text, nullable=False)
     is_custom = Column(Boolean, server_default="false")
+    # 'seed' (S3-01 static palette) | 'ai' (S3-02 color-assignment agent) |
+    # 'user' (a manual override, S3-06). The AI color-assignment step only
+    # ever touches rows still on 'seed' — 'ai' and 'user' rows are left alone.
+    source = Column(Text, server_default="seed")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

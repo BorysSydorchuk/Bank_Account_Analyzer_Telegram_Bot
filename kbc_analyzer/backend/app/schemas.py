@@ -12,6 +12,7 @@ class CategoryOut(BaseModel):
     name: str
     color: str
     is_custom: bool
+    source: Literal["seed", "ai", "user"]
 
 
 class SyncRequest(BaseModel):

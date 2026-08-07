@@ -10,8 +10,11 @@ from sqlalchemy.orm import Session
 
 from . import crud
 from .agents.categorization import CategorizationAgent
+from .agents.color_assignment import ColorAssignmentAgent
 from .agents.insight import InsightAgent
+from .agents.providers.base import LLMProvider
 from .agents.registry import ProviderNotConfiguredError, get_provider
+from .colors import BACKUP_PALETTE, validate_color
 from .settings_service import get_settings
 from .statistics import compute_statistics
 
@@ -22,16 +25,21 @@ async def categorize_transactions(
     db: Session, date_from: date | None = None, date_to: date | None = None
 ) -> dict:
     """Returns {categorized, skipped_already_categorized, failed, provider,
-    error_message}. error_message is only set when categorization couldn't run
-    at all (no API key configured) — a per-batch LLM failure instead shows up
-    as a nonzero `failed` count with error_message left as None, since sync
-    should still report success in that case.
+    error_message}. error_message is only set when nothing could run at all
+    (no API key configured) — a per-batch LLM failure instead shows up as a
+    nonzero `failed` count with error_message left as None, since sync should
+    still report success in that case.
     """
     provider_name = get_settings(db)["llm_provider"]
     skipped = crud.count_categorized_transactions(db, date_from, date_to)
     uncategorized = crud.get_uncategorized_transactions(db, date_from, date_to)
+    # Categories still on their S3-01 seed color — checked on every run, not
+    # just when there are new transactions to categorize, so a category
+    # already in use gets a real AI color even on a sync where nothing new
+    # came in to categorize.
+    seeded_category_names = crud.list_seeded_category_names(db)
 
-    if not uncategorized:
+    if not uncategorized and not seeded_category_names:
         return {
             "categorized": 0,
             "skipped_already_categorized": skipped,
@@ -52,21 +60,26 @@ async def categorize_transactions(
             "error_message": str(exc),
         }
 
-    payloads = [
-        {
-            "id": str(t.id),
-            "description": t.description,
-            "amount": float(t.amount),
-            "booking_date": t.booking_date.isoformat() if t.booking_date else None,
-        }
-        for t in uncategorized
-    ]
+    results: list[dict] = []
+    if uncategorized:
+        payloads = [
+            {
+                "id": str(t.id),
+                "description": t.description,
+                "amount": float(t.amount),
+                "booking_date": t.booking_date.isoformat() if t.booking_date else None,
+            }
+            for t in uncategorized
+        ]
 
-    agent = CategorizationAgent(provider)
-    results = await agent.run(payloads)
+        agent = CategorizationAgent(provider)
+        results = await agent.run(payloads)
 
-    if results:
-        crud.update_transaction_categories(db, results)
+        if results:
+            crud.update_transaction_categories(db, results)
+
+    if seeded_category_names:
+        await assign_ai_colors(db, provider, seeded_category_names)
 
     return {
         "categorized": len(results),
@@ -75,6 +88,51 @@ async def categorize_transactions(
         "provider": provider_name,
         "error_message": None,
     }
+
+
+async def assign_ai_colors(db: Session, provider: LLMProvider, category_names: list[str]) -> None:
+    """Runs the S3-02 color-assignment prompt for category_names (all still on
+    their S3-01 seed color) and persists the result with source='ai'.
+
+    A color that fails colors.validate_color() never reaches the database:
+    it falls back to the category's own existing seed color when one exists,
+    or the next unused color in colors.BACKUP_PALETTE for a category with no
+    prior row at all. A failure of the LLM call itself is logged and
+    swallowed — like insight generation, this is a nice-to-have on top of a
+    successful sync, not something that should fail it.
+    """
+    existing_by_name = crud.get_categories_by_name(db, category_names)
+
+    agent = ColorAssignmentAgent(provider)
+    try:
+        assignments = await agent.run(category_names)
+    except Exception:
+        logger.exception("AI color assignment failed for categories: %s", category_names)
+        return
+
+    assigned_color_by_name = {
+        a["name"]: a["color"] for a in assignments if isinstance(a, dict) and a.get("name") and a.get("color")
+    }
+
+    colors_by_name: dict[str, str] = {}
+    next_backup_index = 0
+    for name in category_names:
+        color = assigned_color_by_name.get(name)
+        if color and validate_color(color):
+            colors_by_name[name] = color
+            continue
+
+        if color:
+            logger.warning("AI color %r for category %r failed validation, falling back", color, name)
+
+        existing_row = existing_by_name.get(name)
+        if existing_row is not None:
+            colors_by_name[name] = existing_row.color
+        else:
+            colors_by_name[name] = BACKUP_PALETTE[next_backup_index % len(BACKUP_PALETTE)]
+            next_backup_index += 1
+
+    crud.upsert_category_colors(db, colors_by_name, source="ai")
 
 
 async def generate_insights(db: Session, date_from: date, date_to: date) -> dict:

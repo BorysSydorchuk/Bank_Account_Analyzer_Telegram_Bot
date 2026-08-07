@@ -121,8 +121,11 @@ export interface TransactionsListResponse {
   pages: number
 }
 
+export type CategoryColorSource = "seed" | "ai" | "user"
+
 export interface Category {
   name: string
   color: string
   is_custom: boolean
+  source: CategoryColorSource
 }

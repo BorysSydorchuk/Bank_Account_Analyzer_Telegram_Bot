@@ -149,6 +149,36 @@ def list_categories(db: Session) -> list[Category]:
     return list(db.execute(select(Category).order_by(Category.name)).scalars())
 
 
+def list_seeded_category_names(db: Session) -> list[str]:
+    """Category names still on their S3-01 seed color — the set eligible for
+    S3-02's AI color assignment. 'ai' and 'user' rows are excluded."""
+    return list(db.execute(select(Category.name).where(Category.source == "seed")).scalars())
+
+
+def get_categories_by_name(db: Session, names: list[str]) -> dict[str, Category]:
+    """Existing rows for the given names, keyed by name. Used by the AI color
+    step to read a category's own seed color as its fallback if the LLM's
+    color fails validation."""
+    if not names:
+        return {}
+    rows = db.execute(select(Category).where(Category.name.in_(names))).scalars()
+    return {row.name: row for row in rows}
+
+
+def upsert_category_colors(db: Session, colors_by_name: dict[str, str], source: str) -> None:
+    """Writes a color + source for each name. Never overwrites a row whose
+    existing source is 'user' — user color choices are final."""
+    for name, color in colors_by_name.items():
+        stmt = pg_insert(Category).values(name=name, color=color, source=source)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[Category.name],
+            set_={"color": stmt.excluded.color, "source": stmt.excluded.source},
+            where=Category.source != "user",
+        )
+        db.execute(stmt)
+    db.commit()
+
+
 def get_all_settings(db: Session) -> dict[str, str]:
     rows = db.execute(select(Setting)).scalars()
     return {row.key: row.value for row in rows}
