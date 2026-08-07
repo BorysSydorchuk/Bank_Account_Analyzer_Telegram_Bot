@@ -120,3 +120,9 @@ export interface TransactionsListResponse {
   page: number
   pages: number
 }
+
+export interface Category {
+  name: string
+  color: string
+  is_custom: boolean
+}

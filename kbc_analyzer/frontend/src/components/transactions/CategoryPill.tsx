@@ -1,12 +1,12 @@
 interface CategoryPillProps {
   category: string | null
-  colorVar: string | undefined
+  color: string | undefined
 }
 
-// colorVar is one of index.css's --category-N tokens (see lib/categoryColors.ts)
-// — the exact same source S1-07's donut chart reads, so a category's pill here
-// always matches its slice color there.
-export function CategoryPill({ category, colorVar }: CategoryPillProps) {
+// color is a real hex value from the categories table (S3-01) — the exact
+// same source the donut chart reads, so a category's pill here always
+// matches its slice color there.
+export function CategoryPill({ category, color }: CategoryPillProps) {
   if (!category) {
     return <span className="text-xs text-text-secondary">—</span>
   }
@@ -15,11 +15,11 @@ export function CategoryPill({ category, colorVar }: CategoryPillProps) {
     <span
       className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
       style={{
-        backgroundColor: colorVar ? `color-mix(in srgb, ${colorVar} 16%, white)` : undefined,
-        color: colorVar,
+        backgroundColor: color ? `color-mix(in srgb, ${color} 16%, white)` : undefined,
+        color: color,
       }}
     >
-      <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: colorVar }} />
+      <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
       {category}
     </span>
   )

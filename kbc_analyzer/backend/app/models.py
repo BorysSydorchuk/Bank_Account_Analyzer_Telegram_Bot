@@ -1,5 +1,5 @@
 """SQLAlchemy models — schema for these lives in app/migrations/versions/ (Alembic)."""
-from sqlalchemy import Column, Date, DateTime, Numeric, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, Date, DateTime, Numeric, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declarative_base
 
@@ -34,3 +34,15 @@ class Setting(Base):
     # new setting later never needs a migration, just a new seeded row.
     key = Column(Text, primary_key=True)
     value = Column(Text, nullable=False)
+
+
+class Category(Base):
+    __tablename__ = "categories"
+
+    # name is the primary key, not a surrogate UUID — categories are referenced by
+    # name everywhere already (transactions.category is a free-text column, not a
+    # foreign key), so this is the natural key rather than an invented one.
+    name = Column(Text, primary_key=True)
+    color = Column(Text, nullable=False)
+    is_custom = Column(Boolean, server_default="false")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -8,7 +8,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .models import Setting, Transaction
+from .models import Category, Setting, Transaction
 
 
 def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[int, int]:
@@ -143,6 +143,10 @@ def update_transaction_categories(db: Session, updates: list[dict]) -> None:
             .values(category=u["category"], subcategory=u.get("subcategory"))
         )
     db.commit()
+
+
+def list_categories(db: Session) -> list[Category]:
+    return list(db.execute(select(Category).order_by(Category.name)).scalars())
 
 
 def get_all_settings(db: Session) -> dict[str, str]:

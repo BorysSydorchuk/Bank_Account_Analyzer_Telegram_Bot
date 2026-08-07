@@ -6,6 +6,14 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
+class CategoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    color: str
+    is_custom: bool
+
+
 class SyncRequest(BaseModel):
     date_from: date
     date_to: date

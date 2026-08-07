@@ -1,5 +1,6 @@
 import type {
   AmountFilter,
+  Category,
   EnableBankingStatusResponse,
   PatchSettingsResponse,
   ReauthorizeResponse,
@@ -89,4 +90,8 @@ export function getTransactionsList(
   })
   for (const category of categories) params.append("category", category)
   return request<TransactionsListResponse>(`/api/transactions?${params.toString()}`)
+}
+
+export function getCategories() {
+  return request<Category[]>("/api/categories")
 }

@@ -4,12 +4,16 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useCategories } from "@/hooks/useCategories"
 import { useStatistics } from "@/hooks/useStatistics"
-import { assignCategoryColors } from "@/lib/categoryColors"
-import { resolveCssVar } from "@/lib/cssVar"
 import { formatAmount } from "@/lib/format"
 import type { CategoryStat } from "@/lib/types"
 import { cn } from "@/lib/utils"
+
+// Fallback for a category name the categories table doesn't know about yet
+// (shouldn't normally happen — S2-05's agent and S3-01's seed cover every
+// category the LLM can produce — but a stat card shouldn't go blank over it).
+const FALLBACK_COLOR = "#94a3b8"
 
 interface CategoryBreakdownProps {
   dateFrom: string
@@ -34,16 +38,19 @@ interface Slice extends CategoryStat {
 
 export function CategoryBreakdown({ dateFrom, dateTo, isSyncing }: CategoryBreakdownProps) {
   const { data } = useStatistics(dateFrom, dateTo)
+  const { data: categoryColors } = useCategories()
   const categories = useMemo(
     () => (data?.by_category ?? []).filter((c) => c.total > 0),
     [data]
   )
   const totalSpent = data?.summary.total_spent ?? 0
 
+  // Colors now come straight from the categories table (S3-01) — no more
+  // hashing category names into a palette slot at render time.
   const slices: Slice[] = useMemo(() => {
-    const colorByCategory = assignCategoryColors(categories.map((c) => c.category))
-    return categories.map((c) => ({ ...c, color: resolveCssVar(colorByCategory.get(c.category)!) }))
-  }, [categories])
+    const colorByName = new Map((categoryColors ?? []).map((c) => [c.name, c.color]))
+    return categories.map((c) => ({ ...c, color: colorByName.get(c.category) ?? FALLBACK_COLOR }))
+  }, [categories, categoryColors])
 
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)

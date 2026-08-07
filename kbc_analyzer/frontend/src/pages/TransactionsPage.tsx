@@ -7,10 +7,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { DateRangePicker } from "@/components/shared/DateRangePicker"
 import { CategoryFilterDropdown } from "@/components/transactions/CategoryFilterDropdown"
 import { TransactionsTable } from "@/components/transactions/TransactionsTable"
+import { useCategories } from "@/hooks/useCategories"
 import { useCategoryOptions } from "@/hooks/useCategoryOptions"
 import { useDateRangeParam } from "@/hooks/useDateRangeParam"
 import { useTransactionsList } from "@/hooks/useTransactionsList"
-import { assignCategoryColors } from "@/lib/categoryColors"
 import { getThisMonthRange, type DateRangePreset } from "@/lib/dateRangePresets"
 import type { AmountFilter } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -53,7 +53,14 @@ export function TransactionsPage() {
   }
 
   const categoryOptions = useCategoryOptions(dateFrom, dateTo)
-  const colorByCategory = useMemo(() => assignCategoryColors(categoryOptions), [categoryOptions])
+  // The full categories table (S3-01), not just categories present in this
+  // date range — this is what lets a category like "Income" (never part of
+  // by_category, see useCategoryOptions) still get a real pill color.
+  const { data: categoryList } = useCategories()
+  const colorByCategory = useMemo(
+    () => new Map((categoryList ?? []).map((c) => [c.name, c.color])),
+    [categoryList]
+  )
 
   const { data, isLoading } = useTransactionsList(dateFrom, dateTo, page, PAGE_SIZE, categories, amountType)
 

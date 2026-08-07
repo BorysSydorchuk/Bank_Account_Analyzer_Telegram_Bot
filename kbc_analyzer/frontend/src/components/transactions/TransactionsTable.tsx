@@ -37,7 +37,7 @@ export function TransactionsTable({ transactions, colorByCategory }: Transaction
             <td className="py-2.5 pr-4">
               <CategoryPill
                 category={t.category}
-                colorVar={t.category ? colorByCategory.get(t.category) : undefined}
+                color={t.category ? colorByCategory.get(t.category) : undefined}
               />
             </td>
             <td className={cn("py-2.5 pl-4 text-right font-medium", t.amount < 0 ? "text-danger" : "text-success")}>
