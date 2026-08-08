@@ -12,3 +12,4 @@ sqlalchemy>=2.0.0
 psycopg[binary]>=3.2.0
 alembic>=1.13.0
 anthropic>=0.40.0
+celery[redis]>=5.4.0
