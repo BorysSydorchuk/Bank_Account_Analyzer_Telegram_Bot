@@ -23,6 +23,14 @@ export function usePatchTransaction() {
         if (!old) return old
         return { ...old, transactions: old.transactions.map((t) => (t.id === updated.id ? updated : t)) }
       })
+      // A re-categorized row changes each of these too — unlike the list
+      // above, there's no cheap local patch for a total or a category count,
+      // so these are invalidated rather than hand-updated. Without this
+      // (S3-08 fix), the Transactions filter dropdown and the dashboard donut
+      // chart kept showing whatever they'd already fetched before the edit
+      // until the next full page load.
+      queryClient.invalidateQueries({ queryKey: ["statistics"] })
+      queryClient.invalidateQueries({ queryKey: ["categoryOptions"] })
       toast.success("Transaction updated")
     },
     onError: (error: unknown) => {

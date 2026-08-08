@@ -8,7 +8,12 @@ import { useCreateCategory, usePatchCategoryColor, useResetCategoryColor } from 
 import type { Category } from "@/lib/types"
 import { CategoryColorPicker } from "./CategoryColorPicker"
 
-const DEFAULT_NEW_CATEGORY_COLOR = "#64748B"
+// S3-08: was "#64748B" (a neutral slate), which reads as visually distinct
+// from the app's primary blue but is actually within backend/app/colors.py's
+// 30-degree forbidden-hue band around it — every "Add category" click that
+// didn't touch the color swatch first was rejected outright. This value
+// passes the same validate_color() check the backend enforces.
+const DEFAULT_NEW_CATEGORY_COLOR = "#816031"
 
 function sourceBadgeLabel(source: Category["source"]) {
   if (source === "ai") return "AI"

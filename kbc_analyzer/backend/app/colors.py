@@ -17,7 +17,14 @@ LIGHTNESS_RANGE = (25, 55)
 # brand-new category, never seeded in S3-01) whose AI-assigned color fails
 # validation. Cycled in order if more than 8 such categories need one in a
 # single run.
-BACKUP_PALETTE = ["#0EA5E9", "#8B5CF6", "#F59E0B", "#10B981", "#EF4444", "#6366F1", "#14B8A6", "#F97316"]
+#
+# S3-08: the original palette here (bright sky/violet/amber/emerald/red/
+# indigo/teal/orange tones) was never actually run through validate_color()
+# itself — every one of the 8 failed on contrast ("Too light"), so any
+# category that ever fell back to this list got a color that would be
+# rejected if a user tried to set the exact same shade by hand. Replaced with
+# 8 values that pass describe_validation_failure() outright.
+BACKUP_PALETTE = ["#836221", "#416F20", "#4C22A0", "#7A29A3", "#A022A0", "#93256E", "#6F6820", "#7339AC"]
 
 
 def is_valid_hex(hex_color: str) -> bool:
