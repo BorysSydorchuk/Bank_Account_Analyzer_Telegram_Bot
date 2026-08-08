@@ -4,10 +4,12 @@ import type {
   EnableBankingStatusResponse,
   JobStatus,
   PatchSettingsResponse,
+  PatchTransactionRequest,
   ReauthorizeResponse,
   SettingsResponse,
   StatisticsResponse,
   SyncResponse,
+  TransactionItem,
   TransactionsListResponse,
 } from "./types"
 
@@ -99,4 +101,11 @@ export function getCategories() {
 
 export function getJob(jobId: string) {
   return request<JobStatus>(`/api/jobs/${jobId}`)
+}
+
+export function patchTransaction(id: string, updates: PatchTransactionRequest) {
+  return request<TransactionItem>(`/api/transactions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  })
 }

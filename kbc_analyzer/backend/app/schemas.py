@@ -85,7 +85,19 @@ class TransactionOut(BaseModel):
     description: str | None
     category: str | None
     subcategory: str | None
+    manually_edited: bool
     fetched_at: datetime
+
+
+class PatchTransactionRequest(BaseModel):
+    # All optional and no default sentinel needed beyond None — the router
+    # reads body.model_dump(exclude_unset=True) to tell "field omitted" from
+    # "field explicitly sent as null", since PATCH semantics (S3-05's own
+    # example body sends "subcategory": null to clear it) depend on that
+    # distinction.
+    category: str | None = None
+    subcategory: str | None = None
+    description: str | None = None
 
 
 class TransactionsListResponse(BaseModel):

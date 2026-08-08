@@ -3,6 +3,7 @@ kbc_analyzer.cache for anything reachable through the API.
 """
 from datetime import date
 from decimal import Decimal
+from uuid import UUID
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -110,7 +111,10 @@ def list_transactions_paginated(
 def get_uncategorized_transactions(
     db: Session, date_from: date | None = None, date_to: date | None = None
 ) -> list[Transaction]:
-    stmt = select(Transaction).where(Transaction.category.is_(None))
+    # manually_edited excludes a row even if its category is null — a user
+    # clearing a category by hand (S3-05) is still a decision, not something
+    # for the next categorize run to silently fill back in.
+    stmt = select(Transaction).where(Transaction.category.is_(None), Transaction.manually_edited.is_(False))
     if date_from is not None:
         stmt = stmt.where(Transaction.booking_date >= date_from)
     if date_to is not None:
@@ -132,17 +136,40 @@ def count_categorized_transactions(
 def update_transaction_categories(db: Session, updates: list[dict]) -> None:
     """updates: [{"id": "<uuid str>", "category": "...", "subcategory": "..."|None}].
 
-    The WHERE clause re-checks category IS NULL rather than trusting that the rows
-    passed in are still uncategorized — never overwrites a category a Sprint 3
-    manual edit (or a concurrent categorize run) already set.
+    The WHERE clause re-checks category IS NULL AND manually_edited IS FALSE
+    rather than trusting that the rows passed in are still eligible — never
+    overwrites a category a manual edit (S3-05) or a concurrent categorize
+    run already set.
     """
     for u in updates:
         db.execute(
             update(Transaction)
-            .where(Transaction.id == u["id"], Transaction.category.is_(None))
+            .where(
+                Transaction.id == u["id"],
+                Transaction.category.is_(None),
+                Transaction.manually_edited.is_(False),
+            )
             .values(category=u["category"], subcategory=u.get("subcategory"))
         )
     db.commit()
+
+
+def update_transaction(db: Session, transaction_id: UUID, updates: dict) -> Transaction | None:
+    """updates: a dict of already-validated column/value pairs (category,
+    subcategory, description — whichever were actually present in the PATCH
+    body). Always stamps manually_edited = True, even if none of the
+    provided values differ from what's already stored — the point is
+    recording that a human looked at this row, not just changing its data.
+    """
+    transaction = db.get(Transaction, transaction_id)
+    if transaction is None:
+        return None
+    for field, value in updates.items():
+        setattr(transaction, field, value)
+    transaction.manually_edited = True
+    db.commit()
+    db.refresh(transaction)
+    return transaction
 
 
 def list_categories(db: Session) -> list[Category]:

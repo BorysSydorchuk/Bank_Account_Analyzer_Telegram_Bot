@@ -1,17 +1,17 @@
-"""POST /api/transactions/sync and GET /api/transactions."""
+"""POST /api/transactions/sync, GET /api/transactions, and PATCH /api/transactions/{id}."""
 import math
 from datetime import date
 from typing import Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from .. import crud, job_store
 from ..db import get_db
 from ..eb_service import EnableBankingService
-from ..schemas import SyncRequest, SyncResponse, TransactionsListResponse
+from ..schemas import PatchTransactionRequest, SyncRequest, SyncResponse, TransactionOut, TransactionsListResponse
 from ..tasks.analysis import categorize_and_analyze
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -87,3 +87,30 @@ def get_transactions(
         page=page,
         pages=max(1, math.ceil(total / limit)),
     )
+
+
+@router.patch("/{transaction_id}", response_model=TransactionOut)
+def patch_transaction(
+    transaction_id: UUID,
+    body: PatchTransactionRequest,
+    db: Session = Depends(get_db),
+) -> TransactionOut:
+    """Manual correction (S3-05). Only fields actually present in the request
+    body are touched — model_dump(exclude_unset=True) is what makes
+    `{"subcategory": null}` mean "clear it" while an omitted field means
+    "leave it alone," which a plain .model_dump() can't distinguish.
+    """
+    updates = body.model_dump(exclude_unset=True)
+
+    if "category" in updates and updates["category"] is not None:
+        known_categories = {c.name for c in crud.list_categories(db)}
+        if updates["category"] not in known_categories:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{updates['category']}' isn't a known category. Use an existing category name or null.",
+            )
+
+    transaction = crud.update_transaction(db, transaction_id, updates)
+    if transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    return transaction

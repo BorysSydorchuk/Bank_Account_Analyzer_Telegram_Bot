@@ -23,6 +23,11 @@ class Transaction(Base):
     description = Column(Text)
     category = Column(Text)
     subcategory = Column(Text)
+    # True once a human has set category/subcategory/description by hand
+    # (S3-05) — the categorization agent's query excludes these rows even
+    # when category is null again (a manual "clear" is still a decision, not
+    # an absence of one), so a correction is never silently re-guessed.
+    manually_edited = Column(Boolean, server_default="false")
     raw_data = Column(JSONB)
     fetched_at = Column(DateTime(timezone=True), server_default=func.now())
 

@@ -1,20 +1,26 @@
-import { format, parseISO } from "date-fns"
+import { useState } from "react"
 
-import { formatAmount } from "@/lib/format"
-import type { TransactionItem } from "@/lib/types"
-import { cn } from "@/lib/utils"
-import { CategoryPill } from "./CategoryPill"
+import { usePatchTransaction } from "@/hooks/usePatchTransaction"
+import type { Category, PatchTransactionRequest, TransactionItem } from "@/lib/types"
+import { EditableTransactionRow } from "./EditableTransactionRow"
 
 interface TransactionsTableProps {
   transactions: TransactionItem[]
   colorByCategory: Map<string, string>
+  categories: Category[]
 }
 
-function truncate(text: string, max: number) {
-  return text.length > max ? `${text.slice(0, max)}…` : text
-}
+export function TransactionsTable({ transactions, colorByCategory, categories }: TransactionsTableProps) {
+  // Only one row edits at a time, so this lives here rather than being
+  // threaded down from TransactionsPage — nothing outside the table needs
+  // to know which row, if any, is mid-edit.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const patchMutation = usePatchTransaction()
 
-export function TransactionsTable({ transactions, colorByCategory }: TransactionsTableProps) {
+  function save(id: string, updates: PatchTransactionRequest) {
+    patchMutation.mutate({ id, updates }, { onSuccess: () => setEditingId(null) })
+  }
+
   return (
     <table className="w-full text-sm">
       <thead>
@@ -23,27 +29,22 @@ export function TransactionsTable({ transactions, colorByCategory }: Transaction
           <th className="py-2 pr-4 font-medium">Description</th>
           <th className="py-2 pr-4 font-medium">Category</th>
           <th className="py-2 pl-4 text-right font-medium">Amount</th>
+          <th className="w-8"></th>
         </tr>
       </thead>
       <tbody>
         {transactions.map((t) => (
-          <tr key={t.id} className="border-b border-border last:border-0">
-            <td className="py-2.5 pr-4 whitespace-nowrap text-text-secondary">
-              {t.booking_date ? format(parseISO(t.booking_date), "d MMM yyyy") : "—"}
-            </td>
-            <td className="py-2.5 pr-4 text-text-primary" title={t.description ?? undefined}>
-              {truncate(t.description ?? "—", 35)}
-            </td>
-            <td className="py-2.5 pr-4">
-              <CategoryPill
-                category={t.category}
-                color={t.category ? colorByCategory.get(t.category) : undefined}
-              />
-            </td>
-            <td className={cn("py-2.5 pl-4 text-right font-medium", t.amount < 0 ? "text-danger" : "text-success")}>
-              {formatAmount(t.amount)}
-            </td>
-          </tr>
+          <EditableTransactionRow
+            key={t.id}
+            transaction={t}
+            color={t.category ? colorByCategory.get(t.category) : undefined}
+            categories={categories}
+            isEditing={editingId === t.id}
+            isSaving={patchMutation.isPending && editingId === t.id}
+            onStartEdit={() => setEditingId(t.id)}
+            onCancelEdit={() => setEditingId(null)}
+            onSave={(updates) => save(t.id, updates)}
+          />
         ))}
       </tbody>
     </table>

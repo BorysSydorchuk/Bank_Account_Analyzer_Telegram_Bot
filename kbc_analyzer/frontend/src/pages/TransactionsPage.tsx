@@ -129,7 +129,11 @@ export function TransactionsPage() {
                 No transactions found for the selected filters.
               </div>
             ) : (
-              <TransactionsTable transactions={visibleTransactions} colorByCategory={colorByCategory} />
+              <TransactionsTable
+                transactions={visibleTransactions}
+                colorByCategory={colorByCategory}
+                categories={categoryList ?? []}
+              />
             )}
 
             {data && data.pages > 1 && (

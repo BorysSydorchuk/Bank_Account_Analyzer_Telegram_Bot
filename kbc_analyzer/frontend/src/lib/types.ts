@@ -140,7 +140,14 @@ export interface TransactionItem {
   description: string | null
   category: string | null
   subcategory: string | null
+  manually_edited: boolean
   fetched_at: string
+}
+
+export interface PatchTransactionRequest {
+  category?: string | null
+  subcategory?: string | null
+  description?: string
 }
 
 export interface TransactionsListResponse {
