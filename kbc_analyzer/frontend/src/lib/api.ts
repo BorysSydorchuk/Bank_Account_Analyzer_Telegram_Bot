@@ -2,6 +2,7 @@ import type {
   AmountFilter,
   Category,
   EnableBankingStatusResponse,
+  JobStatus,
   PatchSettingsResponse,
   ReauthorizeResponse,
   SettingsResponse,
@@ -94,4 +95,8 @@ export function getTransactionsList(
 
 export function getCategories() {
   return request<Category[]>("/api/categories")
+}
+
+export function getJob(jobId: string) {
+  return request<JobStatus>(`/api/jobs/${jobId}`)
 }

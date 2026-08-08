@@ -12,17 +12,46 @@ export interface InsightItem {
 }
 
 export interface SyncResponse {
+  // S3-04: sync is now just fetch + store — categorization and insight
+  // generation moved to a background job, tracked via job_id against
+  // GET /api/jobs/{job_id} instead of being returned here directly.
   fetched: number
   stored: number
   duplicates_skipped: number
+  job_id: string
+  status: "processing"
+}
+
+export interface JobProcessing {
+  job_id: string
+  status: "processing"
+  stage: "categorizing" | "generating_insights"
+  progress: number
+  message: string
+}
+
+export interface JobComplete {
+  job_id: string
+  status: "complete"
+  stage: "done"
+  progress: number
   categorized: number
-  categorization_provider: string | null
-  error_message: string | null
-  // Never persisted server-side (S2-06) — generated fresh on every sync.
+  // Never persisted server-side (S2-06) — generated fresh by the job.
   insights: InsightItem[]
+  insights_provider: string | null
   insights_generated_at: string | null
   insights_error_message: string | null
+  message: string
 }
+
+export interface JobFailed {
+  job_id: string
+  status: "failed"
+  stage: string
+  error: string
+}
+
+export type JobStatus = JobProcessing | JobComplete | JobFailed
 
 export interface BiggestExpense {
   description: string | null

@@ -5,6 +5,7 @@ same logic instead of copies that could drift.
 """
 import logging
 from datetime import date, datetime, timezone
+from typing import Callable
 
 from sqlalchemy.orm import Session
 
@@ -22,13 +23,21 @@ logger = logging.getLogger(__name__)
 
 
 async def categorize_transactions(
-    db: Session, date_from: date | None = None, date_to: date | None = None
+    db: Session,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    on_batch_complete: Callable[[int, int], None] | None = None,
 ) -> dict:
     """Returns {categorized, skipped_already_categorized, failed, provider,
     error_message}. error_message is only set when nothing could run at all
     (no API key configured) — a per-batch LLM failure instead shows up as a
     nonzero `failed` count with error_message left as None, since sync should
     still report success in that case.
+
+    on_batch_complete: forwarded to CategorizationAgent.run() — S3-04's
+    background job passes this to report real per-batch progress; the
+    standalone POST /api/analysis/categorize endpoint has no progress UI to
+    feed, so it just omits it.
     """
     provider_name = get_settings(db)["llm_provider"]
     skipped = crud.count_categorized_transactions(db, date_from, date_to)
@@ -73,7 +82,7 @@ async def categorize_transactions(
         ]
 
         agent = CategorizationAgent(provider)
-        results = await agent.run(payloads)
+        results = await agent.run(payloads, on_batch_complete=on_batch_complete)
 
         if results:
             crud.update_transaction_categories(db, results)

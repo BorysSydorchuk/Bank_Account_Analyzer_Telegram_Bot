@@ -2,7 +2,6 @@ import { Loader2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { DateRangePicker } from "@/components/shared/DateRangePicker"
-import { useSettings } from "@/hooks/useSettings"
 import type { useDashboard } from "@/hooks/useDashboard"
 import { SyncStatus } from "./SyncStatus"
 
@@ -18,10 +17,8 @@ export function SyncControls({
   selectPreset,
   syncNow,
   isSyncing,
-  lastSyncResult,
+  statusMessage,
 }: SyncControlsProps) {
-  const { data: settings } = useSettings()
-
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-2">
@@ -39,7 +36,7 @@ export function SyncControls({
         </Button>
       </div>
 
-      <SyncStatus isSyncing={isSyncing} lastSyncResult={lastSyncResult} provider={settings?.llm_provider ?? null} />
+      <SyncStatus statusMessage={statusMessage} />
     </div>
   )
 }

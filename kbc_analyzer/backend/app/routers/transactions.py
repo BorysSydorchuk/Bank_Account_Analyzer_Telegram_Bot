@@ -2,15 +2,17 @@
 import math
 from datetime import date
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from .. import analysis_service, crud
+from .. import crud, job_store
 from ..db import get_db
 from ..eb_service import EnableBankingService
 from ..schemas import SyncRequest, SyncResponse, TransactionsListResponse
+from ..tasks.analysis import categorize_and_analyze
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -26,9 +28,9 @@ async def sync_transactions(
     eb: EnableBankingService = Depends(get_eb_service),
 ) -> SyncResponse:
     # The Enable Banking fetch is a blocking `requests` call — this endpoint is
-    # `async def` (required so it can `await` the categorization step below),
-    # so the fetch itself has to move to a thread or it would stall the whole
-    # event loop, including unrelated requests, for as long as it takes.
+    # `async def` (required so it can `await` run_in_threadpool below), so the
+    # fetch itself has to move to a thread or it would stall the whole event
+    # loop, including unrelated requests, for as long as it takes.
     def _fetch_and_store() -> tuple[int, int, int]:
         account_uids = eb.get_account_uids()
         fetched = stored = duplicates_skipped = 0
@@ -42,19 +44,29 @@ async def sync_transactions(
 
     fetched, stored, duplicates_skipped = await run_in_threadpool(_fetch_and_store)
 
-    categorization = await analysis_service.categorize_transactions(db, body.date_from, body.date_to)
-    insights = await analysis_service.generate_insights(db, body.date_from, body.date_to)
+    # S3-04: categorization + insight generation moved to the celery_worker
+    # (app/tasks/analysis.py) so this request can return immediately instead
+    # of blocking on however long the LLM calls take. The job's progress
+    # lives in Redis (job_store), polled via GET /api/jobs/{job_id}.
+    job_id = str(uuid4())
+    job_store.set_job(
+        job_id,
+        {
+            "job_id": job_id,
+            "status": "processing",
+            "stage": "categorizing",
+            "progress": 0,
+            "message": "Categorizing transactions...",
+        },
+    )
+    categorize_and_analyze.delay(job_id, body.date_from.isoformat(), body.date_to.isoformat())
 
     return SyncResponse(
         fetched=fetched,
         stored=stored,
         duplicates_skipped=duplicates_skipped,
-        categorized=categorization["categorized"],
-        categorization_provider=categorization["provider"],
-        error_message=categorization["error_message"],
-        insights=insights["insights"],
-        insights_generated_at=insights["generated_at"],
-        insights_error_message=insights["error_message"],
+        job_id=job_id,
+        status="processing",
     )
 
 

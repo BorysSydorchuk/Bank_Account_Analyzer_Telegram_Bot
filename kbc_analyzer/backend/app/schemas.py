@@ -1,9 +1,9 @@
 """Pydantic request/response models for the transactions API."""
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CategoryOut(BaseModel):
@@ -28,22 +28,50 @@ class InsightItem(BaseModel):
 
 
 class SyncResponse(BaseModel):
+    # S3-04: sync itself is now just fetch + store — categorization and
+    # insight generation moved to a background Celery job, tracked via
+    # job_id against GET /api/jobs/{job_id} instead of being returned here.
     fetched: int
     stored: int
     duplicates_skipped: int
+    job_id: str
+    status: Literal["processing"]
+
+
+class JobProcessing(BaseModel):
+    job_id: str
+    status: Literal["processing"]
+    stage: Literal["categorizing", "generating_insights"]
+    progress: int
+    message: str
+
+
+class JobComplete(BaseModel):
+    job_id: str
+    status: Literal["complete"]
+    stage: Literal["done"]
+    progress: int
     categorized: int
-    categorization_provider: str | None = None
-    # Present only when categorization couldn't run at all (e.g. no API key
-    # configured yet) — sync itself still succeeds either way.
-    error_message: str | None = None
-    # Insights are never persisted (S2-06) — generated fresh on every sync and
-    # handed back here; the frontend caches them client-side under the same
-    # date range as the statistics they were generated from.
-    insights: list[InsightItem] = []
+    insights: list[InsightItem]
+    insights_provider: str | None = None
     insights_generated_at: datetime | None = None
-    # Separate from `error_message` above — categorization and insight
-    # generation can fail independently of each other.
+    # Separate from a top-level job failure — categorization can succeed while
+    # insight generation still fails independently (same split as the old
+    # SyncResponse's error_message/insights_error_message pair).
     insights_error_message: str | None = None
+    message: str
+
+
+class JobFailed(BaseModel):
+    job_id: str
+    status: Literal["failed"]
+    stage: str
+    error: str
+
+
+# Discriminated on `status` — GET /api/jobs/{job_id} returns whichever of the
+# three shapes matches the job's current state in Redis.
+JobStatusResponse = Annotated[Union[JobProcessing, JobComplete, JobFailed], Field(discriminator="status")]
 
 
 class TransactionOut(BaseModel):
