@@ -1,85 +1,78 @@
-import { useState } from "react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { ApiError, completeEnableBankingCallback, reauthorizeEnableBanking } from "@/lib/api"
+import { ApiError, getEnableBankingStatus, reauthorizeEnableBanking } from "@/lib/api"
 
-export type ReconnectPhase = "idle" | "awaiting-paste" | "verifying" | "error" | "success"
+export type ReconnectPhase = "idle" | "waiting" | "success" | "error"
 
-// The reconnect flow itself (S2-02) — shared between the dashboard's SessionBanner
-// and the Settings page's Bank Connection section (S2-03), which the ticket
-// explicitly calls "the same flow," not a lookalike. Each caller renders its own
-// markup around this; only the state machine and the two mutations live here.
+const POLL_INTERVAL_MS = 2000
+const MAX_WAIT_MS = 5 * 60 * 1000
+
+// The reconnect flow itself — shared between the dashboard's SessionBanner
+// and the Settings page's Bank Connection section, which the ticket
+// explicitly calls "the same flow," not a lookalike. Each caller renders its
+// own markup around this; only the state machine and mutations live here.
+//
+// S3-07 Item 2: the redirect is now caught automatically by a local HTTPS
+// server running in the celery_worker process (see
+// backend/app/eb_callback_server.py), which completes the re-authorization
+// itself — this hook just polls GET /api/auth/enable-banking/status until it
+// flips to "active", instead of the old flow where the user had to
+// copy-paste the redirect URL back in.
 export function useEnableBankingReconnect() {
   const queryClient = useQueryClient()
-
   const [phase, setPhase] = useState<ReconnectPhase>("idle")
-  const [pastedUrl, setPastedUrl] = useState("")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const reauthorizeMutation = useMutation({
     mutationFn: reauthorizeEnableBanking,
     onSuccess: (result) => {
       window.open(result.auth_url, "_blank", "noopener,noreferrer")
-      setPhase("awaiting-paste")
+      setPhase("waiting")
     },
     onError: (error: unknown) => {
       setErrorMessage(error instanceof ApiError ? error.message : "Couldn't start reconnection. Try again.")
     },
   })
 
-  const callbackMutation = useMutation({
-    mutationFn: ({ code, state }: { code: string; state: string | null }) =>
-      completeEnableBankingCallback(code, state),
-    onSuccess: () => {
+  const statusQuery = useQuery({
+    queryKey: ["enableBankingStatus"],
+    queryFn: getEnableBankingStatus,
+    refetchInterval: phase === "waiting" ? POLL_INTERVAL_MS : false,
+    refetchIntervalInBackground: true,
+  })
+
+  useEffect(() => {
+    if (phase !== "waiting") return
+    if (statusQuery.data?.status === "active") {
       setPhase("success")
       queryClient.invalidateQueries({ queryKey: ["enableBankingStatus"] })
-    },
-    onError: (error: unknown) => {
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusQuery.data])
+
+  // Dedicated timer, not a data-change effect — same lesson as S3-04's job
+  // polling: React Query reuses the same `data` reference across polls when
+  // the response is byte-identical, so an effect keyed only on `data` would
+  // never re-fire to notice a timeout had elapsed while status stayed "expired".
+  useEffect(() => {
+    if (phase !== "waiting") return
+    const timer = setTimeout(() => {
       setPhase("error")
-      setErrorMessage(error instanceof ApiError ? error.message : "Couldn't verify authorization. Try again.")
-    },
-  })
+      setErrorMessage("Didn't detect a completed authorization in time. Click Reconnect to try again.")
+    }, MAX_WAIT_MS)
+    return () => clearTimeout(timer)
+  }, [phase])
 
   function start() {
     setErrorMessage(null)
     reauthorizeMutation.mutate()
   }
 
-  function verify() {
-    let code: string | null = null
-    let state: string | null = null
-    try {
-      const parsed = new URL(pastedUrl.trim())
-      code = parsed.searchParams.get("code")
-      state = parsed.searchParams.get("state")
-    } catch {
-      // not a valid URL — code stays null, handled below
-    }
-    if (!code) {
-      setErrorMessage(
-        "Couldn't find a code in that URL — make sure you copied the full address bar URL after authorizing."
-      )
-      return
-    }
-    setErrorMessage(null)
-    setPhase("verifying")
-    callbackMutation.mutate({ code, state })
-  }
-
   function cancel() {
     setPhase("idle")
-    setPastedUrl("")
     setErrorMessage(null)
   }
 
-  return {
-    phase,
-    pastedUrl,
-    setPastedUrl,
-    errorMessage,
-    start,
-    verify,
-    cancel,
-    isStarting: reauthorizeMutation.isPending,
-  }
+  return { phase, errorMessage, start, cancel, isStarting: reauthorizeMutation.isPending }
 }

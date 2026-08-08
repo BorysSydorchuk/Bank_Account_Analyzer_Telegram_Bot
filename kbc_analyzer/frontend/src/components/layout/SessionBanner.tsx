@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { AlertTriangle, CheckCircle2, ExternalLink, OctagonAlert, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Loader2, OctagonAlert, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useEnableBankingReconnect } from "@/hooks/useEnableBankingReconnect"
@@ -13,8 +13,7 @@ const WARNING_THRESHOLD_DAYS = 7
 
 export function SessionBanner() {
   const { data } = useEnableBankingStatus()
-  const { phase, pastedUrl, setPastedUrl, errorMessage, start, verify, cancel, isStarting } =
-    useEnableBankingReconnect()
+  const { phase, errorMessage, start, cancel, isStarting } = useEnableBankingReconnect()
 
   const [dismissed, setDismissed] = useState(false)
 
@@ -58,18 +57,19 @@ export function SessionBanner() {
             {variant === "warning" &&
               phase === "idle" &&
               `Your bank connection expires on ${expiresAtLabel}. Reconnect now to avoid interruption.`}
-            {(phase === "awaiting-paste" || phase === "verifying" || phase === "error") &&
-              "Complete the KBC authorization in the new tab, then paste the full redirect URL below."}
+            {phase === "waiting" && "Waiting for you to finish authorizing in the new tab…"}
+            {phase === "error" && "Complete the KBC authorization in the new tab, then try again."}
           </p>
         </div>
 
-        {(phase === "idle" || phase === "success") && (
-          <div className="flex shrink-0 items-center gap-2">
-            {phase === "idle" && (
-              <Button size="sm" onClick={start} disabled={isStarting}>
-                {isStarting ? "Starting…" : "Reconnect"}
-              </Button>
-            )}
+        <div className="flex shrink-0 items-center gap-2">
+          {phase === "idle" && (
+            <Button size="sm" onClick={start} disabled={isStarting}>
+              {isStarting ? "Starting…" : "Reconnect"}
+            </Button>
+          )}
+          {phase === "waiting" && <Loader2 className="size-4 animate-spin text-text-secondary" />}
+          {(phase === "idle" || phase === "success") && (
             <button
               type="button"
               aria-label="Dismiss"
@@ -78,38 +78,21 @@ export function SessionBanner() {
             >
               <X className="size-4" />
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {(phase === "awaiting-paste" || phase === "verifying" || phase === "error") && (
-        <div className="ml-6.5 flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-xs text-text-secondary">
-            <ExternalLink className="size-3.5" />
-            The KBC authorization page opened in a new tab. After you approve access, that tab
-            will show an address starting with <code className="rounded bg-black/5 px-1">https://localhost/callback?code=…</code>
-            — copy that full address and paste it here.
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={pastedUrl}
-              onChange={(e) => setPastedUrl(e.target.value)}
-              placeholder="https://localhost/callback?code=...&state=..."
-              className="h-8 flex-1 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            />
-            <Button size="sm" onClick={verify} disabled={!pastedUrl || phase === "verifying"}>
-              {phase === "verifying" ? "Verifying…" : "I've authorized"}
-            </Button>
-            <Button size="sm" variant="outline" onClick={cancel}>
-              Cancel
-            </Button>
-          </div>
-          {errorMessage && <p className="text-xs text-danger">{errorMessage}</p>}
+      {phase === "error" && (
+        <div className="ml-6.5 flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={cancel}>
+            Dismiss
+          </Button>
         </div>
       )}
 
-      {phase === "idle" && errorMessage && <p className="ml-6.5 text-xs text-danger">{errorMessage}</p>}
+      {(phase === "idle" || phase === "error") && errorMessage && (
+        <p className="ml-6.5 text-xs text-danger">{errorMessage}</p>
+      )}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { CheckCircle2, ExternalLink, OctagonAlert } from "lucide-react"
+import { CheckCircle2, ExternalLink, Loader2, OctagonAlert } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -7,8 +7,7 @@ import { useEnableBankingStatus } from "@/hooks/useEnableBankingStatus"
 
 export function BankConnectionSection() {
   const { data } = useEnableBankingStatus()
-  const { phase, pastedUrl, setPastedUrl, errorMessage, start, verify, cancel, isStarting } =
-    useEnableBankingReconnect()
+  const { phase, errorMessage, start, cancel, isStarting } = useEnableBankingReconnect()
 
   const isActive = data?.status === "active"
   const expiresAtLabel = data?.expires_at
@@ -50,26 +49,19 @@ export function BankConnectionSection() {
           )}
         </div>
 
-        {(phase === "awaiting-paste" || phase === "verifying" || phase === "error") && (
+        {(phase === "waiting" || phase === "error") && (
           <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3">
             <div className="flex items-center gap-2 text-xs text-text-secondary">
-              <ExternalLink className="size-3.5 shrink-0" />
-              The KBC authorization page opened in a new tab. After you approve access, that tab
-              will show an address starting with{" "}
-              <code className="rounded bg-black/5 px-1">https://localhost/callback?code=…</code> — copy that
-              full address and paste it here.
+              {phase === "waiting" ? (
+                <Loader2 className="size-3.5 shrink-0 animate-spin" />
+              ) : (
+                <ExternalLink className="size-3.5 shrink-0" />
+              )}
+              {phase === "waiting"
+                ? "Waiting for you to finish authorizing in the new tab…"
+                : "The KBC authorization page opened in a new tab. Approve access there, then try again."}
             </div>
             <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={pastedUrl}
-                onChange={(e) => setPastedUrl(e.target.value)}
-                placeholder="https://localhost/callback?code=...&state=..."
-                className="h-8 flex-1 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              />
-              <Button size="sm" onClick={verify} disabled={!pastedUrl || phase === "verifying"}>
-                {phase === "verifying" ? "Verifying…" : "I've authorized"}
-              </Button>
               <Button size="sm" variant="outline" onClick={cancel}>
                 Cancel
               </Button>

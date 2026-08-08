@@ -25,17 +25,16 @@ BASE_URL = "https://api.enablebanking.com"
 # Local file where we cache the active session (account UIDs + expiry date)
 SESSION_FILE = "eb_session.json"
 
-# Where Enable Banking redirects after login/consent. S3-07 Item 2 built a
-# local catcher server that listens on http://localhost:3001/callback instead
-# of requiring the user to copy-paste the redirect URL — but switching this
-# constant to that address was confirmed LIVE to break authorization entirely
-# ("400 Redirect URI not allowed" from Enable Banking's own /auth endpoint),
-# because that URI isn't registered for this app_id in the Enable Banking
-# developer portal. Left as the original, working value until that portal
-# registration is added — see backend/app/eb_callback_server.py and
-# backend/app/tasks/auth.py, which are built and ready for the moment this
-# is safe to flip to "http://localhost:3001/callback".
-REDIRECT_URL = "https://localhost/callback"
+# Where Enable Banking redirects after login/consent. S3-07 Item 2 replaced
+# the old copy-paste-the-URL flow with a local catcher server (see
+# backend/app/eb_callback_server.py and backend/app/tasks/auth.py) that
+# listens on this exact address. An earlier http:// version of this URI was
+# rejected LIVE by Enable Banking's /auth endpoint ("400 Redirect URI not
+# allowed") because the portal only accepts https:// scheme redirect URIs.
+# The catcher server now serves HTTPS via an mkcert-generated localhost
+# certificate, and https://localhost:3001/callback has been registered for
+# this app_id in the Enable Banking developer portal — this is the live value.
+REDIRECT_URL = "https://localhost:3001/callback"
 
 
 class EnableBankingError(Exception):
