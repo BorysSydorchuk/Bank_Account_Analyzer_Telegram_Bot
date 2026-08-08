@@ -7,7 +7,7 @@ import asyncio
 import logging
 from datetime import date
 
-from .. import analysis_service, job_store
+from .. import analysis_service, crud, job_store
 from ..celery_app import celery_app
 from ..db import SessionLocal
 
@@ -93,6 +93,15 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
         )
 
         insights = await analysis_service.generate_insights(db, date_from, date_to)
+
+        # Only replace the persisted set on an actual successful generation
+        # (S3-07 Item 3) — if this run's LLM call failed, the range keeps
+        # whatever insights a previous successful sync left behind rather
+        # than being wiped out by this run's failure.
+        if insights["error_message"] is None:
+            crud.replace_insights(
+                db, date_from, date_to, insights["insights"], insights["provider"], insights["generated_at"]
+            )
 
         job_store.set_job(
             job_id,

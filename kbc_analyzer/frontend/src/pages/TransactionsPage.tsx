@@ -10,12 +10,15 @@ import { TransactionsTable } from "@/components/transactions/TransactionsTable"
 import { useCategories } from "@/hooks/useCategories"
 import { useCategoryOptions } from "@/hooks/useCategoryOptions"
 import { useDateRangeParam } from "@/hooks/useDateRangeParam"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
+import { useTransactionSearch } from "@/hooks/useTransactionSearch"
 import { useTransactionsList } from "@/hooks/useTransactionsList"
 import { getThisMonthRange, type DateRangePreset } from "@/lib/dateRangePresets"
 import type { AmountFilter } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const PAGE_SIZE = 50
+const SEARCH_DEBOUNCE_MS = 300
 
 const AMOUNT_FILTERS: { value: AmountFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -64,18 +67,18 @@ export function TransactionsPage() {
 
   const { data, isLoading } = useTransactionsList(dateFrom, dateTo, page, PAGE_SIZE, categories, amountType)
 
-  // Client-side only, on whatever page is currently loaded — see the S2-07
-  // WHEN DONE answer for why this doesn't hit the API on every keystroke.
-  const visibleTransactions = useMemo(() => {
-    const rows = data?.transactions ?? []
-    if (!search.trim()) return rows
-    const needle = search.toLowerCase()
-    return rows.filter((t) => t.description?.toLowerCase().includes(needle))
-  }, [data, search])
+  // S3-07 Item 4: search now goes to GET /api/transactions/search — across
+  // every synced transaction, not just whatever page/date-range/category
+  // filters happen to be active — instead of filtering the current page's
+  // 50 rows client-side (the old S2-07 behavior).
+  const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS)
+  const isSearching = debouncedSearch.trim().length > 0
 
-  const subtitle = data
-    ? `${data.total} transaction${data.total === 1 ? "" : "s"} · ${format(parseISO(dateFrom), "MMM d")} – ${format(parseISO(dateTo), "MMM d, yyyy")}`
-    : undefined
+  const subtitle = isSearching
+    ? undefined
+    : data
+      ? `${data.total} transaction${data.total === 1 ? "" : "s"} · ${format(parseISO(dateFrom), "MMM d")} – ${format(parseISO(dateTo), "MMM d, yyyy")}`
+      : undefined
 
   return (
     <>
@@ -113,50 +116,97 @@ export function TransactionsPage() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search description..."
+                placeholder="Search all transactions..."
                 className="h-7 min-w-[180px] flex-1 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               />
             </div>
 
-            {isLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <Skeleton key={i} className="h-9 w-full" />
-                ))}
-              </div>
-            ) : visibleTransactions.length === 0 ? (
-              <div className="flex min-h-[200px] items-center justify-center text-sm text-text-secondary">
-                No transactions found for the selected filters.
-              </div>
+            {isSearching ? (
+              <SearchResults query={debouncedSearch} colorByCategory={colorByCategory} categoryList={categoryList} />
             ) : (
-              <TransactionsTable
-                transactions={visibleTransactions}
-                colorByCategory={colorByCategory}
-                categories={categoryList ?? []}
-              />
-            )}
+              <>
+                {isLoading ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <Skeleton key={i} className="h-9 w-full" />
+                    ))}
+                  </div>
+                ) : (data?.transactions.length ?? 0) === 0 ? (
+                  <div className="flex min-h-[200px] items-center justify-center text-sm text-text-secondary">
+                    No transactions found for the selected filters.
+                  </div>
+                ) : (
+                  <TransactionsTable
+                    transactions={data?.transactions ?? []}
+                    colorByCategory={colorByCategory}
+                    categories={categoryList ?? []}
+                  />
+                )}
 
-            {data && data.pages > 1 && (
-              <div className="flex items-center justify-between pt-2">
-                <Button variant="outline" size="sm" onClick={() => setPage((p) => p - 1)} disabled={page <= 1}>
-                  Previous
-                </Button>
-                <span className={cn("text-sm text-text-secondary")}>
-                  Page {data.page} of {data.pages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={page >= data.pages}
-                >
-                  Next
-                </Button>
-              </div>
+                {data && data.pages > 1 && (
+                  <div className="flex items-center justify-between pt-2">
+                    <Button variant="outline" size="sm" onClick={() => setPage((p) => p - 1)} disabled={page <= 1}>
+                      Previous
+                    </Button>
+                    <span className={cn("text-sm text-text-secondary")}>
+                      Page {data.page} of {data.pages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((p) => p + 1)}
+                      disabled={page >= data.pages}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
       </main>
+    </>
+  )
+}
+
+function SearchResults({
+  query,
+  colorByCategory,
+  categoryList,
+}: {
+  query: string
+  colorByCategory: Map<string, string>
+  categoryList: ReturnType<typeof useCategories>["data"]
+}) {
+  const { data, isLoading } = useTransactionSearch(query)
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[200px] flex-col items-center justify-center gap-2 text-sm text-text-secondary">
+        <span>Searching all transactions...</span>
+      </div>
+    )
+  }
+
+  if (!data || data.transactions.length === 0) {
+    return (
+      <div className="flex min-h-[200px] items-center justify-center text-sm text-text-secondary">
+        No transactions found for &quot;{query}&quot;.
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <p className="text-xs text-text-secondary">
+        {data.total} match{data.total === 1 ? "" : "es"} for &quot;{query}&quot; across all transactions
+      </p>
+      <TransactionsTable
+        transactions={data.transactions}
+        colorByCategory={colorByCategory}
+        categories={categoryList ?? []}
+      />
     </>
   )
 }

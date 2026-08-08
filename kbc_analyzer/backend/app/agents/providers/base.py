@@ -17,6 +17,14 @@ class LLMProvider(ABC):
     async def complete_json(self, system: str, user: str) -> dict:
         """Send a prompt, return parsed JSON. Raises ValueError on invalid JSON."""
 
+    @abstractmethod
+    async def test_connection(self) -> None:
+        """Make the cheapest possible authenticated call to confirm the API key
+        works (S3-07 Item 1). Raises on any failure — an invalid key, a
+        network error, whatever the SDK itself raises. Callers only care
+        whether this returns or raises, never its return value.
+        """
+
     @property
     @abstractmethod
     def name(self) -> str:

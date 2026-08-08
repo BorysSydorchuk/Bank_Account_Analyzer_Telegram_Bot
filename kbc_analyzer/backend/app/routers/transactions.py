@@ -89,6 +89,20 @@ def get_transactions(
     )
 
 
+@router.get("/search", response_model=TransactionsListResponse)
+def search_transactions(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> TransactionsListResponse:
+    """Global search (S3-07 Item 4) — across every synced transaction, not
+    scoped to the Transactions page's current date range or page. `total`/
+    `pages` are both trivially 1 here; this endpoint returns matches
+    directly, it doesn't paginate them."""
+    rows = crud.search_transactions(db, q, limit)
+    return TransactionsListResponse(transactions=rows, total=len(rows), page=1, pages=1)
+
+
 @router.patch("/{transaction_id}", response_model=TransactionOut)
 def patch_transaction(
     transaction_id: UUID,

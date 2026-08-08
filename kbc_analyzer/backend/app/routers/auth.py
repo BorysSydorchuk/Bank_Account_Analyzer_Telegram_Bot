@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from ..eb_service import EnableBankingError, EnableBankingService
 from ..schemas import CallbackRequest, EnableBankingStatus, ReauthorizeResponse
+from ..tasks.auth import catch_enable_banking_callback
 
 router = APIRouter(prefix="/api/auth/enable-banking", tags=["auth"])
 
@@ -26,7 +27,12 @@ def get_status(eb: EnableBankingService = Depends(get_eb_service)) -> EnableBank
 
 @router.post("/reauthorize", response_model=ReauthorizeResponse)
 def reauthorize(eb: EnableBankingService = Depends(get_eb_service)) -> ReauthorizeResponse:
-    return ReauthorizeResponse(auth_url=eb.get_reauthorize_url())
+    # S3-07 Item 2: a background task now catches the redirect automatically
+    # (app/eb_callback_server.py) instead of the user copy-pasting it back —
+    # the frontend's only remaining job is to open auth_url and poll /status.
+    auth_url = eb.get_reauthorize_url()
+    catch_enable_banking_callback.delay()
+    return ReauthorizeResponse(auth_url=auth_url)
 
 
 @router.post("/callback", response_model=EnableBankingStatus)
@@ -34,6 +40,10 @@ def callback(
     body: CallbackRequest,
     eb: EnableBankingService = Depends(get_eb_service),
 ):
+    """Manual fallback (S2-02) — no longer called by the frontend now that
+    reconnecting catches the redirect automatically (S3-07 Item 2), but kept
+    as a working escape hatch in case that ever needs bypassing.
+    """
     try:
         return EnableBankingStatus(**eb.complete_reauthorization(body.code))
     except EnableBankingError:

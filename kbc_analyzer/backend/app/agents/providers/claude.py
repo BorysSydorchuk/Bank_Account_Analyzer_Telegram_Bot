@@ -27,3 +27,14 @@ class ClaudeProvider(LLMProvider):
     async def complete_json(self, system: str, user: str) -> dict:
         text = await self.complete(system, user)
         return parse_json_response(text)
+
+    async def test_connection(self) -> None:
+        # Anthropic has no key-only "ping" endpoint, so the cheapest real
+        # check is the ticket's own suggestion: a real completion capped at
+        # 1 output token — enough to prove the key is accepted, negligible
+        # cost either way.
+        await self._client.messages.create(
+            model=MODEL,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "Hi"}],
+        )

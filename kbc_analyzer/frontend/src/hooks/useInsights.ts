@@ -1,19 +1,25 @@
 import { useQuery } from "@tanstack/react-query"
 
+import { getInsights } from "@/lib/api"
 import { insightsKey } from "@/lib/queryKeys"
 import type { InsightsCacheEntry } from "@/lib/types"
 
-// Read-only view onto the insights cache, same enabled:false pattern as
-// useStatistics — useDashboard's sync mutation is the only writer (insights
-// are never persisted server-side, S2-06), so there's nothing for this hook
-// to fetch on its own. queryFn is never called in practice; it exists only
-// so a stray refetch()/invalidateQueries() doesn't crash instead of no-op.
+// S3-07 Item 3: insights now persist server-side, so this fetches on mount
+// like any normal query instead of the old enabled:false/cache-only pattern
+// — a sync's completion (useDashboard) still writes fresh results straight
+// into this same cache key via setQueryData, so a completed sync updates the
+// panel immediately without waiting for a refetch.
 export function useInsights(dateFrom: string, dateTo: string) {
   return useQuery<InsightsCacheEntry>({
     queryKey: insightsKey(dateFrom, dateTo),
-    queryFn: () => {
-      throw new Error("Insights are only ever populated by a sync — there is no standalone fetch.")
+    queryFn: async () => {
+      const cached = await getInsights(dateFrom, dateTo)
+      return {
+        insights: cached.insights,
+        provider: cached.provider,
+        generatedAt: cached.generated_at,
+        errorMessage: null,
+      }
     },
-    enabled: false,
   })
 }

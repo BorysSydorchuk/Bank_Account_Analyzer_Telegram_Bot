@@ -1,5 +1,6 @@
 import type {
   AmountFilter,
+  CachedInsightsResponse,
   Category,
   EnableBankingStatusResponse,
   JobStatus,
@@ -9,6 +10,7 @@ import type {
   SettingsResponse,
   StatisticsResponse,
   SyncResponse,
+  TestConnectionResponse,
   TransactionItem,
   TransactionsListResponse,
 } from "./types"
@@ -80,6 +82,13 @@ export function patchSettings(key: string, value: string) {
   })
 }
 
+export function testProviderConnection(provider: "gemini" | "claude", apiKey: string) {
+  return request<TestConnectionResponse>("/api/settings/test-connection", {
+    method: "POST",
+    body: JSON.stringify({ provider, api_key: apiKey }),
+  })
+}
+
 export function getTransactionsList(
   dateFrom: string,
   dateTo: string,
@@ -97,6 +106,11 @@ export function getTransactionsList(
   })
   for (const category of categories) params.append("category", category)
   return request<TransactionsListResponse>(`/api/transactions?${params.toString()}`)
+}
+
+export function searchTransactions(q: string, limit: number) {
+  const params = new URLSearchParams({ q, limit: String(limit) })
+  return request<TransactionsListResponse>(`/api/transactions/search?${params.toString()}`)
 }
 
 export function getCategories() {
@@ -121,6 +135,11 @@ export function resetCategoryColor(name: string) {
   return request<Category>(`/api/categories/${encodeURIComponent(name)}/reset`, {
     method: "POST",
   })
+}
+
+export function getInsights(dateFrom: string, dateTo: string) {
+  const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo })
+  return request<CachedInsightsResponse>(`/api/insights?${params.toString()}`)
 }
 
 export function getJob(jobId: string) {

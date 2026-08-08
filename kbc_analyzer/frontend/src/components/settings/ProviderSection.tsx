@@ -1,10 +1,11 @@
 import { useState } from "react"
-import { Check, ExternalLink } from "lucide-react"
+import { useMutation } from "@tanstack/react-query"
+import { Check, CircleX, ExternalLink, Loader2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { usePatchSetting, useSettings } from "@/hooks/useSettings"
-import { ApiError } from "@/lib/api"
+import { ApiError, testProviderConnection } from "@/lib/api"
 import type { LlmProvider } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -91,6 +92,7 @@ export function ProviderSection() {
 
         <ApiKeyForm
           key={selected.keyField}
+          providerId={selected.id}
           keyLabel={selected.keyLabel}
           keyField={selected.keyField}
           hasKeySaved={hasKeySaved}
@@ -102,11 +104,13 @@ export function ProviderSection() {
 }
 
 function ApiKeyForm({
+  providerId,
   keyLabel,
   keyField,
   hasKeySaved,
   getKeyUrl,
 }: {
+  providerId: LlmProvider
   keyLabel: string
   keyField: "gemini_api_key" | "anthropic_api_key"
   hasKeySaved: boolean
@@ -119,6 +123,13 @@ function ApiKeyForm({
   const [value, setValue] = useState("")
   const [saved, setSaved] = useState(false)
   const patchMutation = usePatchSetting()
+
+  // Test and Save are independent actions (S3-07 Item 1) — testing never
+  // touches the saved key, and its result is cleared the moment the field
+  // changes so a stale "Connected" can't linger next to a since-edited key.
+  const testMutation = useMutation({
+    mutationFn: () => testProviderConnection(providerId, value),
+  })
 
   function handleSave() {
     setSaved(false)
@@ -133,6 +144,12 @@ function ApiKeyForm({
     )
   }
 
+  function handleChange(next: string) {
+    setValue(next)
+    setSaved(false)
+    testMutation.reset()
+  }
+
   // This mutation instance is only ever called with this component's own keyField
   // (a fresh ApiKeyForm — and fresh mutation — mounts per provider, via the `key`
   // prop in ProviderSection), so its error state is always about this field.
@@ -141,6 +158,13 @@ function ApiKeyForm({
       ? patchMutation.error.message
       : "Couldn't save that key. Try again."
     : null
+
+  const testResult = testMutation.data
+  const testErrorMessage = testMutation.isError
+    ? testMutation.error instanceof ApiError
+      ? testMutation.error.message
+      : "Couldn't reach the provider. Try again."
+    : (testResult && !testResult.connected ? testResult.error_message : null)
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -152,18 +176,35 @@ function ApiKeyForm({
           id={keyField}
           type="password"
           value={value}
-          onChange={(e) => {
-            setValue(e.target.value)
-            setSaved(false)
-          }}
+          onChange={(e) => handleChange(e.target.value)}
           placeholder="Enter your API key..."
           className="h-9 flex-1 rounded-md border border-border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         />
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => testMutation.mutate()}
+          disabled={!value || testMutation.isPending}
+        >
+          {testMutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : "Test connection"}
+        </Button>
         <Button size="sm" onClick={handleSave} disabled={!value || patchMutation.isPending}>
           {patchMutation.isPending ? "Saving…" : "Save"}
         </Button>
         {saved && <Check className="size-4 text-success" />}
       </div>
+      {testResult?.connected && (
+        <p className="flex items-center gap-1.5 text-xs text-success">
+          <Check className="size-3.5" />
+          Connected
+        </p>
+      )}
+      {testErrorMessage && (
+        <p className="flex items-center gap-1.5 text-xs text-danger">
+          <CircleX className="size-3.5" />
+          {testErrorMessage}
+        </p>
+      )}
       <div className="flex items-center justify-between">
         <span className="text-xs text-text-secondary">
           {hasKeySaved ? "A key is currently saved." : "No key saved yet."}

@@ -1,5 +1,5 @@
 """SQLAlchemy models — schema for these lives in app/migrations/versions/ (Alembic)."""
-from sqlalchemy import Boolean, Column, Date, DateTime, Numeric, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, Date, DateTime, Index, Numeric, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declarative_base
 
@@ -60,3 +60,25 @@ class Category(Base):
     # AI's answer with no way back. Null for a category the AI never touched.
     ai_color = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Insight(Base):
+    __tablename__ = "insights"
+    # Declared here too (not just in the migration) for the same reason as
+    # Transaction's UniqueConstraint — so autogenerate diffs against the real
+    # index instead of proposing to drop it.
+    __table_args__ = (Index("ix_insights_date_range", "date_from", "date_to"),)
+
+    # Insights are cheap to regenerate (one LLM call) and only ever meaningful
+    # for the exact date range they were generated against — a surrogate UUID,
+    # not a natural key, since "date_from + date_to + type" isn't unique
+    # across regenerations for the same range.
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    date_from = Column(Date, nullable=False)
+    date_to = Column(Date, nullable=False)
+    type = Column(Text, nullable=False)
+    title = Column(Text, nullable=False)
+    body = Column(Text, nullable=False)
+    severity = Column(Text, nullable=False)
+    provider = Column(Text, nullable=False)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now())

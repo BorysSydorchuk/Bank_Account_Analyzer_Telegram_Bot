@@ -120,6 +120,11 @@ export interface PatchSettingsResponse {
   value: string
 }
 
+export interface TestConnectionResponse {
+  connected: boolean
+  error_message: string | null
+}
+
 // Client-side cache shape for insights — set only by useDashboard's sync
 // mutation (from SyncResponse's insights fields), read only by useInsights.
 export interface InsightsCacheEntry {
@@ -127,6 +132,12 @@ export interface InsightsCacheEntry {
   provider: string | null
   generatedAt: string | null
   errorMessage: string | null
+}
+
+export interface CachedInsightsResponse {
+  insights: InsightItem[]
+  provider: string | null
+  generated_at: string | null
 }
 
 export type AmountFilter = "all" | "spent" | "received"

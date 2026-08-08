@@ -15,5 +15,5 @@ celery_app = Celery(
     # Explicit rather than Celery's Django-style autodiscover_tasks(), which
     # expects an installed-apps list this project doesn't have. One entry per
     # module under app/tasks/ — add the next one here when S3-04 or later adds it.
-    include=["app.tasks.analysis"],
+    include=["app.tasks.analysis", "app.tasks.auth"],
 )

@@ -1,15 +1,15 @@
 """Database read/write helpers for transactions — the Postgres-backed replacement for
 kbc_analyzer.cache for anything reachable through the API.
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .models import Category, Setting, Transaction
+from .models import Category, Insight, Setting, Transaction
 
 
 def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[int, int]:
@@ -68,6 +68,19 @@ def list_transactions(db: Session, date_from: date, date_to: date) -> list[Trans
             .order_by(Transaction.booking_date)
         ).scalars()
     )
+
+
+def search_transactions(db: Session, query: str, limit: int) -> list[Transaction]:
+    """Global search (S3-07 Item 4) — across every transaction ever synced,
+    not scoped to any date range or the current page. Distinct from the
+    Transactions page's own date-scoped, paginated list above."""
+    stmt = (
+        select(Transaction)
+        .where(Transaction.description.ilike(f"%{query}%"))
+        .order_by(Transaction.booking_date.desc(), Transaction.id.desc())
+        .limit(limit)
+    )
+    return list(db.execute(stmt).scalars())
 
 
 def list_transactions_paginated(
@@ -247,6 +260,48 @@ def create_category(db: Session, name: str, color: str) -> Category:
     db.commit()
     db.refresh(category)
     return category
+
+
+def replace_insights(
+    db: Session,
+    date_from: date,
+    date_to: date,
+    insights: list[dict],
+    provider: str,
+    generated_at: datetime,
+) -> None:
+    """Swaps out all insights for one date range in a single transaction —
+    never accumulates history, since an insight is only ever meaningful as
+    "the current read on this range" (S3-07 Item 3). Deleting first means a
+    sync that produces zero insights (e.g. every category empty) correctly
+    leaves the range with none, rather than stale ones from the last sync
+    that did.
+    """
+    db.execute(delete(Insight).where(Insight.date_from == date_from, Insight.date_to == date_to))
+    for item in insights:
+        db.add(
+            Insight(
+                date_from=date_from,
+                date_to=date_to,
+                type=item["type"],
+                title=item["title"],
+                body=item["body"],
+                severity=item["severity"],
+                provider=provider,
+                generated_at=generated_at,
+            )
+        )
+    db.commit()
+
+
+def list_insights(db: Session, date_from: date, date_to: date) -> list[Insight]:
+    return list(
+        db.execute(
+            select(Insight)
+            .where(Insight.date_from == date_from, Insight.date_to == date_to)
+            .order_by(Insight.generated_at)
+        ).scalars()
+    )
 
 
 def get_all_settings(db: Session) -> dict[str, str]:

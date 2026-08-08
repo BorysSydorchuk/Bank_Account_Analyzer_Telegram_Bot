@@ -37,3 +37,12 @@ class GeminiProvider(LLMProvider):
     async def complete_json(self, system: str, user: str) -> dict:
         text = await self.complete(system, user)
         return parse_json_response(text)
+
+    async def test_connection(self) -> None:
+        # Listing models is the cheapest authenticated call available — unlike
+        # generate_content, it doesn't spend any generation quota, just
+        # confirms the key itself is accepted. One item is enough; the pager
+        # would otherwise walk the entire model catalog.
+        pager = await self._client.aio.models.list()
+        async for _ in pager:
+            break

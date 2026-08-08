@@ -198,6 +198,19 @@ class PatchSettingsResponse(BaseModel):
     value: str
 
 
+class TestConnectionRequest(BaseModel):
+    provider: Literal["gemini", "claude"]
+    # The key currently typed in the form, not necessarily saved yet (S3-07
+    # Item 1) — test and save are independent actions, so this can't just
+    # read the stored key back out.
+    api_key: str
+
+
+class TestConnectionResponse(BaseModel):
+    connected: bool
+    error_message: str | None = None
+
+
 class CategorizeRequest(BaseModel):
     date_from: date | None = None
     date_to: date | None = None
@@ -221,3 +234,13 @@ class InsightsResponse(BaseModel):
     provider: str
     generated_at: datetime
     error_message: str | None = None
+
+
+class CachedInsightsResponse(BaseModel):
+    """GET /api/insights (S3-07 Item 3) — unlike InsightsResponse (a fresh
+    generation that always has a provider and timestamp), a date range with
+    no sync yet has never had insights generated for it at all.
+    """
+    insights: list[InsightItem]
+    provider: str | None = None
+    generated_at: datetime | None = None

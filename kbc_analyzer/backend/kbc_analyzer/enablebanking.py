@@ -25,6 +25,18 @@ BASE_URL = "https://api.enablebanking.com"
 # Local file where we cache the active session (account UIDs + expiry date)
 SESSION_FILE = "eb_session.json"
 
+# Where Enable Banking redirects after login/consent. S3-07 Item 2 built a
+# local catcher server that listens on http://localhost:3001/callback instead
+# of requiring the user to copy-paste the redirect URL — but switching this
+# constant to that address was confirmed LIVE to break authorization entirely
+# ("400 Redirect URI not allowed" from Enable Banking's own /auth endpoint),
+# because that URI isn't registered for this app_id in the Enable Banking
+# developer portal. Left as the original, working value until that portal
+# registration is added — see backend/app/eb_callback_server.py and
+# backend/app/tasks/auth.py, which are built and ready for the moment this
+# is safe to flip to "http://localhost:3001/callback".
+REDIRECT_URL = "https://localhost/callback"
+
 
 class EnableBankingError(Exception):
     """Raised for any Enable Banking API or configuration error."""
@@ -169,8 +181,10 @@ class EnableBankingClient:
         The Enable Banking OAuth flow:
           1. We POST /auth → get back a URL
           2. User opens URL, logs in to KBC, grants consent
-          3. KBC redirects to https://localhost/callback?code=...
-          4. User copies that URL and pastes it back to us
+          3. KBC redirects to REDIRECT_URL?code=...
+          4. Something completes the exchange from that code — the web flow's local
+             catcher server does this automatically (S3-07 Item 2); the terminal flow
+             below still asks the user to paste the URL by hand.
           5. We call complete_auth() to exchange the code for a session
         """
         kbc = self._find_kbc_aspsp()
@@ -190,9 +204,7 @@ class EnableBankingClient:
             },
             # Random state string to prevent CSRF — not checked by us but required by the spec
             "state": secrets.token_urlsafe(16),
-            # The page KBC will redirect to after login — must be registered in the portal.
-            # We use localhost because this is a personal tool and we just copy the URL manually.
-            "redirect_url": "https://localhost/callback",
+            "redirect_url": REDIRECT_URL,
             "psu_type": "personal",     # PSU = Payment Service User (the account owner)
         })
         return auth["url"]  # the KBC login URL the user needs to open
@@ -272,8 +284,9 @@ class EnableBankingClient:
         console.print(f"  [link]{url}[/link]\n")
         console.print(
             "Log in with your KBC credentials. You will be redirected to "
-            "[bold]https://localhost/callback?code=...[/bold]\n"
-            "The browser will show a 'can't connect' error — that is expected.\n"
+            f"[bold]{REDIRECT_URL}?code=...[/bold]\n"
+            "The browser will show a 'can't connect' error unless something is listening "
+            "on that port — that is expected here.\n"
             "Copy the [bold]full URL[/bold] from your browser's address bar and paste it below."
         )
         redirect_url = input("\nPaste the full redirect URL: ").strip()
