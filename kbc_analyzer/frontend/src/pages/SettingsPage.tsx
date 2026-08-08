@@ -1,4 +1,5 @@
 import { BankConnectionSection } from "@/components/settings/BankConnectionSection"
+import { CategoriesSection } from "@/components/settings/CategoriesSection"
 import { ProviderSection } from "@/components/settings/ProviderSection"
 
 export function SettingsPage() {
@@ -11,6 +12,7 @@ export function SettingsPage() {
         <div className="flex max-w-2xl flex-col gap-6">
           <ProviderSection />
           <BankConnectionSection />
+          <CategoriesSection />
         </div>
       </main>
     </>

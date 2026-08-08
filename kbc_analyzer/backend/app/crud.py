@@ -193,17 +193,60 @@ def get_categories_by_name(db: Session, names: list[str]) -> dict[str, Category]
 
 
 def upsert_category_colors(db: Session, colors_by_name: dict[str, str], source: str) -> None:
-    """Writes a color + source for each name. Never overwrites a row whose
-    existing source is 'user' — user color choices are final."""
+    """The AI color-assignment path (S3-02) — always called with source='ai'.
+    Never overwrites a row whose existing source is 'user' — user color
+    choices are final. Also mirrors the color into ai_color, so a later user
+    override (S3-06) has something concrete to "Reset to AI" back to."""
     for name, color in colors_by_name.items():
-        stmt = pg_insert(Category).values(name=name, color=color, source=source)
+        stmt = pg_insert(Category).values(name=name, color=color, source=source, ai_color=color)
         stmt = stmt.on_conflict_do_update(
             index_elements=[Category.name],
-            set_={"color": stmt.excluded.color, "source": stmt.excluded.source},
+            set_={"color": stmt.excluded.color, "source": stmt.excluded.source, "ai_color": stmt.excluded.ai_color},
             where=Category.source != "user",
         )
         db.execute(stmt)
     db.commit()
+
+
+def set_category_color(db: Session, name: str, color: str) -> Category | None:
+    """A user-initiated color change (PATCH /api/categories/{name}, S3-06).
+    Unlike upsert_category_colors' AI path, this always applies — a user
+    editing their own category again is not the same case as the AI trying
+    to silently overwrite a user's existing choice. Leaves ai_color alone,
+    so "Reset to AI" still has the original AI answer to go back to."""
+    category = db.get(Category, name)
+    if category is None:
+        return None
+    category.color = color
+    category.source = "user"
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+def reset_category_to_ai(db: Session, name: str) -> Category | None:
+    """Restores a category's AI-assigned color after a user override.
+    Returns None if the category doesn't exist, or if it has no ai_color to
+    reset to (never AI-colored in the first place) — both cases the router
+    treats as "nothing to reset"."""
+    category = db.get(Category, name)
+    if category is None or category.ai_color is None:
+        return None
+    category.color = category.ai_color
+    category.source = "ai"
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+def create_category(db: Session, name: str, color: str) -> Category:
+    """A brand-new, user-defined category (S3-06) — always is_custom=True,
+    source='user'. No ai_color, since the AI never assigned one."""
+    category = Category(name=name, color=color, is_custom=True, source="user")
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return category
 
 
 def get_all_settings(db: Session) -> dict[str, str]:

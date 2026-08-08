@@ -72,25 +72,38 @@ def validate_color(hex_color: str) -> bool:
     success/danger tokens, and saturated/dark enough to read as an intentional
     color rather than a near-white or near-grey mistake.
     """
+    return describe_validation_failure(hex_color) is None
+
+
+def describe_validation_failure(hex_color: str) -> str | None:
+    """None if hex_color passes every rule validate_color() checks; otherwise
+    a specific, user-facing reason (S3-06: shown inline in the color picker
+    popover, e.g. "Too light — won't be visible on white backgrounds") rather
+    than a bare pass/fail a person can't act on.
+    """
     if not is_valid_hex(hex_color):
-        return False
+        return "Enter a valid hex color, like #2E7D4F."
 
     if contrast_ratio(hex_color) < MIN_CONTRAST_RATIO:
-        return False
+        return "Too light — won't be visible on white backgrounds."
 
     hue = _hue_degrees(hex_color)
     too_close_to_a_token = any(
         _hue_distance(hue, _hue_degrees(forbidden)) <= MIN_HUE_DISTANCE_DEGREES for forbidden in FORBIDDEN_HUES_HEX
     )
     if too_close_to_a_token:
-        return False
+        return "Too close to an existing app color (the primary, success, or danger color)."
 
     r, g, b = _hex_to_rgb(hex_color)
     _hue, lightness, saturation = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
     saturation_pct, lightness_pct = saturation * 100, lightness * 100
-    if not (SATURATION_RANGE[0] <= saturation_pct <= SATURATION_RANGE[1]):
-        return False
-    if not (LIGHTNESS_RANGE[0] <= lightness_pct <= LIGHTNESS_RANGE[1]):
-        return False
+    if saturation_pct < SATURATION_RANGE[0]:
+        return "Too dull — pick a more saturated color."
+    if saturation_pct > SATURATION_RANGE[1]:
+        return "Too vivid — pick a slightly more muted color."
+    if lightness_pct < LIGHTNESS_RANGE[0]:
+        return "Too dark — pick a lighter shade."
+    if lightness_pct > LIGHTNESS_RANGE[1]:
+        return "Too light — won't be visible on white backgrounds."
 
-    return True
+    return None

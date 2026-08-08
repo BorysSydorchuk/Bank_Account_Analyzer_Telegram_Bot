@@ -164,4 +164,7 @@ export interface Category {
   color: string
   is_custom: boolean
   source: CategoryColorSource
+  // Present once the AI has assigned this category a color at least once —
+  // "Reset to AI" (S3-06) only shows when this is non-null.
+  ai_color: string | null
 }

@@ -54,4 +54,9 @@ class Category(Base):
     # 'user' (a manual override, S3-06). The AI color-assignment step only
     # ever touches rows still on 'seed' — 'ai' and 'user' rows are left alone.
     source = Column(Text, server_default="seed")
+    # The last color the AI actually assigned, kept separately from `color` so
+    # "Reset to AI" (S3-06) has something to restore to after a user override
+    # — without this, overwriting `color` with a user's pick would lose the
+    # AI's answer with no way back. Null for a category the AI never touched.
+    ai_color = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

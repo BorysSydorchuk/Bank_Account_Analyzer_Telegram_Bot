@@ -33,7 +33,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const body = await res.json().catch(() => null)
-    throw new ApiError(res.status, body?.message ?? `Request failed with status ${res.status}`)
+    // main.py's custom exception handlers return {"message": ...}; a plain
+    // `raise HTTPException(status_code, detail=...)` (used directly in most
+    // routers) gets Starlette's own default body, {"detail": ...} — both
+    // conventions exist in this API, so both need checking here.
+    throw new ApiError(res.status, body?.message ?? body?.detail ?? `Request failed with status ${res.status}`)
   }
   return res.json() as Promise<T>
 }
@@ -97,6 +101,26 @@ export function getTransactionsList(
 
 export function getCategories() {
   return request<Category[]>("/api/categories")
+}
+
+export function patchCategoryColor(name: string, color: string) {
+  return request<Category>(`/api/categories/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ color }),
+  })
+}
+
+export function createCategory(name: string, color: string) {
+  return request<Category>("/api/categories", {
+    method: "POST",
+    body: JSON.stringify({ name, color }),
+  })
+}
+
+export function resetCategoryColor(name: string) {
+  return request<Category>(`/api/categories/${encodeURIComponent(name)}/reset`, {
+    method: "POST",
+  })
 }
 
 export function getJob(jobId: string) {

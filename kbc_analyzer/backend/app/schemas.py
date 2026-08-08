@@ -13,6 +13,19 @@ class CategoryOut(BaseModel):
     color: str
     is_custom: bool
     source: Literal["seed", "ai", "user"]
+    # Present only once the AI has assigned this category a color at least
+    # once — the frontend uses "is this null?" to decide whether "Reset to
+    # AI" (S3-06) has anything to restore.
+    ai_color: str | None = None
+
+
+class PatchCategoryRequest(BaseModel):
+    color: str
+
+
+class CreateCategoryRequest(BaseModel):
+    name: str
+    color: str
 
 
 class SyncRequest(BaseModel):
