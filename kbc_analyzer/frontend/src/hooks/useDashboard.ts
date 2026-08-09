@@ -56,7 +56,11 @@ export function useDashboard() {
     mutationKey: ["syncStatistics"],
     mutationFn: ({ dateFrom, dateTo }: SyncArgs) => syncTransactions(dateFrom, dateTo),
     onSuccess: (syncResult, variables) => {
-      setStatusMessage("Categorizing transactions...")
+      // S4-02: the job starts on the "fetching" stage now, not "categorizing"
+      // — the Enable Banking fetch moved into the background job itself, so
+      // this response comes back before any of that has happened yet. The
+      // very next poll immediately replaces this with the job's own message.
+      setStatusMessage("Fetching transactions from KBC...")
       setActiveJob({
         jobId: syncResult.job_id,
         dateFrom: variables.dateFrom,

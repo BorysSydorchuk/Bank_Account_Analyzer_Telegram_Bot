@@ -12,12 +12,11 @@ export interface InsightItem {
 }
 
 export interface SyncResponse {
-  // S3-04: sync is now just fetch + store — categorization and insight
-  // generation moved to a background job, tracked via job_id against
-  // GET /api/jobs/{job_id} instead of being returned here directly.
-  fetched: number
-  stored: number
-  duplicates_skipped: number
+  // S4-02: the Enable Banking fetch itself moved into the background job
+  // along with storing/categorizing/insights — this only ever creates the
+  // job now, so fetched/stored/duplicates_skipped aren't known yet at
+  // response time. Those numbers show up in the job's own stage messages
+  // instead (see the "storing" stage), via GET /api/jobs/{job_id}.
   job_id: string
   status: "processing"
 }
@@ -25,7 +24,7 @@ export interface SyncResponse {
 export interface JobProcessing {
   job_id: string
   status: "processing"
-  stage: "categorizing" | "generating_insights"
+  stage: "fetching" | "storing" | "categorizing" | "generating_insights"
   progress: number
   message: string
 }

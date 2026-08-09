@@ -1,7 +1,8 @@
-"""Background version of analysis_service's work (S3-04) — runs the real
-categorization + insight generation that used to run inline inside
-POST /api/transactions/sync, now on the celery_worker process so the API
-request returns immediately after fetch + store.
+"""Background version of the full sync pipeline (S3-04's categorization +
+insight generation, joined by S4-02's Enable Banking fetch + store) — runs
+everything POST /api/transactions/sync used to do inline, now entirely on
+the celery_worker process so the API request can return almost immediately
+regardless of how long Enable Banking or the LLM calls take.
 """
 import asyncio
 import logging
@@ -10,12 +11,13 @@ from datetime import date
 from .. import analysis_service, crud, job_store
 from ..celery_app import celery_app
 from ..db import SessionLocal
+from ..eb_service import EnableBankingAuthError, EnableBankingError, EnableBankingService
 
 logger = logging.getLogger(__name__)
 
 
 @celery_app.task
-def categorize_and_analyze(job_id: str, date_from: str, date_to: str) -> None:
+def run_sync_job(job_id: str, date_from: str, date_to: str) -> None:
     """job_id: the key this task reports progress under (job:{job_id} in
     Redis, via job_store). date_from/date_to: ISO date strings — Celery
     serializes task arguments to JSON, so a date object wouldn't survive the
@@ -31,7 +33,65 @@ def categorize_and_analyze(job_id: str, date_from: str, date_to: str) -> None:
 
 async def _run(job_id: str, date_from: date, date_to: date) -> None:
     db = SessionLocal()
+    # Tracked so the catch-all except below can report which stage an
+    # unexpected exception actually interrupted, instead of a stage name
+    # left over from before this task had more than one of them.
+    current_stage = "fetching"
     try:
+        job_store.set_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "status": "processing",
+                "stage": "fetching",
+                "progress": 0,
+                "message": "Fetching transactions from KBC...",
+            },
+        )
+
+        # Was a synchronous call inside the router before this ticket, where an
+        # EnableBankingAuthError/EnableBankingError became an HTTP 401/502
+        # straight from POST /sync. There's no HTTP response left to attach
+        # that to once the fetch happens here instead — the job's own `error`
+        # field is now what carries the same message the exception handlers
+        # used to (S4-02's "auth errors surface through job status" requirement).
+        eb = EnableBankingService()
+        try:
+            account_uids = eb.get_account_uids()
+            fetched_by_account: list[tuple[str, list[dict]]] = []
+            fetched = 0
+            for account_uid in account_uids:
+                txs = eb.fetch_transactions(account_uid, date_from, date_to)
+                fetched += len(txs)
+                fetched_by_account.append((account_uid, txs))
+        except (EnableBankingAuthError, EnableBankingError) as exc:
+            job_store.set_job(
+                job_id,
+                {"job_id": job_id, "status": "failed", "stage": "fetching", "error": str(exc)},
+            )
+            return
+
+        current_stage = "storing"
+        job_store.set_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "status": "processing",
+                "stage": "storing",
+                "progress": 0,
+                "message": f"Storing {fetched} transactions...",
+            },
+        )
+
+        stored = duplicates_skipped = 0
+        for account_uid, txs in fetched_by_account:
+            account_stored, account_duplicates = crud.upsert_transactions(db, account_uid, txs)
+            stored += account_stored
+            duplicates_skipped += account_duplicates
+        logger.info(
+            "Sync job %s: fetched=%d stored=%d duplicates_skipped=%d", job_id, fetched, stored, duplicates_skipped
+        )
+
         def on_batch_complete(completed_batches: int, total_batches: int) -> None:
             progress = round(completed_batches / total_batches * 100) if total_batches else 100
             job_store.set_job(
@@ -45,11 +105,12 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
                 },
             )
 
-        # The router already seeded job:{job_id} with this same "starting"
-        # state right after enqueueing — so a poll that lands before this
-        # worker process even picks up the task still gets a valid response
-        # instead of a 404. Nothing to re-seed here; on_batch_complete below
-        # is the first real update.
+        current_stage = "categorizing"
+        # The router already seeded job:{job_id} with a "fetching" state right
+        # after enqueueing — so a poll that lands before this worker process
+        # even picks up the task still gets a valid response instead of a
+        # 404. That's immediately overwritten by this function's own first
+        # set_job call above; nothing to re-seed here.
         categorization = await analysis_service.categorize_transactions(
             db, date_from, date_to, on_batch_complete=on_batch_complete
         )
@@ -81,6 +142,7 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
             )
             return
 
+        current_stage = "generating_insights"
         job_store.set_job(
             job_id,
             {
@@ -125,13 +187,13 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
         # Never surface the raw exception to the job's `error` field — it's
         # user-facing (rendered as a toast), not a debug log. The real
         # exception still goes to the worker's own logs for us to debug.
-        logger.exception("Background sync job %s failed unexpectedly", job_id)
+        logger.exception("Background sync job %s failed unexpectedly during %s", job_id, current_stage)
         job_store.set_job(
             job_id,
             {
                 "job_id": job_id,
                 "status": "failed",
-                "stage": "categorizing",
+                "stage": current_stage,
                 "error": "Something went wrong while processing this sync. Please try again.",
             },
         )

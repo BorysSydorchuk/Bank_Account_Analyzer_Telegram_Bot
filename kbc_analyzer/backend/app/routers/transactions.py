@@ -6,68 +6,37 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from starlette.concurrency import run_in_threadpool
 
 from .. import crud, job_store
 from ..db import get_db
-from ..eb_service import EnableBankingService
 from ..schemas import PatchTransactionRequest, SyncRequest, SyncResponse, TransactionOut, TransactionsListResponse
-from ..tasks.analysis import categorize_and_analyze
+from ..tasks.analysis import run_sync_job
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
 
-def get_eb_service() -> EnableBankingService:
-    return EnableBankingService()
-
-
 @router.post("/sync", response_model=SyncResponse)
-async def sync_transactions(
-    body: SyncRequest,
-    db: Session = Depends(get_db),
-    eb: EnableBankingService = Depends(get_eb_service),
-) -> SyncResponse:
-    # The Enable Banking fetch is a blocking `requests` call — this endpoint is
-    # `async def` (required so it can `await` run_in_threadpool below), so the
-    # fetch itself has to move to a thread or it would stall the whole event
-    # loop, including unrelated requests, for as long as it takes.
-    def _fetch_and_store() -> tuple[int, int, int]:
-        account_uids = eb.get_account_uids()
-        fetched = stored = duplicates_skipped = 0
-        for account_uid in account_uids:
-            txs = eb.fetch_transactions(account_uid, body.date_from, body.date_to)
-            fetched += len(txs)
-            account_stored, account_duplicates = crud.upsert_transactions(db, account_uid, txs)
-            stored += account_stored
-            duplicates_skipped += account_duplicates
-        return fetched, stored, duplicates_skipped
-
-    fetched, stored, duplicates_skipped = await run_in_threadpool(_fetch_and_store)
-
-    # S3-04: categorization + insight generation moved to the celery_worker
-    # (app/tasks/analysis.py) so this request can return immediately instead
-    # of blocking on however long the LLM calls take. The job's progress
-    # lives in Redis (job_store), polled via GET /api/jobs/{job_id}.
+def sync_transactions(body: SyncRequest) -> SyncResponse:
+    # S4-02: the Enable Banking fetch used to happen here, synchronously,
+    # before this endpoint could return — 4 to 18 seconds of the request just
+    # waiting on a third-party API. Fetch, store, categorize, and generate
+    # insights now all happen inside the one Celery job; this endpoint's only
+    # job is to create that job and hand back its id, which is why it no
+    # longer needs `db` or an EnableBankingService of its own at all.
     job_id = str(uuid4())
     job_store.set_job(
         job_id,
         {
             "job_id": job_id,
             "status": "processing",
-            "stage": "categorizing",
+            "stage": "fetching",
             "progress": 0,
-            "message": "Categorizing transactions...",
+            "message": "Fetching transactions from KBC...",
         },
     )
-    categorize_and_analyze.delay(job_id, body.date_from.isoformat(), body.date_to.isoformat())
+    run_sync_job.delay(job_id, body.date_from.isoformat(), body.date_to.isoformat())
 
-    return SyncResponse(
-        fetched=fetched,
-        stored=stored,
-        duplicates_skipped=duplicates_skipped,
-        job_id=job_id,
-        status="processing",
-    )
+    return SyncResponse(job_id=job_id, status="processing")
 
 
 @router.get("", response_model=TransactionsListResponse)

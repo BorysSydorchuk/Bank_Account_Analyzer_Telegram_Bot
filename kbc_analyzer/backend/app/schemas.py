@@ -41,12 +41,12 @@ class InsightItem(BaseModel):
 
 
 class SyncResponse(BaseModel):
-    # S3-04: sync itself is now just fetch + store — categorization and
-    # insight generation moved to a background Celery job, tracked via
-    # job_id against GET /api/jobs/{job_id} instead of being returned here.
-    fetched: int
-    stored: int
-    duplicates_skipped: int
+    # S4-02: the Enable Banking fetch itself moved into the Celery job along
+    # with everything else (S3-04's categorization/insights) — this endpoint
+    # now only ever creates the job and returns, so fetched/stored/
+    # duplicates_skipped are no longer known synchronously. Those numbers are
+    # surfaced instead through the job's own stage messages (see
+    # tasks/analysis.py's "storing" stage) via GET /api/jobs/{job_id}.
     job_id: str
     status: Literal["processing"]
 
@@ -54,7 +54,7 @@ class SyncResponse(BaseModel):
 class JobProcessing(BaseModel):
     job_id: str
     status: Literal["processing"]
-    stage: Literal["categorizing", "generating_insights"]
+    stage: Literal["fetching", "storing", "categorizing", "generating_insights"]
     progress: int
     message: str
 
