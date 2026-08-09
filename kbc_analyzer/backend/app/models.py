@@ -8,11 +8,13 @@ Base = declarative_base()
 
 class Transaction(Base):
     __tablename__ = "transactions"
-    # Matches the baseline migration exactly — declared here too (not just in the
-    # migration) so `alembic revision --autogenerate` diffs against the real
-    # constraint instead of proposing to drop it, which it silently did once
-    # already (S2-03) before this was added.
-    __table_args__ = (UniqueConstraint("account_id", "external_id"),)
+    # Declared here too (not just in the migration) so `alembic revision
+    # --autogenerate` diffs against the real constraint instead of proposing
+    # to drop it, which it silently did once already (S2-03) before this was
+    # added. external_id alone (S4-01) — Enable Banking's own transaction
+    # reference is unique across the whole bank, unlike account_id, which
+    # changes on every reconnect.
+    __table_args__ = (UniqueConstraint("external_id"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     account_id = Column(Text, nullable=False)

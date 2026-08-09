@@ -17,8 +17,11 @@ def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[
 
     Returns (stored, duplicates_skipped). Enable Banking's own transaction reference
     (entry_reference, exposed as `id` on the normalized dict) is the natural key —
-    checked per account_id, since the same reference could in principle repeat across
-    different accounts.
+    checked globally by external_id alone (S4-01), not scoped to account_id, since
+    Enable Banking issues a new account_id on every reconnect but external_id stays
+    the same for the same real transaction. account_id is still stored (first-seen
+    value, never overwritten on conflict) but no longer part of how a duplicate is
+    recognized.
     """
     if not txs:
         return 0, 0
@@ -26,10 +29,7 @@ def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[
     external_ids = [t["id"] for t in txs]
     existing = set(
         db.execute(
-            select(Transaction.external_id).where(
-                Transaction.account_id == account_id,
-                Transaction.external_id.in_(external_ids),
-            )
+            select(Transaction.external_id).where(Transaction.external_id.in_(external_ids))
         ).scalars()
     )
 
@@ -43,7 +43,7 @@ def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[
             raw_data=t,
         )
         stmt = stmt.on_conflict_do_update(
-            index_elements=[Transaction.account_id, Transaction.external_id],
+            index_elements=[Transaction.external_id],
             set_={
                 "booking_date": stmt.excluded.booking_date,
                 "amount": stmt.excluded.amount,
