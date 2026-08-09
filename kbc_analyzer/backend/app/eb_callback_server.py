@@ -28,6 +28,78 @@ _CERTS_DIR = Path(__file__).resolve().parent.parent / "certs"
 CERT_FILE = _CERTS_DIR / "localhost.pem"
 KEY_FILE = _CERTS_DIR / "localhost-key.pem"
 
+# This is a plain http.server response with no access to the frontend's
+# index.css or React components, so the brand's colors and font are inlined
+# by hand rather than imported — kept in sync manually with the design
+# tokens (#2563EB primary, #16A34A success) rather than shared automatically.
+_CONFIRMATION_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KBC Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #F8FAFC;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #1E293B;
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 16px;
+    padding: 48px 40px;
+  }
+  .wordmark {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #2563EB;
+    margin-bottom: 8px;
+  }
+  .icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 999px;
+    background: #DCFCE7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #0F172A;
+  }
+  p {
+    font-size: 15px;
+    color: #64748B;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="wordmark">KBC Analyzer</div>
+    <div class="icon">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 6L9 17l-5-5"/>
+      </svg>
+    </div>
+    <h1>Bank connected successfully</h1>
+    <p>You can close this tab and return to the app</p>
+  </div>
+</body>
+</html>"""
+
 
 class _CallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
@@ -43,10 +115,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
-        self.wfile.write(
-            b"<html><body><h2>Authorization received.</h2>"
-            b"<p>You can close this tab and return to KBC Analyzer.</p></body></html>"
-        )
+        self.wfile.write(_CONFIRMATION_PAGE.encode("utf-8"))
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002 - matches base signature
         pass  # BaseHTTPRequestHandler logs every request to stderr by default; too noisy here
