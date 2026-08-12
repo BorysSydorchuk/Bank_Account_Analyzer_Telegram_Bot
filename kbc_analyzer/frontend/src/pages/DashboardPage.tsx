@@ -1,3 +1,4 @@
+import { BudgetsWidget } from "@/components/dashboard/BudgetsWidget"
 import { CategoryBreakdown } from "@/components/dashboard/CategoryBreakdown"
 import { InsightsPanel } from "@/components/dashboard/InsightsPanel"
 import { SpendingOverTime } from "@/components/dashboard/SpendingOverTime"
@@ -19,6 +20,7 @@ export function DashboardPage() {
           dateTo={dashboard.dateTo}
           isSyncing={dashboard.isSyncing}
         />
+        <BudgetsWidget />
         <CategoryBreakdown
           dateFrom={dashboard.dateFrom}
           dateTo={dashboard.dateTo}

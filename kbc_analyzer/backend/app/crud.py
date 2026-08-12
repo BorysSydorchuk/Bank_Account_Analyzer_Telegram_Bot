@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .models import Category, Insight, Setting, Transaction
+from .models import Budget, Category, Insight, Setting, Transaction
 
 
 def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[int, int]:
@@ -313,6 +313,108 @@ def list_insights(db: Session, date_from: date, date_to: date) -> list[Insight]:
             .order_by(Insight.generated_at)
         ).scalars()
     )
+
+
+def get_budget(db: Session, user_id: UUID | None, category: str, period: str = "monthly") -> Budget | None:
+    return db.execute(
+        select(Budget).where(Budget.user_id == user_id, Budget.category == category, Budget.period == period)
+    ).scalar_one_or_none()
+
+
+def create_budget(db: Session, user_id: UUID | None, category: str, amount: Decimal, period: str = "monthly") -> Budget:
+    """A new monthly spending limit for one category (S4-05). Caller checks
+    for an existing budget first — this always inserts."""
+    budget = Budget(user_id=user_id, category=category, amount=amount, period=period)
+    db.add(budget)
+    db.commit()
+    db.refresh(budget)
+    return budget
+
+
+def update_budget_amount(
+    db: Session, user_id: UUID | None, category: str, amount: Decimal, period: str = "monthly"
+) -> Budget | None:
+    budget = get_budget(db, user_id, category, period)
+    if budget is None:
+        return None
+    budget.amount = amount
+    db.commit()
+    db.refresh(budget)
+    return budget
+
+
+def delete_budget(db: Session, user_id: UUID | None, category: str, period: str = "monthly") -> bool:
+    budget = get_budget(db, user_id, category, period)
+    if budget is None:
+        return False
+    db.delete(budget)
+    db.commit()
+    return True
+
+
+def _spent_this_month_by_category(db: Session, categories: list[str]) -> dict[str, Decimal]:
+    """Total spend (positive magnitude) per category, calendar-month-to-date.
+    Same amount<0 / -amount sign convention as statistics.py, so a budget's
+    "spent" figure always agrees with the rest of the dashboard."""
+    if not categories:
+        return {}
+    today = date.today()
+    month_start = today.replace(day=1)
+    rows = db.execute(
+        select(Transaction.category, func.sum(Transaction.amount))
+        .where(
+            Transaction.category.in_(categories),
+            Transaction.amount < 0,
+            Transaction.booking_date >= month_start,
+            Transaction.booking_date <= today,
+        )
+        .group_by(Transaction.category)
+    ).all()
+    return {category: -total for category, total in rows}
+
+
+BUDGET_WARNING_THRESHOLD = 80.0
+
+
+def list_budgets_with_status(db: Session, user_id: UUID | None) -> list[dict]:
+    """Every budget for this user, joined against this-calendar-month spending.
+    spent_this_month is always the calendar month of today (day 1 through
+    today) regardless of a budget's own `period` value — 'monthly' is the
+    only period this sprint supports, so today's calendar month is what
+    "this month" already means everywhere else in the app (statistics.py's
+    "This month" preset). A rolling 30-day window would drift out of sync
+    with that and reset on no predictable date, which is harder to reason
+    about for a limit a person is tracking against a bill cycle.
+    """
+    budgets = list(
+        db.execute(select(Budget).where(Budget.user_id == user_id).order_by(Budget.category)).scalars()
+    )
+    if not budgets:
+        return []
+
+    spent_by_category = _spent_this_month_by_category(db, [b.category for b in budgets])
+
+    result = []
+    for budget in budgets:
+        spent = spent_by_category.get(budget.category, Decimal("0"))
+        percentage_used = float(spent / budget.amount * 100)
+        if percentage_used > 100:
+            status = "exceeded"
+        elif percentage_used >= BUDGET_WARNING_THRESHOLD:
+            status = "warning"
+        else:
+            status = "on_track"
+        result.append(
+            {
+                "category": budget.category,
+                "amount": float(budget.amount),
+                "period": budget.period,
+                "spent_this_month": float(spent),
+                "percentage_used": round(percentage_used, 1),
+                "status": status,
+            }
+        )
+    return result
 
 
 def get_all_settings(db: Session) -> dict[str, str]:

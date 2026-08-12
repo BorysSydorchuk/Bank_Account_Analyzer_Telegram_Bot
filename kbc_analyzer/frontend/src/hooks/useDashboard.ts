@@ -6,6 +6,7 @@ import { ApiError, getJob, getStatistics, syncTransactions } from "@/lib/api"
 import { getThisMonthRange, type DateRangePreset } from "@/lib/dateRangePresets"
 import { insightsKey, statisticsKey } from "@/lib/queryKeys"
 import type { InsightsCacheEntry } from "@/lib/types"
+import { budgetsKey } from "./useBudgets"
 import { useDateRangeParam } from "./useDateRangeParam"
 
 interface SyncArgs {
@@ -129,6 +130,11 @@ export function useDashboard() {
       getStatistics(activeJob.dateFrom, activeJob.dateTo).then((statistics) => {
         queryClient.setQueryData(statisticsKey(activeJob.dateFrom, activeJob.dateTo), statistics)
       })
+      // A sync that touches this calendar month changes spent_this_month for
+      // every budget (S4-05) — invalidated rather than hand-patched, same
+      // reasoning as statistics: this job doesn't know which categories'
+      // totals moved, only that some of them did.
+      queryClient.invalidateQueries({ queryKey: budgetsKey })
       setStatusMessage(job.message)
       setActiveJob(null)
     } else if (job.status === "failed") {

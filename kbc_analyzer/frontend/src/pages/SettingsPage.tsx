@@ -1,4 +1,5 @@
 import { BankConnectionSection } from "@/components/settings/BankConnectionSection"
+import { BudgetsSection } from "@/components/settings/BudgetsSection"
 import { CategoriesSection } from "@/components/settings/CategoriesSection"
 import { ProviderSection } from "@/components/settings/ProviderSection"
 
@@ -13,6 +14,7 @@ export function SettingsPage() {
           <ProviderSection />
           <BankConnectionSection />
           <CategoriesSection />
+          <BudgetsSection />
         </div>
       </main>
     </>

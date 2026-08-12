@@ -244,3 +244,25 @@ class CachedInsightsResponse(BaseModel):
     insights: list[InsightItem]
     provider: str | None = None
     generated_at: datetime | None = None
+
+
+class BudgetOut(BaseModel):
+    # Not from_attributes=True: this is assembled in crud.py by joining a
+    # Budget row against this-calendar-month spending, not read straight off
+    # the ORM model — spent_this_month/percentage_used/status don't exist as
+    # columns.
+    category: str
+    amount: float
+    period: str
+    spent_this_month: float
+    percentage_used: float
+    status: Literal["on_track", "warning", "exceeded"]
+
+
+class CreateBudgetRequest(BaseModel):
+    category: str
+    amount: float
+
+
+class PatchBudgetRequest(BaseModel):
+    amount: float

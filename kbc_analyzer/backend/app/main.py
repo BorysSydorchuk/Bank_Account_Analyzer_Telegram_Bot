@@ -13,7 +13,7 @@ from sqlalchemy.exc import OperationalError
 
 from .db import engine
 from .eb_service import EnableBankingAuthError, EnableBankingError
-from .routers import analysis, auth, categories, insights, jobs, settings, statistics, transactions
+from .routers import analysis, auth, budgets, categories, insights, jobs, settings, statistics, transactions
 
 app = FastAPI(title="KBC Analyzer API")
 
@@ -35,6 +35,7 @@ app.include_router(analysis.router)
 app.include_router(categories.router)
 app.include_router(jobs.router)
 app.include_router(insights.router)
+app.include_router(budgets.router)
 
 
 @app.exception_handler(EnableBankingAuthError)

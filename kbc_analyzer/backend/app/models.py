@@ -1,5 +1,17 @@
 """SQLAlchemy models — schema for these lives in app/migrations/versions/ (Alembic)."""
-from sqlalchemy import Boolean, Column, Date, DateTime, Index, Numeric, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declarative_base
 
@@ -84,3 +96,34 @@ class Insight(Base):
     severity = Column(Text, nullable=False)
     provider = Column(Text, nullable=False)
     generated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Budget(Base):
+    __tablename__ = "budgets"
+    # Declared here too (not just in the migration), same reason as
+    # Transaction's UniqueConstraint (S2-03): so autogenerate diffs against
+    # the real constraint instead of proposing to drop it. NULLS NOT DISTINCT
+    # matters even in the single-user era — every row's user_id is NULL today,
+    # and Postgres treats NULL as distinct from NULL by default, so a plain
+    # UNIQUE would silently allow two budgets for the same category.
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "category", "period",
+            name="uq_budgets_user_category_period",
+            postgresql_nulls_not_distinct=True,
+        ),
+        CheckConstraint("amount > 0", name="ck_budgets_amount_positive"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    # NULL = single-user era. Sprint 6's multi-user migration backfills this
+    # and adds NOT NULL — added now so that migration doesn't have to
+    # retrofit a whole new column onto a table already holding real budgets.
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+    # References categories.name, not a surrogate id — same natural-key
+    # reasoning as Category itself. ON UPDATE CASCADE so renaming a category
+    # (if that ever becomes possible) carries its budget along automatically.
+    category = Column(Text, ForeignKey("categories.name", onupdate="CASCADE"), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    period = Column(Text, nullable=False, server_default="monthly")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

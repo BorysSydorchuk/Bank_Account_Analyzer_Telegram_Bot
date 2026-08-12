@@ -1,5 +1,6 @@
 import type {
   AmountFilter,
+  Budget,
   CachedInsightsResponse,
   Category,
   EnableBankingStatusResponse,
@@ -40,6 +41,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // routers) gets Starlette's own default body, {"detail": ...} — both
     // conventions exist in this API, so both need checking here.
     throw new ApiError(res.status, body?.message ?? body?.detail ?? `Request failed with status ${res.status}`)
+  }
+  // 204 No Content (e.g. DELETE /api/budgets/{category}) has no body to parse.
+  if (res.status === 204) {
+    return undefined as T
   }
   return res.json() as Promise<T>
 }
@@ -151,4 +156,26 @@ export function patchTransaction(id: string, updates: PatchTransactionRequest) {
     method: "PATCH",
     body: JSON.stringify(updates),
   })
+}
+
+export function getBudgets() {
+  return request<Budget[]>("/api/budgets")
+}
+
+export function createBudget(category: string, amount: number) {
+  return request<Budget>("/api/budgets", {
+    method: "POST",
+    body: JSON.stringify({ category, amount }),
+  })
+}
+
+export function patchBudgetAmount(category: string, amount: number) {
+  return request<Budget>(`/api/budgets/${encodeURIComponent(category)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ amount }),
+  })
+}
+
+export function deleteBudget(category: string) {
+  return request<void>(`/api/budgets/${encodeURIComponent(category)}`, { method: "DELETE" })
 }

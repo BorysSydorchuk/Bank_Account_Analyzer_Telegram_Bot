@@ -178,3 +178,16 @@ export interface Category {
   // "Reset to AI" (S3-06) only shows when this is non-null.
   ai_color: string | null
 }
+
+export type BudgetStatus = "on_track" | "warning" | "exceeded"
+
+export interface Budget {
+  category: string
+  amount: number
+  period: string
+  // Always the calendar month of today (S4-05), never a rolling 30 days —
+  // matches the "This month" preset used elsewhere in the app.
+  spent_this_month: number
+  percentage_used: number
+  status: BudgetStatus
+}

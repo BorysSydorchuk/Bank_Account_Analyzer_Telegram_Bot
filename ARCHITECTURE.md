@@ -76,6 +76,7 @@ worker never produces a new `data` reference to key an effect off).
 | `settings` | Flat key/value store (LLM provider + encrypted API keys) | `key` TEXT primary key; avoids a migration per new setting |
 | `categories` | Category → display color | `name` TEXT primary key; `source` ∈ `seed`\|`ai`\|`user`; `ai_color` holds the last AI color separately so "reset to AI" survives a user override |
 | `insights` | Generated AI insight cards per date range | indexed on `(date_from, date_to)`; **delete-and-replace** per range on every successful sync — no history retained |
+| `budgets` | Monthly spending limit per category (S4-05) | `category` FK → `categories(name)` `ON UPDATE CASCADE`; `amount` CHECK `> 0`; `user_id` nullable UUID, always `NULL` today (pre-Sprint 6 multi-user readiness, same pattern as future new tables); `UNIQUE NULLS NOT DISTINCT (user_id, category, period)` so a plain `UNIQUE` wouldn't have blocked duplicate budgets while every row's `user_id` is `NULL` |
 
 `manually_edited`: true once a human has set category/subcategory/
 description by hand; the categorization agent excludes these rows even
