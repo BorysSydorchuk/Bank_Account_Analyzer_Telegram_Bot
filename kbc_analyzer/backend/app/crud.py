@@ -276,6 +276,17 @@ def replace_insights(
     sync that produces zero insights (e.g. every category empty) correctly
     leaves the range with none, rather than stale ones from the last sync
     that did.
+
+    This delete-and-replace behavior is a deliberate decision (S4-04), not
+    an oversight: the period-comparison feature (S4-08) never depends on
+    insight history to be correct, because its numeric core (totals,
+    category deltas) is always computed live from `transactions`. Stored
+    insights are shown only as supplementary context, labeled with
+    `generated_at` so the UI is honest that a re-sync of one period doesn't
+    regenerate the other. If a future sprint needs true insight history
+    (e.g. "how did this month's read change across regenerations"), that's
+    a new column (`generation_number`) and a "latest per range" query, not
+    a change to this function's contract.
     """
     db.execute(delete(Insight).where(Insight.date_from == date_from, Insight.date_to == date_to))
     for item in insights:

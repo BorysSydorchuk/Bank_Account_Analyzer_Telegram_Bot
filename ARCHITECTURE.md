@@ -85,6 +85,9 @@ Enforced in `crud.get_uncategorized_transactions` and
 `manually_edited IS FALSE` server-side. Any `PATCH /api/transactions/{id}`
 sets it to `true` unconditionally, even for a no-op edit.
 
+`insights` delete-and-replace is a deliberate decision (S4-04), not an
+oversight — see Invariants below.
+
 ## External Dependencies & Their Guarantees
 
 **Enable Banking** — rely on: `external_id` is stable and unique across
@@ -114,6 +117,15 @@ with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
 - **Colors come only from the `categories` table.** No component stores
   or hardcodes a per-transaction color; the donut chart and category
   pills read the same source, and validation is centralized in `colors.py`.
+- **Insight history is not retained (S4-04, decided).** `insights` is
+  delete-and-replace per date range on every successful sync
+  (`crud.replace_insights`) — "history" means whatever the latest sync
+  generated, nothing more. This is safe because no feature depends on it
+  for correctness: the period-comparison feature (S4-08) computes its
+  numbers live from `transactions`, and only shows stored insights as
+  supplementary context labeled `generated_at`. If a future sprint needs
+  true insight history, that's a new `generation_number` column and a
+  "latest per range" query — a clean addition, not a fix to a bug.
 - **Job state is Redis-only.** No `jobs` table exists in any migration;
   sync progress never touches Postgres.
 - **One sync job at a time (per user) — NOT currently enforced.** No
