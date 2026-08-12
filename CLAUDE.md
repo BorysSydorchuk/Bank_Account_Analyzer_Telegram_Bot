@@ -135,6 +135,45 @@ GIT:
   commit unless it touches an entirely different concern.
 - Never commit .env, eb_session.json, or __pycache__.
  
+ARCHITECTURE DOCUMENTATION:
+- ARCHITECTURE.md at the monorepo root is the current-state
+  record of services, ports, URLs, data flows, tables, and
+  invariants. Any commit that changes a port, URL, redirect,
+  data flow, table, constraint, or invariant MUST update
+  ARCHITECTURE.md in that same commit. A change that alters
+  architecture without touching this file is incomplete.
+- ARCHITECTURE.md describes what IS. Never document planned
+  or removed behavior there — plans live in tickets, history
+  lives in git.
+- Before starting any ticket, verify the ticket's stated
+  URLs, ports, endpoints, and flows against ARCHITECTURE.md
+  and the running system. If the ticket's premise is stale,
+  flag it before building anything (see FLAGGED format in
+  PROMPT 5).
+ 
+EXTERNAL SYSTEM ASSUMPTIONS:
+- Never build identity, uniqueness, ordering, or idempotency
+  on an external system's values without validating the
+  guarantee. Validation means one of: (a) vendor
+  documentation explicitly stating it, (b) an empirical
+  test you ran, or (c) an explicit KEY DECISIONS entry
+  stating the assumption is unvalidated and the failure
+  mode if wrong.
+- Known validated/burned examples (keep updated):
+  Enable Banking external_id — stable per transaction
+  (validated S4-01). Enable Banking account_id — NOT stable
+  across reconnects (production incident, S3-08/S4-01).
+  Never key anything on account_id.
+ 
+MULTI-USER READINESS (effective until Sprint 6 completes):
+- Every new table includes a nullable user_id UUID column.
+- Every new crud/service function accepts a user_id
+  parameter, passing None during the single-user era.
+- No new global singletons keyed on "the user" (the
+  settings table predates this rule and is scheduled for
+  the Sprint 5 schema audit — do not extend it with
+  per-user values).
+ 
 ================================================================
 PROMPT 3 — SECURITY STANDARD
 ================================================================
@@ -207,6 +246,19 @@ A ticket is done when:
 3. The WHEN DONE questions are answered with real outputs
 4. The code is committed with the correct message
  
+VERIFICATION DEBT LEDGER:
+- docs/verification_debt.md tracks every verification that
+  was deferred or completed structurally-only (no live
+  execution). Any WHEN DONE answer containing "verified by
+  code review," "structurally verified," or "could not
+  test" MUST add or update a line in this file in the same
+  commit: what was deferred, why, what would close it, and
+  status.
+- Destructive verifications on real data or live credentials
+  (breaking the bank session, overwriting a real API key)
+  are never performed unilaterally — ask Borys for explicit
+  consent, and record his answer in the ledger either way.
+ 
 ================================================================
 PROMPT 5 — SCOPE DISCIPLINE
 ================================================================
@@ -238,6 +290,12 @@ This keeps the git history clean, keeps sprints predictable,
 and gives Borys as CEO full control over what gets built
 and when.
  
+- When deviating from a ticket's literal spec because
+  deployed reality differs, quote the exact acceptance
+  criterion being deviated from in your FLAGGED note or
+  KEY DECISIONS entry, so the PM can judge the deviation
+  against original intent without re-reading the ticket.
+ 
 ================================================================
 PROMPT 6 — COMMUNICATION STANDARD
 ================================================================
@@ -264,4 +322,10 @@ NEVER:
   confirmation.
 - Make a significant architectural decision without flagging
   it, even if you are confident it is correct.
+ 
+- Sprint-close duty: as part of every sprint's final
+  (polish/end-to-end) ticket, read ARCHITECTURE.md top to
+  bottom and verify every claim against the running system.
+  Stale claims are bugs — fix them in the sprint-close
+  commit.
  
