@@ -1,0 +1,125 @@
+# ARCHITECTURE.md
+
+Current-state record of the KBC Personal Finance Analyzer. Describes what
+**is**, never what was or what's planned — see git history for the former,
+sprint tickets for the latter. Project root is `kbc_analyzer/`; all paths
+below are relative to it unless stated otherwise.
+
+**Verification note:** Docker Desktop's daemon was not running when this
+was written, so `docker compose ps` (live containers/port bindings) could
+not be run. Verified instead via `docker compose config` (fully
+interpolated effective config — the strongest static check available) plus
+direct reads of the source files cited below. Re-run `docker compose ps`
+to confirm live bindings match before relying on this section operationally.
+
+## Services & Ports
+
+| Service | Image/build | Port | Serves |
+|---|---|---|---|
+| `db` | `postgres:16-alpine` | 5432 | Postgres, `pg_isready` healthcheck |
+| `backend` | `backend/Dockerfile` | 8000 | FastAPI (`app.main:app`); runs `alembic upgrade head` then `uvicorn --reload` on every start |
+| `frontend` | `frontend/Dockerfile` | 5173 | Vite dev server |
+| `redis` | `redis:7-alpine` | 6379 | Celery broker (db 0) + result backend (db 1) |
+| `celery_worker` | `backend/Dockerfile` (same image as backend) | **3001** | `celery -A app.celery_app worker`, **and** the Enable Banking OAuth callback catcher |
+
+`celery_worker`, not `backend`, publishes port 3001 — deliberate
+(`docker-compose.yml:59-64`): the OAuth redirect lands in the user's real
+browser on the host, and the catcher (`app/eb_callback_server.py`) runs
+inside the Celery process (`app/tasks/auth.py`), not the FastAPI process.
+It's a Celery task (`catch_enable_banking_callback`), TLS via
+`certs/localhost.pem`/`localhost-key.pem` (mkcert), handles exactly one
+request then shuts down, and raises `CallbackPortBusyError` if a second
+reconnect races the first.
+
+## URLs & Redirects
+
+| URL | Value | Served by |
+|---|---|---|
+| Enable Banking redirect URI | `https://localhost:3001/callback` | `celery_worker` / `eb_callback_server.py` (`enablebanking.py:37`) |
+| Frontend origin (CORS) | `FRONTEND_ORIGIN`, default `http://localhost:5173` | `backend/app/main.py:22-28`, `CORSMiddleware` |
+| Frontend's API base | `VITE_API_URL`, default `http://localhost:8000` | `frontend/src/lib/api.ts:18`, injected via compose, no `.env` file on disk |
+
+The redirect URI must be `https://` — Enable Banking's `/auth` endpoint
+rejects `http://` live (400), which is why the mkcert cert exists.
+`POST /api/auth/enable-banking/callback` is a manual fallback only; the
+frontend no longer calls it now that reconnect auto-catches the redirect.
+
+## Data Flow
+
+`POST /api/transactions/sync` (`routers/transactions.py:18-39`) does
+almost nothing synchronously: creates a `job_id`, seeds Redis with
+`{"status": "processing", "stage": "fetching"}`, dispatches
+`run_sync_job.delay(...)`, returns immediately.
+
+Celery task `run_sync_job` (`tasks/analysis.py:19-201`) runs the pipeline,
+updating the Redis job record as it progresses:
+`fetching` → `storing` (`crud.upsert_transactions`, upsert on
+`external_id` conflict) → `categorizing` (batch progress reported via
+`on_batch_complete`) → `generating_insights` (only on success does
+`crud.replace_insights` run — a failed generation leaves prior insights
+untouched) → `complete`/`failed`.
+
+Job state lives only in Redis (`job_store.py`, key `job:{job_id}`, 24h
+TTL) — never Postgres. `GET /api/jobs/{job_id}` 404s once the key expires.
+
+Frontend polling (`frontend/src/hooks/useDashboard.ts`): `useQuery` with
+`refetchInterval` of 2s while `status === "processing"`,
+`refetchIntervalInBackground: true`, plus an independent `setTimeout`
+enforcing a 10-minute cap (React Query's structural sharing means a dead
+worker never produces a new `data` reference to key an effect off).
+
+## Database Tables
+
+| Table | Purpose | Key constraints |
+|---|---|---|
+| `transactions` | One row per bank transaction | `external_id` **UNIQUE** (not `account_id` — see below); `manually_edited` boolean, default `false` |
+| `settings` | Flat key/value store (LLM provider + encrypted API keys) | `key` TEXT primary key; avoids a migration per new setting |
+| `categories` | Category → display color | `name` TEXT primary key; `source` ∈ `seed`\|`ai`\|`user`; `ai_color` holds the last AI color separately so "reset to AI" survives a user override |
+| `insights` | Generated AI insight cards per date range | indexed on `(date_from, date_to)`; **delete-and-replace** per range on every successful sync — no history retained |
+
+`manually_edited`: true once a human has set category/subcategory/
+description by hand; the categorization agent excludes these rows even
+when `category` is null again (a manual clear is still a decision).
+Enforced in `crud.get_uncategorized_transactions` and
+`crud.update_transaction_categories`, both filtering
+`manually_edited IS FALSE` server-side. Any `PATCH /api/transactions/{id}`
+sets it to `true` unconditionally, even for a no-op edit.
+
+## External Dependencies & Their Guarantees
+
+**Enable Banking** — rely on: `external_id` is stable and unique across
+the whole bank. Do **not** rely on: `account_id` — it changes on every
+reconnect (burned S4-01: keying the old unique constraint on
+`(account_id, external_id)` caused 78 duplicate rows on reconnect; fixed
+by migration `827da7c749b8`). `account_id` is still stored but is
+first-seen-only and never overwritten on conflict.
+
+**AI providers** — resolved via `agents/registry.py`, switching in
+Settings changes behavior everywhere at once. Gemini alias:
+`gemini-flash-latest` (`gemini-2.0-flash` was live-confirmed deprecated,
+404). Claude alias: `claude-haiku-4-5-20251001`. Provider API keys are
+**not** read from `.env` by the running app — only
+`scripts/smoke_test_providers.py` does that. The app reads them from the
+`settings` table, Fernet-encrypted at rest, masked on every read except
+the one internal decrypt used by the provider registry.
+
+**mkcert certificate**: `backend/certs/localhost.pem`, valid
+2026-08-08 → **2028-11-08**, SANs `localhost`/`127.0.0.1`/`::1`. Regenerate
+with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
+
+## Invariants
+
+- **Manual edits outrank AI categorization.** Enforced server-side (see
+  Database Tables above) — not just a frontend convention.
+- **Colors come only from the `categories` table.** No component stores
+  or hardcodes a per-transaction color; the donut chart and category
+  pills read the same source, and validation is centralized in `colors.py`.
+- **Job state is Redis-only.** No `jobs` table exists in any migration;
+  sync progress never touches Postgres.
+- **One sync job at a time (per user) — NOT currently enforced.** No
+  locking exists around `POST /api/transactions/sync`; nothing server-side
+  stops two overlapping sync jobs. The only related lock in the codebase
+  guards the OAuth callback port (3001) against a second concurrent
+  *reconnect*, which is a different flow. The only guard against duplicate
+  syncs today is client-side (`useDashboard.ts`'s sync-in-flight state).
+  Flagged separately below — documented here as-is, not as-intended.
