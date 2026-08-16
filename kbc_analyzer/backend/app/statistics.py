@@ -43,7 +43,12 @@ def _distribute_percentages(totals: dict[str, float], grand_total: float) -> dic
     return {cat: floor_tenths[cat] / 10 for cat in totals}
 
 
-def _format_date_range(start: date, end: date) -> str:
+def format_date_range(start: date, end: date) -> str:
+    """Human-readable range label, e.g. "Jun 1–30" or "Jun 1–Jul 31" — used
+    by by_week's per-week labels and, since S4-08, GET /api/insights/compare's
+    per-period labels. No year in the output; both call sites only ever
+    format ranges the caller already knows the year of from context.
+    """
     if start.month == end.month:
         return f"{start.strftime('%b')} {start.day}–{end.day}"
     return f"{start.strftime('%b')} {start.day}–{end.strftime('%b')} {end.day}"
@@ -69,7 +74,7 @@ def _aggregate_weeks(by_day: list[dict]) -> list[dict]:
         w = weeks[(iso_year, iso_week)]
         result.append({
             "week": f"W{iso_week:02d}",
-            "date_range": _format_date_range(w["days"][0], w["days"][-1]),
+            "date_range": format_date_range(w["days"][0], w["days"][-1]),
             "spent": round(w["spent"], 2),
             "received": round(w["received"], 2),
         })

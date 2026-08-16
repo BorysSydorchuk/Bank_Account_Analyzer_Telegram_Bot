@@ -1,5 +1,6 @@
 import { BudgetsWidget } from "@/components/dashboard/BudgetsWidget"
 import { CategoryBreakdown } from "@/components/dashboard/CategoryBreakdown"
+import { ComparePeriodsSection } from "@/components/dashboard/ComparePeriodsSection"
 import { InsightsPanel } from "@/components/dashboard/InsightsPanel"
 import { SpendingOverTime } from "@/components/dashboard/SpendingOverTime"
 import { SummaryCards } from "@/components/dashboard/SummaryCards"
@@ -36,6 +37,7 @@ export function DashboardPage() {
           dateTo={dashboard.dateTo}
           isSyncing={dashboard.isSyncing}
         />
+        <ComparePeriodsSection />
       </main>
     </>
   )

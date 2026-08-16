@@ -246,6 +246,48 @@ class CachedInsightsResponse(BaseModel):
     generated_at: datetime | None = None
 
 
+class PeriodComparison(BaseModel):
+    """One side of GET /api/insights/compare's response (S4-08). total_spent
+    and by_category are always computed live from transactions; insights
+    are read from storage exactly as stored for this exact range (S4-04
+    Option B) — empty if this range was never synced with insight
+    generation, never generated here on the fly.
+    """
+    date_range: str
+    total_spent: float
+    by_category: list[CategoryStat]
+    insights: list[InsightItem]
+    # Every row in one batch shares the same timestamp (crud.replace_insights
+    # writes them together), so one label per period is enough — None when
+    # `insights` is empty, matching CachedInsightsResponse's convention.
+    insights_generated_at: datetime | None = None
+
+
+class CategoryChange(BaseModel):
+    category: str
+    period_a: float
+    period_b: float
+    change: float
+    # None when period_a's total for this category was 0 — percentage
+    # change from zero is undefined, not "infinite%" or silently 0%.
+    change_pct: float | None
+
+
+class ComparisonDelta(BaseModel):
+    total_spent_change: float
+    total_spent_change_pct: float | None
+    # Sorted by absolute change descending (biggest movers first, either
+    # direction) — not alphabetical, not by period_b total; a category swing
+    # is what the comparison view exists to surface.
+    category_changes: list[CategoryChange]
+
+
+class ComparisonResponse(BaseModel):
+    period_a: PeriodComparison
+    period_b: PeriodComparison
+    delta: ComparisonDelta
+
+
 class BudgetOut(BaseModel):
     # Not from_attributes=True: this is assembled in crud.py by joining a
     # Budget row against this-calendar-month spending, not read straight off

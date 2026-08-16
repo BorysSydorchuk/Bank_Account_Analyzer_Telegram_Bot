@@ -105,6 +105,21 @@ POST body (message + history). `useChatSession` (a hook, not React Query —
 there's nothing here to cache) owns the message list as plain React state;
 history is never persisted, matching the backend's statelessness.
 
+`GET /api/insights/compare` (`routers/insights.py`, `comparison_service.py`,
+S4-08) computes spending deltas between two arbitrary date ranges.
+`total_spent`/`by_category` for both ranges are always computed live from
+`transactions` via `statistics.compute_statistics` — never read from a
+stored snapshot. `insights` per range are read from the `insights` table
+exactly as stored for that exact range (the S4-04 Option B decision) and
+never generated on the fly; a range with no matching stored insights just
+returns an empty list, labeled `insights_generated_at: null`. Both ranges
+are validated (`date_from <= date_to`, ≤365 days) before either is queried,
+returning 400 on violation. Frontend:
+`components/dashboard/ComparePeriodsSection.tsx`, collapsed on every page
+load (plain `useState`, no persistence), a `useMutation`
+(`hooks/useCompareInsights.ts`) rather than a cached query — nothing else
+in the app reads a comparison result.
+
 ## Database Tables
 
 | Table | Purpose | Key constraints |

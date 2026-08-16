@@ -1,4 +1,4 @@
-import { format, startOfMonth, subDays, subMonths } from "date-fns"
+import { endOfMonth, format, startOfMonth, subDays, subMonths } from "date-fns"
 
 export interface DateRange {
   dateFrom: string
@@ -14,6 +14,15 @@ const iso = (d: Date) => format(d, "yyyy-MM-dd")
 
 export function getThisMonthRange(): DateRange {
   return { dateFrom: iso(startOfMonth(new Date())), dateTo: iso(new Date()) }
+}
+
+// S4-08's Compare Periods default for Period A — the full prior calendar
+// month, not "30 days ago to today" (getThisMonthRange's own convention:
+// this-month always runs to today, so last-month should run to its own
+// month-end, not truncate at today's day-of-month).
+export function getLastMonthRange(): DateRange {
+  const lastMonth = subMonths(new Date(), 1)
+  return { dateFrom: iso(startOfMonth(lastMonth)), dateTo: iso(endOfMonth(lastMonth)) }
 }
 
 export const DATE_RANGE_PRESETS: DateRangePreset[] = [

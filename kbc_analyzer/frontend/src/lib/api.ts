@@ -5,6 +5,7 @@ import type {
   Category,
   ChatHistoryEntry,
   ChatUsage,
+  ComparisonResponse,
   EnableBankingStatusResponse,
   JobStatus,
   PatchSettingsResponse,
@@ -147,6 +148,21 @@ export function resetCategoryColor(name: string) {
 export function getInsights(dateFrom: string, dateTo: string) {
   const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo })
   return request<CachedInsightsResponse>(`/api/insights?${params.toString()}`)
+}
+
+export function compareInsights(
+  periodAFrom: string,
+  periodATo: string,
+  periodBFrom: string,
+  periodBTo: string
+) {
+  const params = new URLSearchParams({
+    period_a_from: periodAFrom,
+    period_a_to: periodATo,
+    period_b_from: periodBFrom,
+    period_b_to: periodBTo,
+  })
+  return request<ComparisonResponse>(`/api/insights/compare?${params.toString()}`)
 }
 
 export function getJob(jobId: string) {

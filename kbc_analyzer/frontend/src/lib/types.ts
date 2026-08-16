@@ -207,3 +207,39 @@ export interface ChatUsage {
   output: number
 }
 
+// GET /api/insights/compare (S4-08) — statistics are always computed live
+// from transactions; insights are read from storage exactly as stored for
+// each exact range (the S4-04 decision), so `insights` here can be empty
+// even for a period with real spending.
+export interface PeriodComparison {
+  date_range: string
+  total_spent: number
+  by_category: CategoryStat[]
+  insights: InsightItem[]
+  insights_generated_at: string | null
+}
+
+export interface CategoryChange {
+  category: string
+  period_a: number
+  period_b: number
+  change: number
+  // null when period_a's total for this category was 0 — percentage change
+  // from zero is undefined, not "infinite%" or silently 0%.
+  change_pct: number | null
+}
+
+export interface ComparisonDelta {
+  total_spent_change: number
+  total_spent_change_pct: number | null
+  // Sorted by absolute change descending (biggest movers first) — see
+  // comparison_service.py.
+  category_changes: CategoryChange[]
+}
+
+export interface ComparisonResponse {
+  period_a: PeriodComparison
+  period_b: PeriodComparison
+  delta: ComparisonDelta
+}
+
