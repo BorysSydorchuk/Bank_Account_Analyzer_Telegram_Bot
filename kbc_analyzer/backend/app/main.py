@@ -3,6 +3,7 @@
 S1-01 wired up the skeleton (CORS, /health). S1-02 added /api/transactions.
 S1-03 adds /api/statistics.
 """
+import logging
 import os
 
 from fastapi import FastAPI, Request
@@ -14,6 +15,17 @@ from sqlalchemy.exc import OperationalError
 from .db import engine
 from .eb_service import EnableBankingAuthError, EnableBankingError
 from .routers import analysis, auth, budgets, categories, chat, insights, jobs, settings, statistics, transactions
+
+# S4-09 Item 3 surfaced this: without any handler configured, Python's root
+# logger only emits WARNING and above (its built-in "handler of last
+# resort") — every logger.info() call anywhere in this app (registry.py's
+# provider-cache hit/miss, tasks/analysis.py's sync summary) was silently
+# dropped for this process. celery_worker doesn't have this problem — its
+# `--loglevel=info` CLI flag already configures the root logger for that
+# process. INFO only, never DEBUG: CLAUDE.md reserves DEBUG for anything
+# that could carry transaction amounts/descriptions, and INFO must stay
+# safe to leave on in production.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 app = FastAPI(title="KBC Analyzer API")
 

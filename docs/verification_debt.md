@@ -83,6 +83,10 @@ create it early rather than tracking by memory").
   then commit as `chore: close Sprint 2 Claude provider gap` per the
   existing handoff note, updating this entry alongside.
 - **Status:** OPEN — blocked on Borys/PM providing a real Anthropic API key.
+  Re-checked 2026-08-17 as S4-09 Item 5 (conditional Claude live test) —
+  `GET /api/settings` still shows `anthropic_api_key: ""`; explicitly
+  deferred again, no new information. This entry already covers the exact
+  close-out procedure Item 5 asked for.
 
 ---
 

@@ -27,6 +27,10 @@ CALLBACK_PORT = 3001
 _CERTS_DIR = Path(__file__).resolve().parent.parent / "certs"
 CERT_FILE = _CERTS_DIR / "localhost.pem"
 KEY_FILE = _CERTS_DIR / "localhost-key.pem"
+# Expires 2028-11-08. Regenerate with `mkcert localhost 127.0.0.1 ::1` (run
+# from backend/certs/) before then, or retire this whole mkcert setup in
+# favor of real HTTPS once Sprint 6 stands up a production deployment —
+# whichever comes first (S4-09 Item 4).
 
 # This is a plain http.server response with no access to the frontend's
 # index.css or React components, so the brand's colors and font are inlined

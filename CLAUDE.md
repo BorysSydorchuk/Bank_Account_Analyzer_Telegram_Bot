@@ -116,6 +116,10 @@ ENVIRONMENT:
   Strings, URLs, thresholds, model names — all go in .env
   or as named constants at the top of the file.
 - No secrets ever in code, even in comments.
+- mkcert cert (backend/certs/localhost.pem) for the Enable
+  Banking OAuth callback expires 2028-11-08. Regenerate
+  with mkcert before then, or retire it entirely once
+  Sprint 6 stands up real production HTTPS (S4-09 Item 4).
  
 FRONTEND SPECIFIC:
 - Components do one thing. A component that fetches data,

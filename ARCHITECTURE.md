@@ -27,9 +27,25 @@ to confirm live bindings match before relying on this section operationally.
 browser on the host, and the catcher (`app/eb_callback_server.py`) runs
 inside the Celery process (`app/tasks/auth.py`), not the FastAPI process.
 It's a Celery task (`catch_enable_banking_callback`), TLS via
-`certs/localhost.pem`/`localhost-key.pem` (mkcert), handles exactly one
+`certs/localhost.pem`/`localhost-key.pem` (mkcert, expires 2028-11-08 —
+regenerate or retire per Sprint 6 production HTTPS), handles exactly one
 request then shuts down, and raises `CallbackPortBusyError` if a second
 reconnect races the first.
+
+`backend` and `celery_worker` both run as a non-root `appuser`
+(`backend/Dockerfile`, S4-09 Item 1) — the image's final `USER appuser`
+directive, after dependencies are installed and the source is copied as
+root. Verified this doesn't break `eb_session.json`/cert access: Docker
+Desktop's Windows bind mounts report `rwxrwxrwx` regardless of the
+container's UID, so this isn't the classic root-owned-files failure mode a
+native Linux host would hit — worth re-verifying if this project ever runs
+on a Linux Docker host.
+
+`frontend`'s Vite dev server watches with polling (`vite.config.ts`,
+S4-09 Item 2: `usePolling: true, interval: 1000`) — Docker Desktop's
+bind-mounted volumes don't reliably deliver native filesystem change
+events into the container, so the default watcher silently missed edits
+without this.
 
 ## URLs & Redirects
 
@@ -151,7 +167,12 @@ by migration `827da7c749b8`). `account_id` is still stored but is
 first-seen-only and never overwritten on conflict.
 
 **AI providers** — resolved via `agents/registry.py`, switching in
-Settings changes behavior everywhere at once. Gemini alias:
+Settings changes behavior everywhere at once. `get_provider()` caches one
+instance per provider name at module level (S4-09 Item 3) instead of
+re-authenticating an SDK client on every call; `routers/settings.py`
+drops the whole cache after any successful `PATCH /api/settings` (not
+just an `llm_provider` switch — editing a key under the same provider
+name must also force a fresh instance). Gemini alias:
 `gemini-flash-latest` (`gemini-2.0-flash` was live-confirmed deprecated,
 404). Claude alias: `claude-haiku-4-5-20251001`. Provider API keys are
 **not** read from `.env` by the running app — only

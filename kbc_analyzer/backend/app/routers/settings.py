@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from .. import settings_service
 from ..agents.providers.claude import ClaudeProvider
 from ..agents.providers.gemini import GeminiProvider
+from ..agents.registry import invalidate_provider_cache
 from ..db import get_db
 from ..schemas import (
     PatchSettingsRequest,
@@ -26,9 +27,14 @@ def get_settings(db: Session = Depends(get_db)) -> SettingsResponse:
 @router.patch("", response_model=PatchSettingsResponse)
 def patch_settings(body: PatchSettingsRequest, db: Session = Depends(get_db)):
     try:
-        return PatchSettingsResponse(**settings_service.patch_setting(db, body.key, body.value))
+        result = settings_service.patch_setting(db, body.key, body.value)
     except settings_service.InvalidSettingError as exc:
         return JSONResponse(status_code=400, content={"message": str(exc)})
+    # S4-09 Item 3: not just an llm_provider switch — a key edit under the
+    # same provider name must drop the cache too, or get_provider() would
+    # keep serving an instance built from the old key.
+    invalidate_provider_cache()
+    return PatchSettingsResponse(**result)
 
 
 def _connection_error_message(exc: Exception) -> str:
