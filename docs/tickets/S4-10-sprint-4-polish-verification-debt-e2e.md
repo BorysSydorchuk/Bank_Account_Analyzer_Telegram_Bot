@@ -1,4 +1,4 @@
-Status: delivered
+Status: confirmed
 Source: issued directly in Claude Code session, 2026-08-17
 
 ---
@@ -228,13 +228,23 @@ condition.
   accepting a valid one) — Dashboard donut's largest wedge and the
   category legend dot both updated to the new color immediately. Reset to
   AI afterward to leave state as found.
-- **m.** **Not attempted.** The Reconnect button drives a real OAuth flow
-  against KBC's actual online banking login — needs Borys's real bank
-  credentials to complete, which I'm not able to enter (financial
-  credentials are a hard no regardless of ticket instructions), and the
-  existing session doesn't expire until 5 November 2026, so there was no
-  organic need to force a reconnect. This step needs Borys to run
-  personally, or an explicit decision to skip it for this sprint close.
+- **m. PASSED — completed live with Borys, 2026-08-17.** Codee temporarily
+  bumped `SessionBanner.tsx`'s `WARNING_THRESHOLD_DAYS` from 7 to 90 (a
+  mechanism the file already anticipated: "Bump this to test the warning
+  banner... put back to 7 before shipping" — S2-02) so the real,
+  not-actually-expiring session (5 Nov 2026) tripped the warning banner
+  without faking or shortening anything. Confirmed the amber banner fired
+  correctly: "Your bank connection expires on 5 November 2026. Reconnect
+  now to avoid interruption." Codee did not touch the Reconnect button or
+  enter any credentials — Borys clicked Reconnect and completed the real
+  KBC login himself in the new tab. Result: `GET
+  /api/auth/enable-banking/status` → `{"status": "active", "expires_at":
+  "2026-11-13T20:27:27...`"}` (a fresh ~90-day PSD2 consent, not the old
+  one) — auto-caught by the port-3001 callback catcher, zero copy-paste.
+  Browser showed the green "Bank connection reconnected — you're all set."
+  success banner. Threshold reverted to 7 immediately after; confirmed the
+  banner correctly disappeared again (real expiry is ~88 days out, above
+  the 7-day threshold).
 - **n.** Same 3 syncs as Item 6 — count stable at 350 throughout.
 - **o.** Skipped — no Claude key, already covered by the ledger.
 
@@ -262,7 +272,22 @@ out accurate — mkcert dates verified against the actual certificate file
 via `openssl x509 -dates` (exact match), migration count/names verified
 against `migrations/versions/`.
 
-**Sprint 4 complete, pending PM confirmation.** Steps m (reconnect) and o
-(Claude) are the two genuinely open items, both requiring Borys personally
-(real bank credentials; a real Anthropic key) rather than anything
-Codee can resolve.
+---
+
+## UPDATE 2026-08-17 (same day) — step m closed live with Borys
+
+Step m (reconnect flow) was the one item left open above. Borys asked to
+test it together: Codee bumped the warning threshold (a mechanism the code
+already anticipated for exactly this), confirmed the banner fired
+correctly, then Borys completed the real KBC login himself — Codee never
+touched credentials or the Reconnect button. Result: a fresh session,
+auto-caught with zero copy-paste, exactly as designed. Threshold reverted
+and confirmed clean afterward. Full detail folded into step m's entry
+above rather than duplicated here.
+
+**All of a–n now pass.** Step o (Claude) remains the only deferred item,
+covered by the existing verification-debt ledger entry (no key available).
+
+**Sprint 4 complete.** Status flipped to `confirmed` per Borys's "done...
+S4-10 closes clean, all of a–n" — PM sign-off is the remaining downstream
+step, tracked separately from this ticket's own Status field.

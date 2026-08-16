@@ -67,6 +67,15 @@ rejects `http://` live (400), which is why the mkcert cert exists.
 `POST /api/auth/enable-banking/callback` is a manual fallback only; the
 frontend no longer calls it now that reconnect auto-catches the redirect.
 
+Live-verified end-to-end 2026-08-17 (S4-10 step m, with Borys completing
+the real KBC login himself — Codee never handles bank credentials):
+`SessionBanner.tsx`'s warning threshold was temporarily raised so the
+real (not-actually-expiring) session tripped the banner without faking
+anything; after a real reconnect, `GET /api/auth/enable-banking/status`
+returned a genuinely new ~90-day expiry, auto-caught by the port-3001
+callback catcher with zero copy-paste — confirming this flow works
+exactly as described above, not just as designed.
+
 ## Data Flow
 
 `POST /api/transactions/sync` (`routers/transactions.py:18-39`) does
