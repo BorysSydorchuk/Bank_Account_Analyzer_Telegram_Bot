@@ -37,13 +37,27 @@ create it early rather than tracking by memory").
   own message (which already says "Add one in Settings..."), and the
   interrupted marker is a fixed string independent of the underlying error.
   `tsc -b` and `oxlint` both pass clean.
-- **What would close it:** With Borys's consent, temporarily clear the
-  Gemini key in Settings and send a chat message (should toast, no bubble
-  left behind) — then restore the key; separately, throttle/kill the
-  network mid-stream via devtools and confirm the partial bubble gets the
-  interrupted marker.
-- **Status:** OPEN — low priority; both paths are simple, type-checked, and
-  mirror the backend's already-live-verified 400/mid-stream-error handling.
+- **What would close it — CONSENT GRANTED 2026-08-17, deferred to S4-10:**
+  Borys approved both live triggers during S4-07 confirmation, with this
+  exact procedure, so S4-10 can execute it directly without re-asking:
+  1. **No-API-key toast:** back up the current Gemini key value from
+     Settings first (copy it somewhere safe — Settings only ever shows the
+     masked `••••••••` once saved, so the real value must be captured
+     *before* blanking it, not re-read after). Blank the key via Settings,
+     send a chat message, confirm a toast appears and no empty assistant
+     bubble is left behind. Restore the backed-up key value via Settings
+     immediately after, then confirm normal chat still works (e.g. re-run
+     the biggest-expense check) before considering this closed.
+  2. **Mid-stream interrupted marker:** send a chat message, then kill the
+     `backend` container mid-response (`docker compose kill backend` —
+     `backend`, not `celery_worker`; `POST /api/chat` is served by the
+     FastAPI/uvicorn process, not the Celery worker). Confirm the partial
+     assistant bubble gets the "Response interrupted — please try again"
+     marker rather than hanging forever. Bring `backend` back up afterward
+     (`docker compose up -d backend`) and confirm normal chat still works
+     before considering this closed.
+- **Status:** OPEN — scheduled for S4-10's polish pass, consent already on
+  file (see above); do not defer further without checking back with Borys.
 
 ### Claude provider — chat streaming, no API key (S4-06)
 

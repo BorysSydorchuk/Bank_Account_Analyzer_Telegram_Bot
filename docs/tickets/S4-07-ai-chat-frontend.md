@@ -1,4 +1,4 @@
-Status: delivered
+Status: confirmed
 Source: issued directly in Claude Code session, 2026-08-17
 
 ---
@@ -120,11 +120,24 @@ WATCH OUT FOR:
 - `npm install` surfaced 2 pre-existing transitive vulnerabilities (1
   moderate in `hono`, 1 high in `nanoid`) unrelated to `react-markdown`
   itself — not fixed here (`npm audit fix` could shift unrelated dependency
-  versions); flagging for a dependency-hygiene pass.
-- Auto-scroll (`MessageThread`'s `scrollIntoView` effect) is implemented
-  and runs on every message-array change, but wasn't stress-tested with
-  enough content to actually force scrolling in this session — the real
-  conversations tested fit within the viewport.
+  versions); added to S4-09 as Item 7 (per Borys, S4-07 confirmation).
+- Nothing outstanding on error paths beyond what's tracked in
+  `docs/verification_debt.md` (no-API-key toast, mid-stream interrupted
+  marker) — consent granted 2026-08-17, deferred to S4-10 with an explicit
+  procedure recorded there.
+
+---
+
+## UPDATE 2026-08-17 (S4-07 confirmation, requested verification)
+
+Auto-scroll was re-tested live, on request, with content that genuinely
+overflows the viewport: two long chained questions (a 7-category breakdown
+with commentary, then a 20-item transaction-by-transaction list) against
+the real dataset. Confirmed the view followed the stream all the way down
+as content was still arriving mid-generation, and settled at the bottom
+once the response completed — not just implemented-and-assumed, as the
+original delivery notes below had left it. The prior "wasn't
+stress-tested" caveat under WATCH OUT is superseded by this.
 
 WHEN DONE — answered:
 - Screenshots: captured empty state, a pre-token streaming frame, a
