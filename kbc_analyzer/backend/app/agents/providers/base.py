@@ -4,6 +4,7 @@ every agent talks to "a provider," never to a specific vendor's SDK.
 import json
 import re
 from abc import ABC, abstractmethod
+from typing import AsyncGenerator
 
 __all__ = ["LLMProvider", "parse_json_response"]
 
@@ -16,6 +17,19 @@ class LLMProvider(ABC):
     @abstractmethod
     async def complete_json(self, system: str, user: str) -> dict:
         """Send a prompt, return parsed JSON. Raises ValueError on invalid JSON."""
+
+    @abstractmethod
+    def stream_complete(self, system: str, messages: list[dict]) -> AsyncGenerator[str, None]:
+        """Stream a multi-turn chat completion (S4-06).
+
+        messages: [{"role": "user"|"assistant", "content": "..."}], oldest first —
+        the caller's conversation history plus the latest user message already
+        appended. Yields response text incrementally as it arrives from the
+        provider. Once the generator is exhausted, self.last_usage holds
+        {"input": N, "output": M} token counts for the completed turn — there's
+        no other way to surface usage from something whose return type is a bare
+        token stream rather than a response object.
+        """
 
     @abstractmethod
     async def test_connection(self) -> None:

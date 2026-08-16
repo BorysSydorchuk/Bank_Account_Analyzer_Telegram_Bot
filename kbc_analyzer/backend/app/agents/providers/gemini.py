@@ -6,6 +6,8 @@ kbc_analyzer/analysis.py (the existing CLI) already depends on google-genai for
 the exact same job, so this reuses that dependency instead of adding a second,
 redundant Google SDK for no benefit.
 """
+from typing import AsyncGenerator
+
 from google import genai
 from google.genai import types
 
@@ -21,6 +23,7 @@ MODEL = "gemini-flash-latest"
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str):
         self._client = genai.Client(api_key=api_key)
+        self.last_usage: dict[str, int] | None = None
 
     @property
     def name(self) -> str:
@@ -37,6 +40,37 @@ class GeminiProvider(LLMProvider):
     async def complete_json(self, system: str, user: str) -> dict:
         text = await self.complete(system, user)
         return parse_json_response(text)
+
+    async def stream_complete(self, system: str, messages: list[dict]) -> AsyncGenerator[str, None]:
+        # Gemini's roles are "user"/"model", not "user"/"assistant" — the only
+        # translation needed, since our own history format otherwise matches
+        # Anthropic's role names directly.
+        contents = [
+            types.Content(
+                role="model" if m["role"] == "assistant" else "user",
+                parts=[types.Part.from_text(text=m["content"])],
+            )
+            for m in messages
+        ]
+        self.last_usage = None
+        stream = await self._client.aio.models.generate_content_stream(
+            model=MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(system_instruction=system),
+        )
+        async for chunk in stream:
+            # usage_metadata's exact per-chunk timing isn't live-verified (see
+            # docs/verification_debt.md) — the field exists on every chunk per
+            # google-genai 2.18.1's types, and other streaming APIs report it
+            # cumulatively, so keeping only the latest value read should end up
+            # with the final total either way.
+            if chunk.usage_metadata is not None:
+                self.last_usage = {
+                    "input": chunk.usage_metadata.prompt_token_count or 0,
+                    "output": chunk.usage_metadata.candidates_token_count or 0,
+                }
+            if chunk.text:
+                yield chunk.text
 
     async def test_connection(self) -> None:
         # Listing models is the cheapest authenticated call available — unlike

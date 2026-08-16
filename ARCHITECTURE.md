@@ -68,6 +68,20 @@ Frontend polling (`frontend/src/hooks/useDashboard.ts`): `useQuery` with
 enforcing a 10-minute cap (React Query's structural sharing means a dead
 worker never produces a new `data` reference to key an effect off).
 
+`POST /api/chat` (`routers/chat.py`, S4-06) streams a chat reply as
+Server-Sent Events. `chat_service.start_chat_stream` runs everything
+synchronous first — resolves the configured provider
+(`agents/registry.get_provider`) and assembles a fresh financial context
+(last-90-days summary, last 20 transactions, active budgets, all read
+straight from Postgres, never cached) — so a missing API key is a normal
+400 JSON error, not a broken stream. Only then does
+`ChatAgent.stream()` (`agents/chat.py`) start yielding tokens from
+`LLMProvider.stream_complete()`, forwarded one SSE frame per chunk
+(`{"token": ..., "done": false}`), ending with
+`{"token": "", "done": true, "usage": {...}}`. Conversation history is
+entirely client-held — the backend is stateless across turns; no
+`chat_messages` table exists.
+
 ## Database Tables
 
 | Table | Purpose | Key constraints |
@@ -105,7 +119,11 @@ Settings changes behavior everywhere at once. Gemini alias:
 **not** read from `.env` by the running app — only
 `scripts/smoke_test_providers.py` does that. The app reads them from the
 `settings` table, Fernet-encrypted at rest, masked on every read except
-the one internal decrypt used by the provider registry.
+the one internal decrypt used by the provider registry. Both providers also
+implement `stream_complete()` (S4-06, chat) — neither has been live-verified
+yet (see docs/verification_debt.md); Claude additionally has no
+`ANTHROPIC_API_KEY` available at all, the same gap as its non-streaming
+methods.
 
 **mkcert certificate**: `backend/certs/localhost.pem`, valid
 2026-08-08 → **2028-11-08**, SANs `localhost`/`127.0.0.1`/`::1`. Regenerate

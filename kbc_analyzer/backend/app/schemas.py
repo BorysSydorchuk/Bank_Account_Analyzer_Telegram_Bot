@@ -266,3 +266,15 @@ class CreateBudgetRequest(BaseModel):
 
 class PatchBudgetRequest(BaseModel):
     amount: float
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatRequest(BaseModel):
+    # history is entirely client-held (S4-06) — the backend is stateless
+    # across turns and never persists a conversation.
+    message: str
+    history: list[ChatMessage] = Field(default_factory=list)

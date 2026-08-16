@@ -70,6 +70,22 @@ def list_transactions(db: Session, date_from: date, date_to: date) -> list[Trans
     )
 
 
+def get_recent_transactions(db: Session, limit: int) -> list[Transaction]:
+    """Newest-first transactions, unbounded by any date range (S4-06) — used
+    to ground the AI chat assistant's context in specific recent activity."""
+    stmt = select(Transaction).order_by(Transaction.booking_date.desc(), Transaction.id.desc()).limit(limit)
+    return list(db.execute(stmt).scalars())
+
+
+def get_transaction_date_range(db: Session) -> tuple[date, date] | None:
+    """Earliest and latest booking_date across every stored transaction, or
+    None if nothing has been synced yet (S4-06 chat context)."""
+    earliest, latest = db.execute(select(func.min(Transaction.booking_date), func.max(Transaction.booking_date))).one()
+    if earliest is None:
+        return None
+    return earliest, latest
+
+
 def search_transactions(db: Session, query: str, limit: int) -> list[Transaction]:
     """Global search (S3-07 Item 4) — across every transaction ever synced,
     not scoped to any date range or the current page. Distinct from the
