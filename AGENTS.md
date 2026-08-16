@@ -20,16 +20,28 @@ understands the structure immediately.
 
 1. PM writes the ticket with acceptance criteria → Borys
    carries it to Codee.
-2. Codee verifies the ticket's premise against
+2. Codee's first action, before building anything: commit
+   the ticket's text verbatim to
+   docs/tickets/S4-XX-short-name.md with a `Status:
+   in-progress` line at the top.
+3. Codee verifies the ticket's premise against
    ARCHITECTURE.md and the running system, then implements,
    commits (one commit per ticket), and writes a delivery
-   report (format in CLAUDE.md).
-3. Reviewer independently reviews the DIFF against the
+   report (format in CLAUDE.md). The docs/tickets/ file's
+   `Status:` line updates to `delivered` in the same commit
+   (or a follow-up commit once live verification closes any
+   deferred items), with delivery notes appended below the
+   ticket text.
+4. Reviewer independently reviews the DIFF against the
    ticket + rulebooks (procedure in REVIEWER.md) and issues
    PASS / PASS WITH NOTES / FAIL.
-4. Borys takes both reports to the PM → PM gives the
+5. Borys takes both reports to the PM → PM gives the
    verdict → Borys confirms or bounces the ticket to Codee.
-5. From Sprint 5: Tester adds/extends tests for the
+   On confirmation, the docs/tickets/ file's `Status:` line
+   updates to `confirmed` (Codee's next ticket does this as
+   a small housekeeping step, since confirmation itself
+   happens outside Claude Code).
+6. From Sprint 5: Tester adds/extends tests for the
    confirmed ticket and runs the full suite; RED blocks the
    next ticket.
 
@@ -38,7 +50,10 @@ understands the structure immediately.
 - Agents coordinate through repo files, never through each
   other: CLAUDE.md (standards), ARCHITECTURE.md (current
   state), docs/verification_debt.md (deferred
-  verifications), AGENTS.md (this file).
+  verifications), docs/tickets/ (every ticket issued, as
+  Codee received it, with its live Status: and delivery
+  notes — repo ground truth for what was actually asked
+  for, independent of chat history), AGENTS.md (this file).
 - One ticket at a time per implementer. Two implementer
   sessions may run in parallel ONLY on tickets the PM has
   explicitly marked independent (disjoint file trees).
