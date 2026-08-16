@@ -5,12 +5,12 @@ Current-state record of the KBC Personal Finance Analyzer. Describes what
 sprint tickets for the latter. Project root is `kbc_analyzer/`; all paths
 below are relative to it unless stated otherwise.
 
-**Verification note:** Docker Desktop's daemon was not running when this
-was written, so `docker compose ps` (live containers/port bindings) could
-not be run. Verified instead via `docker compose config` (fully
-interpolated effective config — the strongest static check available) plus
-direct reads of the source files cited below. Re-run `docker compose ps`
-to confirm live bindings match before relying on this section operationally.
+**Verification note:** Services & Ports below verified live 2026-08-17
+(S4-10 sprint close) via `docker compose ps` against a clean
+`docker compose down && docker compose up -d` — all five containers
+healthy, port bindings match exactly. (Originally written S4-03 against
+static config only, since Docker Desktop's daemon wasn't running then;
+that gap is now closed.)
 
 ## Services & Ports
 
@@ -47,13 +47,20 @@ bind-mounted volumes don't reliably deliver native filesystem change
 events into the container, so the default watcher silently missed edits
 without this.
 
+`backend` has `logging.basicConfig(level=logging.INFO, ...)` (`main.py`,
+S4-09 Item 3) — before this, the uvicorn process had no logging
+configuration at all, so every `logger.info()` call anywhere in the app
+was silently dropped for it (Python's root-logger fallback only emits
+WARNING+). `celery_worker` never had this problem — its `--loglevel=info`
+CLI flag already configures its own root logger.
+
 ## URLs & Redirects
 
 | URL | Value | Served by |
 |---|---|---|
 | Enable Banking redirect URI | `https://localhost:3001/callback` | `celery_worker` / `eb_callback_server.py` (`enablebanking.py:37`) |
-| Frontend origin (CORS) | `FRONTEND_ORIGIN`, default `http://localhost:5173` | `backend/app/main.py:22-28`, `CORSMiddleware` |
-| Frontend's API base | `VITE_API_URL`, default `http://localhost:8000` | `frontend/src/lib/api.ts:18`, injected via compose, no `.env` file on disk |
+| Frontend origin (CORS) | `FRONTEND_ORIGIN`, default `http://localhost:5173` | `backend/app/main.py:34-40`, `CORSMiddleware` |
+| Frontend's API base | `VITE_API_URL`, default `http://localhost:8000` | `frontend/src/lib/api.ts:22`, injected via compose, no `.env` file on disk |
 
 The redirect URI must be `https://` — Enable Banking's `/auth` endpoint
 rejects `http://` live (400), which is why the mkcert cert exists.
@@ -213,3 +220,11 @@ with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
   *reconnect*, which is a different flow. The only guard against duplicate
   syncs today is client-side (`useDashboard.ts`'s sync-in-flight state).
   Flagged separately below — documented here as-is, not as-intended.
+- **CLAUDE.md's date-range validation (`date_from <= date_to`, ≤365 days)
+  is enforced only on `GET /api/insights/compare` (S4-08) — NOT on
+  `GET /api/statistics`, `POST /api/transactions/sync`,
+  `GET /api/transactions`, or `GET /api/insights`.** Discovered during the
+  S4-10 sprint-close audit while verifying the compare endpoint's own
+  validation. Pre-existing on every endpoint except the newest one, not
+  introduced this sprint — documented here as-is; candidate for a shared
+  validation helper in a future sprint rather than four copy-pasted checks.

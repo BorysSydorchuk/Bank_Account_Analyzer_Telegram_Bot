@@ -30,6 +30,8 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
 
 ## OPEN
 
+*(Re-confirmed 2026-08-17, S4-10 sprint close — both entries below re-checked against current state, dates and closure conditions still accurate.)*
+
 ### Non-root file-permission protection — unverifiable on Windows Docker Desktop (S4-09 Item 1)
 
 - **What was deferred:** Confirming that the non-root `appuser` (added
@@ -51,51 +53,6 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   confirm the app still runs correctly end-to-end as non-root.
 - **Status:** OPEN — closes naturally at Sprint 6, when production
   deployment moves off Windows Docker Desktop onto a real (Linux) host.
-
-### Chat frontend error paths — not live-triggered (S4-07)
-
-- **What was deferred:** Live verification of two of `ChatInput`'s error
-  paths: (1) the "no API key configured" toast (`useChatSession.ts`'s
-  `onError` with `hadPartialResponse: false`), and (2) the mid-stream
-  "Response interrupted — please try again" marker (`hadPartialResponse:
-  true`).
-- **Why:** Both require the request to actually fail. Triggering (1) live
-  means removing the real, working Gemini API key from Settings — a
-  destructive change to Borys's live configuration, not performed without
-  explicit consent per CLAUDE.md's verification rules. Triggering (2) means
-  killing the connection mid-response, which browser devtools can do but
-  wasn't attempted this session.
-- **What was verified instead:** Every *other* acceptance criterion was
-  live-tested in a real browser against the real 331-transaction dataset
-  (see S4-07's delivery notes) — empty state, suggestion chips, streaming,
-  multi-turn, markdown (bold/list/italic), input disabled while streaming,
-  the 400/500-character counter and cap, Shift+Enter vs Enter, and Clear
-  conversation. The two error paths themselves were code-reviewed: `onError`
-  branches correctly on `hadPartialResponse`, the toast uses the backend's
-  own message (which already says "Add one in Settings..."), and the
-  interrupted marker is a fixed string independent of the underlying error.
-  `tsc -b` and `oxlint` both pass clean.
-- **What would close it — CONSENT GRANTED 2026-08-17, deferred to S4-10:**
-  Borys approved both live triggers during S4-07 confirmation, with this
-  exact procedure, so S4-10 can execute it directly without re-asking:
-  1. **No-API-key toast:** back up the current Gemini key value from
-     Settings first (copy it somewhere safe — Settings only ever shows the
-     masked `••••••••` once saved, so the real value must be captured
-     *before* blanking it, not re-read after). Blank the key via Settings,
-     send a chat message, confirm a toast appears and no empty assistant
-     bubble is left behind. Restore the backed-up key value via Settings
-     immediately after, then confirm normal chat still works (e.g. re-run
-     the biggest-expense check) before considering this closed.
-  2. **Mid-stream interrupted marker:** send a chat message, then kill the
-     `backend` container mid-response (`docker compose kill backend` —
-     `backend`, not `celery_worker`; `POST /api/chat` is served by the
-     FastAPI/uvicorn process, not the Celery worker). Confirm the partial
-     assistant bubble gets the "Response interrupted — please try again"
-     marker rather than hanging forever. Bring `backend` back up afterward
-     (`docker compose up -d backend`) and confirm normal chat still works
-     before considering this closed.
-- **Status:** OPEN — scheduled for S4-10's polish pass, consent already on
-  file (see above); do not defer further without checking back with Borys.
 
 ### Claude provider — chat streaming, no API key (S4-06)
 
@@ -121,14 +78,40 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   then commit as `chore: close Sprint 2 Claude provider gap` per the
   existing handoff note, updating this entry alongside.
 - **Status:** OPEN — blocked on Borys/PM providing a real Anthropic API key.
-  Re-checked 2026-08-17 as S4-09 Item 5 (conditional Claude live test) —
-  `GET /api/settings` still shows `anthropic_api_key: ""`; explicitly
-  deferred again, no new information. This entry already covers the exact
-  close-out procedure Item 5 asked for.
+  Re-checked 2026-08-17 twice: as S4-09 Item 5 (conditional Claude live
+  test) and again at S4-10 sprint close — both times `GET /api/settings`
+  showed `anthropic_api_key: ""`; explicitly deferred again, no new
+  information. Suggested next checkpoint: S5-06 (per Sprint 5's schema
+  audit) or whenever a real key arrives, whichever is first. This entry
+  already covers the exact close-out procedure needed.
 
 ---
 
 ## CLOSED (recent)
+
+### Chat frontend error paths — live-triggered (S4-07 → closed S4-10, 2026-08-17)
+
+Both consented tests executed exactly per the procedure Borys approved at
+S4-07 confirmation:
+
+1. **No-API-key toast:** backed up the real (encrypted) `gemini_api_key`
+   value directly at the database level (`SELECT`/copy into a temp table,
+   never decrypted, never seen in plaintext) rather than relying on
+   Settings' masked display. Blanked it via `PATCH /api/settings`, sent a
+   chat message: a toast appeared reading *"No API key configured for
+   gemini. Add one in Settings before running analysis."*, and no empty
+   assistant bubble was left in the thread. Restored the exact encrypted
+   value via direct `UPDATE`, dropped the temp table, sent another message:
+   real Gemini reply came back normally.
+2. **Mid-stream interrupted marker:** sent a long chat message, ran
+   `docker compose kill backend` mid-stream. Partial response text stayed
+   in the bubble, followed by *"Response interrupted — please try again"*
+   in red, input re-enabled (not stuck). Brought `backend` back up
+   (`docker compose up -d backend`), sent a follow-up message: real reply
+   came back, prior history intact.
+
+Both matched `onError`'s two branches (`hadPartialResponse: false` /
+`true`) exactly as code-reviewed at S4-07. No regressions.
 
 ### `POST /api/chat` — Gemini live verification (S4-06, closed 2026-08-16)
 
