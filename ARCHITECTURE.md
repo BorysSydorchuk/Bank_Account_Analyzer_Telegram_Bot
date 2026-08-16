@@ -98,6 +98,13 @@ just wasn't surfacing it. Fixed in-ticket (S4-06 review bounce,
 re-verified live against the same dataset: exact match on amount,
 merchant, and date.
 
+Frontend consumption (`frontend/src/pages/ChatPage.tsx` + `lib/api.ts`'s
+`streamChat`, S4-07): plain `fetch` with `response.body.getReader()`, not
+`EventSource` — `EventSource` only supports GET, and this endpoint needs a
+POST body (message + history). `useChatSession` (a hook, not React Query —
+there's nothing here to cache) owns the message list as plain React state;
+history is never persisted, matching the backend's statelessness.
+
 ## Database Tables
 
 | Table | Purpose | Key constraints |

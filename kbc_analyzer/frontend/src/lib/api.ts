@@ -3,6 +3,8 @@ import type {
   Budget,
   CachedInsightsResponse,
   Category,
+  ChatHistoryEntry,
+  ChatUsage,
   EnableBankingStatusResponse,
   JobStatus,
   PatchSettingsResponse,
@@ -178,4 +180,82 @@ export function patchBudgetAmount(category: string, amount: number) {
 
 export function deleteBudget(category: string) {
   return request<void>(`/api/budgets/${encodeURIComponent(category)}`, { method: "DELETE" })
+}
+
+interface ChatStreamHandlers {
+  onToken: (token: string) => void
+  onDone: (usage: ChatUsage | null) => void
+  // hadPartialResponse distinguishes the two error cases the ticket calls
+  // out: a pre-stream failure (no API key, network down — nothing rendered
+  // yet, so the caller shows a toast) from a mid-stream failure (some
+  // tokens already arrived — the caller appends an inline marker instead).
+  onError: (message: string, hadPartialResponse: boolean) => void
+}
+
+// Server-Sent Events over a plain fetch, not EventSource — EventSource only
+// supports GET, and this endpoint needs a POST body (the message + history).
+// Returns a cancel function so callers can abort an in-flight stream (e.g.
+// "Clear conversation" or navigating away from /chat).
+export function streamChat(message: string, history: ChatHistoryEntry[], handlers: ChatStreamHandlers): () => void {
+  const controller = new AbortController()
+  let receivedAnyToken = false
+
+  ;(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, history }),
+        signal: controller.signal,
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new ApiError(res.status, body?.message ?? body?.detail ?? `Request failed with status ${res.status}`)
+      }
+      if (!res.body) {
+        throw new Error("Streaming is not supported by this browser.")
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      // SSE frames are separated by a blank line (routers/chat.py's
+      // _sse_event). A frame can arrive split across multiple reader.read()
+      // chunks, so any trailing partial frame is held here and prefixed onto
+      // the next read rather than parsed early.
+      let buffer = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const frames = buffer.split("\n\n")
+        buffer = frames.pop() ?? ""
+        for (const frame of frames) {
+          const dataLine = frame.split("\n").find((line) => line.startsWith("data: "))
+          if (!dataLine) continue
+          const payload = JSON.parse(dataLine.slice("data: ".length))
+
+          if (payload.error) {
+            handlers.onError(payload.error, receivedAnyToken)
+            return
+          }
+          if (payload.token) {
+            receivedAnyToken = true
+            handlers.onToken(payload.token)
+          }
+          if (payload.done) {
+            handlers.onDone(payload.usage ?? null)
+            return
+          }
+        }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return
+      const message = err instanceof ApiError ? err.message : "Response interrupted — please try again."
+      handlers.onError(message, receivedAnyToken)
+    }
+  })()
+
+  return () => controller.abort()
 }

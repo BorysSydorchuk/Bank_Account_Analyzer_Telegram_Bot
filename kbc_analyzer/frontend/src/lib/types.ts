@@ -191,3 +191,19 @@ export interface Budget {
   percentage_used: number
   status: BudgetStatus
 }
+
+export type ChatRole = "user" | "assistant"
+
+// The wire shape POST /api/chat expects for history (S4-06) — deliberately
+// smaller than ChatMessage below, which also carries client-only UI state
+// (id, timestamp, streaming status) that never gets sent to the backend.
+export interface ChatHistoryEntry {
+  role: ChatRole
+  content: string
+}
+
+export interface ChatUsage {
+  input: number
+  output: number
+}
+

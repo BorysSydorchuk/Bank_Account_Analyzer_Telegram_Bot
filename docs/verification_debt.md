@@ -14,6 +14,37 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Chat frontend error paths — not live-triggered (S4-07)
+
+- **What was deferred:** Live verification of two of `ChatInput`'s error
+  paths: (1) the "no API key configured" toast (`useChatSession.ts`'s
+  `onError` with `hadPartialResponse: false`), and (2) the mid-stream
+  "Response interrupted — please try again" marker (`hadPartialResponse:
+  true`).
+- **Why:** Both require the request to actually fail. Triggering (1) live
+  means removing the real, working Gemini API key from Settings — a
+  destructive change to Borys's live configuration, not performed without
+  explicit consent per CLAUDE.md's verification rules. Triggering (2) means
+  killing the connection mid-response, which browser devtools can do but
+  wasn't attempted this session.
+- **What was verified instead:** Every *other* acceptance criterion was
+  live-tested in a real browser against the real 331-transaction dataset
+  (see S4-07's delivery notes) — empty state, suggestion chips, streaming,
+  multi-turn, markdown (bold/list/italic), input disabled while streaming,
+  the 400/500-character counter and cap, Shift+Enter vs Enter, and Clear
+  conversation. The two error paths themselves were code-reviewed: `onError`
+  branches correctly on `hadPartialResponse`, the toast uses the backend's
+  own message (which already says "Add one in Settings..."), and the
+  interrupted marker is a fixed string independent of the underlying error.
+  `tsc -b` and `oxlint` both pass clean.
+- **What would close it:** With Borys's consent, temporarily clear the
+  Gemini key in Settings and send a chat message (should toast, no bubble
+  left behind) — then restore the key; separately, throttle/kill the
+  network mid-stream via devtools and confirm the partial bubble gets the
+  interrupted marker.
+- **Status:** OPEN — low priority; both paths are simple, type-checked, and
+  mirror the backend's already-live-verified 400/mid-stream-error handling.
+
 ### Claude provider — chat streaming, no API key (S4-06)
 
 - **What was deferred:** Live verification of

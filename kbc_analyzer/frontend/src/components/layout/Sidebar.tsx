@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 
 const NAV_ITEMS = [
   { label: "Dashboard", to: "/" },
+  { label: "Chat", to: "/chat" },
   { label: "Transactions", to: "/transactions" },
   { label: "Settings", to: "/settings" },
 ]
