@@ -12,7 +12,45 @@ create it early rather than tracking by memory").
 
 ---
 
+## SPRINT 5 AUDIT SCOPE
+
+Architectural findings flagged for the Sprint 5 schema/global-singleton
+audit (CLAUDE.md's MULTI-USER READINESS rule) — not verification debt in
+the sense of "unverified," but real debt this project has knowingly taken
+on that the audit needs to resolve before Sprint 6 multi-user auth lands.
+
+- `agents/registry.py`'s `_provider_cache` (added S4-09 Item 3) is a
+  module-level global keyed on provider name, not on user — exactly the
+  "no new global singletons keyed on 'the user'" pattern CLAUDE.md already
+  warns against for the `settings` table. Fine in the single-user era (one
+  provider selection total), but at Sprint 6 it must become user-scoped
+  (keyed on `(user_id, provider_name)` or moved into a per-request/
+  per-session scope) or one user's cached provider instance — and API
+  key — could leak across users. Flagged in S4-09 review.
+
 ## OPEN
+
+### Non-root file-permission protection — unverifiable on Windows Docker Desktop (S4-09 Item 1)
+
+- **What was deferred:** Confirming that the non-root `appuser` (added
+  S4-09 Item 1) actually protects anything — i.e. that a real permission
+  boundary exists between `appuser` and files a different/root process
+  might have written.
+- **Why:** Verified only that `appuser` can read/write
+  `eb_session.json`/`certs/` — necessary but not sufficient. Docker
+  Desktop's Windows bind mounts (`./backend:/app`) report `rwxrwxrwx` to
+  every UID regardless of the container's actual user, so this host can't
+  demonstrate the failure mode the non-root user is meant to prevent
+  (root-owned files becoming inaccessible), and by the same token can't
+  demonstrate the fix actually closes it either. The security property is
+  asserted from the Dockerfile change and Debian/Linux `USER` semantics
+  generally, not observed working on this host.
+- **What would close it:** Run the same stack on a native Linux Docker
+  host (real bind-mount ownership, not synthesized 777) — create a file as
+  root inside a container, confirm `appuser` genuinely cannot write it,
+  confirm the app still runs correctly end-to-end as non-root.
+- **Status:** OPEN — closes naturally at Sprint 6, when production
+  deployment moves off Windows Docker Desktop onto a real (Linux) host.
 
 ### Chat frontend error paths — not live-triggered (S4-07)
 
