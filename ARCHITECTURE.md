@@ -82,6 +82,19 @@ straight from Postgres, never cached) — so a missing API key is a normal
 entirely client-held — the backend is stateless across turns; no
 `chat_messages` table exists.
 
+Live-verified 2026-08-16 (Gemini, real 331-row dataset): tokens arrive as
+separate incremental frames, not one flush; a 3-turn conversation correctly
+built on prior turns; every number the assistant computed from the summary/
+category/budget context matched `GET /api/statistics` and `GET /api/budgets`
+exactly. One real limitation surfaced by that test, not a bug: the "last 20
+transactions" section can be a small slice of a much larger summary window
+(this dataset had 293 transactions across the 90-day window) — a "what was
+my single biggest expense" question can miss rows older than the visible
+20. The assistant is instructed to say so rather than guess, and did
+exactly that rather than inventing a number. Fixing this (e.g. a dedicated
+"biggest expense in range" field alongside the summary) is a product
+decision, not part of this ticket.
+
 ## Database Tables
 
 | Table | Purpose | Key constraints |
@@ -120,10 +133,10 @@ Settings changes behavior everywhere at once. Gemini alias:
 `scripts/smoke_test_providers.py` does that. The app reads them from the
 `settings` table, Fernet-encrypted at rest, masked on every read except
 the one internal decrypt used by the provider registry. Both providers also
-implement `stream_complete()` (S4-06, chat) — neither has been live-verified
-yet (see docs/verification_debt.md); Claude additionally has no
-`ANTHROPIC_API_KEY` available at all, the same gap as its non-streaming
-methods.
+implement `stream_complete()` (S4-06, chat) — Gemini's is live-verified
+(2026-08-16); Claude's is structurally verified only, since no
+`ANTHROPIC_API_KEY` has ever been available, the same gap as its
+non-streaming methods (see docs/verification_debt.md).
 
 **mkcert certificate**: `backend/certs/localhost.pem`, valid
 2026-08-08 → **2028-11-08**, SANs `localhost`/`127.0.0.1`/`::1`. Regenerate
