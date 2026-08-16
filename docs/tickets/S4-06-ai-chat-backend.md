@@ -1,4 +1,4 @@
-Status: delivered
+Status: confirmed
 Source: sprint4_tickets_v2.txt (revised set)
 
 ---
