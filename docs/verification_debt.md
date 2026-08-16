@@ -66,3 +66,11 @@ full 90 days, the assistant correctly declined to guess beyond its visible
 20 rows rather than inventing a number — exactly per its system-prompt
 rule — but that means a true 90-day-max query can't be answered from
 today's context shape.
+
+**Update 2026-08-17 (S4-06 review bounce):** Reviewer found this was a
+one-line omission, not a design gap — `compute_statistics()` already
+returns `summary.biggest_expense`; `chat_service._summary_text()` just
+wasn't surfacing it. Fixed in-ticket; re-verified live against the same
+dataset (exact match: €800.00, [REDACTED-NAME], 2026-07-27). See
+`docs/tickets/S4-06-ai-chat-backend.md`'s amendment history for the full
+sequence.

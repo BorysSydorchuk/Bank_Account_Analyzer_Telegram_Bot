@@ -86,14 +86,17 @@ Live-verified 2026-08-16 (Gemini, real 331-row dataset): tokens arrive as
 separate incremental frames, not one flush; a 3-turn conversation correctly
 built on prior turns; every number the assistant computed from the summary/
 category/budget context matched `GET /api/statistics` and `GET /api/budgets`
-exactly. One real limitation surfaced by that test, not a bug: the "last 20
-transactions" section can be a small slice of a much larger summary window
-(this dataset had 293 transactions across the 90-day window) — a "what was
-my single biggest expense" question can miss rows older than the visible
-20. The assistant is instructed to say so rather than guess, and did
-exactly that rather than inventing a number. Fixing this (e.g. a dedicated
-"biggest expense in range" field alongside the summary) is a product
-decision, not part of this ticket.
+exactly. That first run surfaced a real gap: the "last 20 transactions"
+section is a small slice of a much larger summary window (293 transactions
+fell in the 90-day window tested), so a "what was my single biggest
+expense" question couldn't be answered from it — the assistant correctly
+said so rather than guessing. Review caught that this was a one-line
+omission, not a design limitation: `compute_statistics()` already returns
+`summary.biggest_expense` (`statistics.py:151-159`), and `_summary_text()`
+just wasn't surfacing it. Fixed in-ticket (S4-06 review bounce,
+2026-08-17) — `summary_text` now includes a `Biggest expense: ...` line,
+re-verified live against the same dataset: exact match on amount,
+merchant, and date.
 
 ## Database Tables
 

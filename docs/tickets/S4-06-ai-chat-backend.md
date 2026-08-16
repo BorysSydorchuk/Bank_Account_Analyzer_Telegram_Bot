@@ -146,10 +146,24 @@ declined to answer rather than hallucinate. Ruled a spec
 gap in this ticket's context design, not an implementation
 defect.
 
-Resolution, folded into S4-07's scope:
-Include statistics.summary.biggest_expense (last 90 days)
-as its own labeled field in the chat context prompt, so
-"biggest expense" questions are answerable. One field —
-the 20-transaction window itself is unchanged. Update
-ARCHITECTURE.md and close the corresponding
-verification_debt.md note in the same commit.
+~~Resolution, folded into S4-07's scope:~~
+~~Include statistics.summary.biggest_expense (last 90 days)~~
+~~as its own labeled field in the chat context prompt, so~~
+~~"biggest expense" questions are answerable. One field —~~
+~~the 20-transaction window itself is unchanged. Update~~
+~~ARCHITECTURE.md and close the corresponding~~
+~~verification_debt.md note in the same commit.~~
+
+**SUPERSEDED 2026-08-17 (S4-06 review verdict: FAIL, bounced for
+this fix):** Reviewer found `summary["biggest_expense"]` was already
+present in the dict `_summary_text()` unpacks
+(`chat_service.py:35-49` vs `statistics.py:151-159`) — this was a
+one-line omission in S4-06's own code, not a spec gap needing new
+scope. Fixed in-ticket: `_summary_text()` now surfaces it as a
+labeled `Biggest expense: ...` line. Re-verified live against the
+same dataset — exact match on amount, merchant, and date. **S4-07's
+scope addition above is void**; S4-07 will be reissued without it.
+Also fixed in the same bounce: docstrings on `_sse_event` and
+`_event_stream` (`routers/chat.py`), and the `TODO(Sprint 6)` format
+at `chat_service.py:24` per CLAUDE.md's `# TODO(Sprint N):
+description — reason deferred` rule.

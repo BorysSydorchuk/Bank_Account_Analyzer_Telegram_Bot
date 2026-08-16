@@ -19,10 +19,16 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 def _sse_event(data: dict) -> str:
+    """Format one Server-Sent Events frame: a JSON payload on a `data:` line
+    followed by the blank line SSE requires between events."""
     return f"data: {json.dumps(data)}\n\n"
 
 
 async def _event_stream(stream, provider: LLMProvider):
+    """Forward each chunk from the agent's token stream as its own SSE
+    frame, then a final frame carrying token usage — or, if the stream
+    raises partway through, a final frame carrying a safe error message
+    instead of a truncated response or a leaked traceback."""
     try:
         async for chunk in stream:
             yield _sse_event({"token": chunk, "done": False})

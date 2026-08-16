@@ -19,9 +19,11 @@ RECENT_TRANSACTIONS_LIMIT = 20
 SUMMARY_WINDOW_DAYS = 90
 MAX_HISTORY_MESSAGES = 20
 
-# TODO(Sprint 6): pass the authenticated user's id through once auth exists.
+# TODO(Sprint 6): pass the authenticated user's id through —
 # crud.list_budgets_with_status already takes user_id as an explicit
-# parameter (S4-05 pattern) so that sprint only has to change this value.
+# parameter (S4-05 pattern), so deferred until Sprint 6 auth exists to
+# actually supply a real value; this sprint only has to change this one
+# constant, not any function signature.
 CURRENT_USER_ID = None
 
 
@@ -45,6 +47,11 @@ def _summary_text(db: Session, today: date) -> str:
         f"Total received: {_format_amount(summary['total_received'])}",
         f"Net: {_format_amount(summary['net'])}",
     ]
+    biggest = summary["biggest_expense"]
+    if biggest is not None:
+        lines.append(
+            f"Biggest expense: {_format_amount(biggest['amount'])} at {biggest['description']} on {biggest['date']}"
+        )
     lines += [f"- {cat['category']}: {_format_amount(cat['total'])} ({cat['percentage']}%)" for cat in stats["by_category"]]
     return "\n".join(lines)
 
