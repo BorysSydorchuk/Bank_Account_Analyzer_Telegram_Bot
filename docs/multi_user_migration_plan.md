@@ -16,8 +16,8 @@ per its own acceptance criteria.
 | Table | Has `user_id` today? | Needs `user_id`? | Migration step |
 |---|---|---|---|
 | `transactions` | No | **Yes** | Add nullable `user_id UUID`, backfill every existing row to the bootstrap user (see Ordering), then `ALTER COLUMN user_id SET NOT NULL` in a follow-up migration once backfill is verified. |
-| `categories` | No | **Decision needed** — see below | If per-user: same nullable→backfill→NOT NULL sequence as `transactions`. If shared/global: no schema change, document the decision in ARCHITECTURE.md Invariants instead. |
-| `settings` | No | **Decision needed** — see below | If per-user: restructure from a flat `key TEXT PRIMARY KEY` table to either `user_id` added to a composite key `(user_id, key)`, or a dedicated `user_settings` table. CLAUDE.md currently says *"do not extend it with per-user values"* — that instruction is scoped to pre-Sprint-6 tickets, not a permanent rule; Sprint 6 is exactly the ticket that instruction defers to. |
+| `categories` | No | **Yes — DECIDED** (PM ruling, 2026-08-17) | Same nullable→backfill→NOT NULL sequence as `transactions`. Primary key becomes `(user_id, name)`. |
+| `settings` | No | **Yes — DECIDED** (PM ruling, 2026-08-17) | **This is a schema change, not just a scoping addition** — unlike `transactions`/`categories`/`insights`, there's no nullable-column-then-backfill path available, because `settings` isn't row-per-entity today, it's a flat global key-value store (`key TEXT PRIMARY KEY`). Going per-user means either widening the primary key to `(user_id, key)` and duplicating the existing global rows once per user at migration time, or splitting into a proper `user_settings` table entirely. Either way this is a structural redesign of the table's shape, not an `ALTER TABLE ... ADD COLUMN`. |
 | `budgets` | **Yes** (nullable, S4-05) | Already has the column | Backfill existing `NULL` rows to the bootstrap user, then `ALTER COLUMN user_id SET NOT NULL`. No new column needed — this table was already built multi-user-ready. |
 | `insights` | No | **Yes** | Same nullable→backfill→NOT NULL sequence as `transactions`. Insights are generated from a specific user's transactions over a specific range; without `user_id` two users syncing overlapping date ranges would silently overwrite each other's insight rows (the `(date_from, date_to)` index has no user dimension today). |
 
@@ -26,21 +26,18 @@ concretely, the single user account created by his first Google OAuth
 login in Sprint 6. This means the `users` table and Borys's own row must
 exist *before* any of these backfills run (see Ordering).
 
-**The categories/settings decision, argued:**
-Categories are currently a shared reference table (`name TEXT PRIMARY
-KEY`) — every user would see the identical category list and colors if
-left as-is. Settings holds the LLM provider choice and each provider's
-API key — currently one deployment-wide choice. I recommend **both become
-per-user** in Sprint 6: category colors are a personal preference (S3-06
-already lets Borys override AI colors — that's meaningless as a *shared*
-override once a second user exists), and API keys are literally
-individual — a second user would need to bring their own Gemini/Claude
-key, not spend Borys's quota. The alternative (keep both global/shared) is
-simpler to migrate but means every user sees one person's category
-customizations and one person's provider bill — I don't think that holds
-up as the product's actual intent, but this is a product call, not a
-purely technical one, and Borys/PM should confirm it explicitly before
-Sprint 6 executes it.
+**The categories/settings decision — DECIDED (PM ruling, 2026-08-17):
+both go per-user.** Originally raised here as a recommendation pending
+Borys/PM confirmation (see git history for the original framing); now
+resolved. Settings in particular: a shared API key means one user's key
+funds every other user's LLM calls — that's a billing hole, not a design
+choice, and it directly collides with Sprint 8's usage-limits work (a
+per-user limit is meaningless against a key nobody but the first user
+actually owns). Categories go per-user for the reason already argued
+here: a personal color override (S3-06) is meaningless as a *shared*
+override once a second user exists. Both are now firm inputs to Sprint
+6's migration, not open questions — see the Tables row above for
+settings' schema-shape consequence specifically.
 
 *Verified via: `grep -n "^class \|__tablename__" app/models.py`, then a
 full read of `app/models.py` for every column, constraint, and existing
@@ -54,10 +51,34 @@ source (Alembic's `env.py` autogenerates against exactly this file).*
 
 | Constraint | Today | Must become | Risk if unchanged |
 |---|---|---|---|
-| `transactions` — `UNIQUE (external_id)` | Global, added S4-01 specifically because `account_id` isn't stable across reconnects | `UNIQUE (user_id, external_id)` | **This is the single highest-risk item in this entire plan.** Enable Banking's `external_id` is unique *per bank*, not globally across all Enable Banking customers — two different real users of this app, both connecting a KBC account, could plausibly receive an overlapping `external_id` from Enable Banking's numbering (unverified whether Enable Banking guarantees global uniqueness across all its client apps; the safe assumption is that it does not). Left as a bare global `UNIQUE`, the *second* user's sync would either silently upsert into the *first* user's transaction row (via the existing `ON CONFLICT (external_id) DO UPDATE` in `crud.upsert_transactions`) or reject the insert — either way, one user's transaction data leaks into or blocks the other's. This is a direct repeat of the S4-01 incident class, just keyed on `user_id` instead of `account_id`. |
-| `categories` — `PRIMARY KEY (name)` | Global | `PRIMARY KEY (user_id, name)` *if* categories go per-user (see Tables decision above) | If categories stay shared, no change needed. If they go per-user and this isn't updated, two users couldn't both have a category named "Groceries" — a near-certain collision on day one. |
+| `transactions` — `UNIQUE (external_id)` | Global, added S4-01 specifically because `account_id` isn't stable across reconnects | `UNIQUE (user_id, external_id)` **— pending empirical validation, see below** | **This is the single highest-risk item in this entire plan.** Enable Banking's `external_id` is unique *per bank*, not globally across all Enable Banking customers — two different real users of this app, both connecting a KBC account, could plausibly receive an overlapping `external_id` from Enable Banking's numbering (unverified whether Enable Banking guarantees global uniqueness across all its client apps; the safe assumption is that it does not). Left as a bare global `UNIQUE`, the *second* user's sync would either silently upsert into the *first* user's transaction row (via the existing `ON CONFLICT (external_id) DO UPDATE` in `crud.upsert_transactions`) or reject the insert — either way, one user's transaction data leaks into or blocks the other's. This is a direct repeat of the S4-01 incident class, just keyed on `user_id` instead of `account_id`. |
+| `categories` — `PRIMARY KEY (name)` | Global | `PRIMARY KEY (user_id, name)` **— DECIDED, categories go per-user** (PM ruling, 2026-08-17) | Confirmed change, not conditional: two users couldn't both have a category named "Groceries" without this. |
 | `budgets` — `UNIQUE NULLS NOT DISTINCT (user_id, category, period)` | **Already correct** — built this way in S4-05 specifically anticipating multi-user | Add `NOT NULL` to `user_id` once backfilled; the constraint shape itself needs no change | None — this is the one table already done right. |
-| `settings` — `PRIMARY KEY (key)` | Global | `PRIMARY KEY (user_id, key)` *if* settings go per-user | If settings stay global, no change. If per-user and unchanged, one user's provider switch changes behavior for every user simultaneously — which is exactly today's (single-user-era) behavior, silently carried forward as a bug. |
+| `settings` — `PRIMARY KEY (key)` | Global | `PRIMARY KEY (user_id, key)` **— DECIDED, settings go per-user** (PM ruling, 2026-08-17) | Confirmed change, not conditional — see Tables above for why leaving this global is a billing hole, not a neutral default. |
+
+**`transactions.external_id` uniqueness — CLAUDE.md EXTERNAL SYSTEM
+ASSUMPTIONS violation, flagged 2026-08-17 (PM):** the risk description
+above rests on an assumption — that Enable Banking's `external_id`
+(`entry_reference` in their API) is not guaranteed unique across their
+whole customer base — that has never actually been validated against
+vendor documentation or an empirical test. Per CLAUDE.md, an assumption
+about an external system's uniqueness/identity guarantee must be
+validated one of three ways before being built on: vendor documentation
+stating it, an empirical test, or an explicit unvalidated-assumption
+note with the failure mode if wrong. This entry was, until this
+correction, only the third of those — stated as an assumption, not
+resolved. **A pre-migration validation task is now step 0 of the
+Ordering section below**, ahead of any schema work: check Enable
+Banking's API documentation for `entry_reference`'s uniqueness scope. If
+documented as globally unique, `UNIQUE (external_id)` alone remains
+correct and no per-user change is needed on this specific constraint (the
+`user_id` column addition still happens for scoping every other query,
+independent of this). If the scope is undocumented or explicitly
+per-bank/per-connection, the safe default is `UNIQUE (user_id,
+external_id)`, and `crud.upsert_transactions`'s `ON CONFLICT` clause must
+match on both columns, not `external_id` alone — this is the same class
+of burn as S4-01, and the fix must not repeat S4-01's mistake of trusting
+an unverified vendor guarantee a second time.
 
 *Verified via: `grep -n "UniqueConstraint\|primary_key=True\|ForeignKey" app/models.py`
 plus the migration files under `app/migrations/versions/` for the ones
@@ -74,14 +95,14 @@ currently exactly one user and no auth layer to scope against.
 
 | Router | Endpoints | Scoping change required |
 |---|---|---|
-| `transactions.py` | `POST /sync`, `GET ""`, `GET /search`, `PATCH /{id}` | All four need `user_id` threaded through: sync writes must tag new rows with the requesting user; the two GETs must filter by it; the PATCH must verify the target row belongs to the requester before editing (see IDOR note below). |
-| `categories.py` | `GET ""`, `PATCH /{name}`, `POST ""`, `POST /{name}/reset` | Depends on the categories-per-user decision above. If per-user: all four need scoping. If shared: no change. |
-| `settings.py` | `GET ""`, `PATCH ""`, `POST /test-connection` | Depends on the settings-per-user decision above. `test-connection` doesn't touch storage at all (it takes a key directly in the request body) — no change needed there regardless. |
-| `budgets.py` | `GET ""`, `POST ""`, `PATCH /{category}`, `DELETE /{category}` | **Already done** — `crud.list_budgets_with_status`, `create_budget`, `update_budget_amount`, `delete_budget` all take `user_id` today; only the router's `CURRENT_USER_ID = None` placeholder needs to become a real value from the auth session. |
+| `transactions.py` | `POST /sync`, `GET ""`, `GET /search`, `PATCH /{id}` | All four need `user_id` threaded through: sync writes must tag new rows with the requesting user; the two GETs must filter by it; the PATCH additionally needs an ownership check, not just scoping — see "Separate workstream: authorization gaps" in Ordering. |
+| `categories.py` | `GET ""`, `PATCH /{name}`, `POST ""`, `POST /{name}/reset` | All four need `user_id` scoping — categories are going per-user (DECIDED, see Tables). |
+| `settings.py` | `GET ""`, `PATCH ""`, `POST /test-connection` | `GET`/`PATCH` need `user_id` scoping — settings are going per-user (DECIDED, see Tables). `test-connection` doesn't touch storage at all (it takes a key directly in the request body) — no change needed there regardless. |
+| `budgets.py` | `GET ""`, `POST ""`, `PATCH /{category}`, `DELETE /{category}` | **Already done** — `crud.get_budget`, `list_budgets_with_status`, `create_budget`, `update_budget_amount`, `delete_budget` all take `user_id` today; only the router's `CURRENT_USER_ID = None` placeholder needs to become a real value from the auth session. |
 | `insights.py` | `GET ""`, `GET /compare` | Both need `user_id` filtering added to `crud.list_insights` (currently filters only by `date_from`/`date_to`). |
 | `analysis.py` | `POST /categorize`, `POST /insights` | Both operate on whatever `crud.get_uncategorized_transactions`/`list_transactions` return — needs `user_id` threaded the same way as the transactions endpoints. |
 | `chat.py` | `POST ""` | `chat_service.build_context` reads transactions/budgets/insights directly — needs `user_id` threaded through the whole context-assembly chain, not just the top-level router. |
-| `jobs.py` | `GET /{job_id}` | **Authorization gap, not just scoping.** `job_store.get_job` has no ownership concept at all — any caller who knows a `job_id` (a random UUID, so not practically guessable, but still) can read another user's job status, including embedded insight text. Needs an ownership check, not just a filter (jobs aren't queried by user, they're looked up by ID — the fix is verifying the ID's owner matches the caller, which means the job payload must record who started it). |
+| `jobs.py` | `GET /{job_id}` | **Authorization gap, not just scoping** — see "Separate workstream: authorization gaps" in Ordering. `job_store.get_job` has no ownership concept at all — any caller who knows a `job_id` (a random UUID, so not practically guessable, but still) can read another user's job status, including embedded insight text. Needs an ownership check (the job payload must record who started it), not a query filter — jobs aren't queried by user, they're looked up by ID. |
 | `auth.py` | `GET /status`, `POST /reauthorize`, `POST /callback` | All three currently talk to the single global `EnableBankingService`/`eb_session.json`. Needs the whole Enable Banking session layer to become per-user first (see Files on disk) — the endpoints themselves are thin wrappers and change trivially once that's done. |
 | `statistics.py` | `GET ""` | Needs `user_id` filtering added to `crud.list_transactions`. |
 
@@ -91,12 +112,22 @@ explicitly per the ticket's ask:** `GET /api/transactions`, `GET
 `GET /api/insights/compare`, `GET /api/categories`, `GET /api/settings` —
 every one of these currently has zero `WHERE` clause on any user
 dimension, because `crud.py` has no concept of one to filter on outside
-the four budget functions.
+the five budget functions.
 
 *Verified via: `grep -n "@router\.\(get\|post\|patch\|delete\|put\)"
 app/routers/*.py` for the complete endpoint list (25 matches), then
 `grep -n "^def " app/crud.py` to confirm exactly which crud functions
-accept a `user_id` parameter today (4, all budget-related), then a full
+accept a `user_id` parameter today. **Correction (Reviewer/Borys,
+2026-08-17): that grep first said 4 — it actually missed `get_budget`
+(`crud.py:334`, called from `routers/budgets.py:42`) and undercounted
+because `update_budget_amount`'s signature spans two lines
+(`def update_budget_amount(` on one line, `user_id` on the next) — a
+`^def ` pattern matched against a single line doesn't see parameters that
+aren't on that line. The correct count is 5. Re-verified by reading every
+line of `crud.py` rather than grepping `^def ` alone; any future
+re-verification of this count should do the same, or grep across the
+full function signature (e.g. with `-A2`) rather than the def line in
+isolation.** Then a full
 read of `transactions.py`, `categories.py`, and `job_store.py` to confirm
 the IDOR-shaped gaps on `PATCH /api/transactions/{id}` and `GET
 /api/jobs/{job_id}` specifically.*
@@ -195,8 +226,21 @@ environment variables, not per-request state.*
 
 ## Ordering
 
-Dependency-ordered sequence for Sprint 6:
+Dependency-ordered sequence for Sprint 6 — schema and scoping work only.
+The authorization-gap items (`GET /api/jobs/{job_id}`, `PATCH
+/api/transactions/{id}`, `job_store`'s unscoped keys) are **not** in this
+sequence — see "Separate workstream: authorization gaps" below for why.
 
+0. **Validate `external_id`'s uniqueness scope against Enable Banking's
+   API documentation, before any schema work on it** (PM ruling,
+   2026-08-17 — see Constraints). Check whether `entry_reference` is
+   documented as globally unique across their whole customer base, or
+   only per-bank/per-connection. This determines whether step 7 below
+   applies `UNIQUE (user_id, external_id)` (if undocumented or scoped) or
+   confirms `UNIQUE (external_id)` alone remains correct (if documented
+   as global). If vendor documentation doesn't resolve it either way, the
+   safe default is the scoped constraint — do not carry an unvalidated
+   assumption into Sprint 6 a second time.
 1. **Create the `users` table** (Google OAuth identity — Sprint 6's own
    scope). Nothing below can proceed without this existing, since every
    subsequent step either adds a foreign key to it or backfills against a
@@ -207,49 +251,42 @@ Dependency-ordered sequence for Sprint 6:
    bootstrap row directly in a migration if login must happen after
    backfill for ordering reasons. Either way, this must happen *before*
    step 4.
-3. **Decide categories and settings: per-user or shared** (see Tables).
-   This is a product decision, not a technical one — get it confirmed
-   before writing the migrations, since it changes which of the two
-   tables get touched in steps 4–6 at all.
-4. **Add nullable `user_id` columns** to `transactions`, `insights`, and
-   (if the decision says so) `categories`/`settings`. Nullable first,
-   deliberately — this is the same pattern `budgets` already used in
-   S4-05, and it means the column can exist and be backfilled without a
-   single blocking migration that locks a live table while assigning
-   every row at once.
-5. **Backfill every existing row** in every touched table to Borys's user
+3. **Add nullable `user_id` columns** to `transactions`, `insights`,
+   `categories`, and `settings` (all four — the per-user decision for the
+   last two is made, see Tables). Nullable first, deliberately — this is
+   the same pattern `budgets` already used in S4-05, and it means the
+   column can exist and be backfilled without a single blocking migration
+   that locks a live table while assigning every row at once. `settings`
+   additionally needs its actual shape change here (widened primary key
+   or split table — see Tables), not just a bolted-on column.
+4. **Backfill every existing row** in every touched table to Borys's user
    id from step 2. Verify row counts before and after match exactly (no
    row should be silently dropped or duplicated by the backfill).
-6. **Add `NOT NULL`** to each `user_id` column, in a separate migration
-   from step 4, once step 5's backfill is verified complete. Running
+5. **Add `NOT NULL`** to each `user_id` column, in a separate migration
+   from step 3, once step 4's backfill is verified complete. Running
    this before backfill finishes would fail outright (correctly) rather
    than silently corrupt data — but running it as part of the *same*
-   migration as step 4 removes the verification window between "column
+   migration as step 3 removes the verification window between "column
    added" and "column enforced," which is the whole point of splitting
    these two steps.
-7. **Update constraints**: `transactions`'s `UNIQUE (external_id)` →
-   `UNIQUE (user_id, external_id)` (the highest-risk item in this plan —
-   see Constraints), and `categories`'s primary key if it goes per-user.
-   Must happen *after* step 6, not before — a `UNIQUE (user_id,
-   external_id)` constraint is meaningless (and in Postgres, actually
-   still permits full duplicates) while `user_id` can be `NULL` on
-   every row.
-8. **Thread `user_id` through every `crud.py` function** that doesn't
-   already take it, following the exact pattern `budgets`'s four
+6. **Update constraints**: `transactions`'s `UNIQUE (external_id)` → the
+   shape step 0 determined (the highest-risk item in this plan — see
+   Constraints), and `categories`'s primary key to `(user_id, name)`
+   (confirmed, not conditional). Must happen *after* step 5, not before —
+   a `UNIQUE (user_id, external_id)` constraint is meaningless (and in
+   Postgres, actually still permits full duplicates) while `user_id` can
+   be `NULL` on every row.
+7. **Thread `user_id` through every `crud.py` function** that doesn't
+   already take it, following the exact pattern `budgets`'s five
    functions already establish. Mechanical but touches nearly every
    function in the file — the two `CURRENT_USER_ID = None` placeholders
    already mark where the router-level wiring point is.
-9. **Wire routers to the real authenticated user** — replace both
+8. **Wire routers to the real authenticated user** — replace both
    `CURRENT_USER_ID = None` placeholders and add the equivalent
    plumbing to every other router listed under Endpoints, once Sprint
    6's auth middleware exists to source a real value from.
-10. **Fix the two IDOR-shaped gaps**: add an ownership check to `GET
-    /api/jobs/{job_id}` (requires recording who started each job in its
-    Redis payload) and to `PATCH /api/transactions/{id}` (requires the
-    fetch-before-update to filter on `user_id`, not just the row's own
-    primary key).
-11. **Fix `_provider_cache`** to key on `(user_id, provider_name)`.
-12. **Redesign bank-session storage** off `eb_session.json` onto a
+9. **Fix `_provider_cache`** to key on `(user_id, provider_name)`.
+10. **Redesign bank-session storage** off `eb_session.json` onto a
     per-user table, and **redesign the OAuth callback catcher** off its
     single-port/single-listener design — both are Sprint 6's "per-user
     bank sessions" and "public deployment with real HTTPS" scope
@@ -258,20 +295,46 @@ Dependency-ordered sequence for Sprint 6:
     them means every user after the first still can't independently
     connect their own bank account.
 
-**What breaks if this order is violated:** doing step 7 before step 6
+**What breaks if this order is violated:** doing step 6 before step 5
 (constraints before `NOT NULL`) produces a constraint that doesn't
 actually protect anything, since `NULL <> NULL` in the columns it's
 supposed to be distinguishing users by — the exact case S4-05 already
 solved once for `budgets` with `NULLS NOT DISTINCT`, which only works
 because `budgets.user_id` is *staying* nullable through Sprint 5; the
 other tables are meant to end up `NOT NULL`, so they need the ordering
-above instead of reusing that exact trick. Doing step 5 (backfill) before
+above instead of reusing that exact trick. Doing step 4 (backfill) before
 step 2 (bootstrap user exists) has nothing to backfill *to* and either
 fails or requires a throwaway placeholder id that then needs a second
-backfill to correct. Doing step 9 (router wiring) before step 8 (crud
+backfill to correct. Doing step 8 (router wiring) before step 7 (crud
 functions accept `user_id`) means the router has a real user id and
 nowhere to pass it — the two have to land together or in that specific
-order.
+order. Skipping step 0 and going straight to step 6 means guessing at
+`external_id`'s real guarantee instead of checking it — exactly the
+mistake step 0 exists to prevent.
+
+---
+
+### Separate workstream: authorization gaps (IDOR)
+
+**Not part of the numbered sequence above, deliberately (PM ruling,
+2026-08-17).** `GET /api/jobs/{job_id}`, `PATCH /api/transactions/{id}`,
+and `job_store`'s unscoped `job:{job_id}` Redis keys all share a
+different problem than everything above: those are queries that need a
+`WHERE user_id = ...` added; these are single-resource lookups by ID that
+need an *ownership check* added — confirming the caller is allowed to see
+this specific job or transaction, not just filtering a list down to
+theirs. Retrofitting authorization onto a by-ID lookup is a distinct kind
+of work from adding a scoping clause to a list query, done at a different
+layer (the router/dependency level, checking "does this id belong to this
+caller" before returning anything) than the schema/crud threading above.
+
+These three are **named targets for the Security Auditor agent**
+(`AGENTS.md`'s roles table: activates in Sprint 6, before auth ships).
+They don't block the schema migration sequence above and the schema
+sequence doesn't block them — they can be picked up in parallel, but they
+need their own review pass specifically for authorization logic, not
+folded into the general crud/router threading work as if fixing them were
+the same kind of change.
 
 *Verified via: reasoning from the table/constraint/endpoint facts
 established in the sections above, cross-checked against

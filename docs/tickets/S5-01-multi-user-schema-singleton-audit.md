@@ -1,4 +1,4 @@
-Status: delivered
+Status: confirmed
 Source: docs/tickets/S5-00-sprint-plan.md
 
 ---
