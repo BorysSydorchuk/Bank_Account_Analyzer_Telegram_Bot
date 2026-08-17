@@ -170,6 +170,12 @@ Enforced in `crud.get_uncategorized_transactions` and
 `manually_edited IS FALSE` server-side. Any `PATCH /api/transactions/{id}`
 sets it to `true` unconditionally, even for a no-op edit.
 
+Only `budgets` has a `user_id` column today; `transactions`, `settings`,
+`categories`, and `insights` are still fully global (every query against
+them is unscoped — there's exactly one user). `docs/multi_user_migration_
+plan.md` (S5-01) is the complete, code-verified inventory of what each
+table/constraint/endpoint/singleton needs before Sprint 6's auth lands.
+
 `insights` delete-and-replace is a deliberate decision (S4-04), not an
 oversight — see Invariants below.
 

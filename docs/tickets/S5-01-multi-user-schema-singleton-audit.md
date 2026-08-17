@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 Source: docs/tickets/S5-00-sprint-plan.md
 
 ---
@@ -81,3 +81,67 @@ WHEN DONE:
 - Explain: which single item in this plan carries the most
   risk of silent cross-user data leakage if missed?
 - Do not start S5-02 until confirmed
+
+---
+
+## Delivery notes (Codee)
+
+`docs/multi_user_migration_plan.md` written, all six required sections
+present (Tables, Constraints, Endpoints, Singletons and module-level
+state, Files on disk, Ordering), each ending with a "Verified via" note
+naming the exact command/read that produced it.
+
+While verifying the Ordering section's precedent against `budgets`'s own
+migration, found my first draft's claim wrong (I'd said `budgets` split
+its nullable column and its constraint into two migrations — it didn't,
+it did both in one, because it was a brand-new table with nothing to
+backfill). Corrected it in the document itself rather than silently
+fixing it, since the ticket's whole point is that every claim must be
+verified, not recalled — leaving the correction visible seemed more
+honest than a quiet edit.
+
+No code changes made, per this ticket's own scope. ARCHITECTURE.md
+updated with one cross-reference (not a correction — nothing existing
+was factually wrong, but the Database Tables section didn't previously
+say *which* tables are still fully global, which this audit now answers
+precisely).
+
+WHEN DONE — answered:
+
+**How many need changes:**
+- **Tables:** 4 of 5. `transactions` and `insights` definitely need a
+  `user_id` column added. `categories` and `settings` need one *if* the
+  product decision (see document) goes per-user — both currently global
+  by design, and I recommended per-user with reasoning, but flagged it as
+  Borys/PM's call, not mine to make unilaterally. `budgets` is already
+  done (S4-05) — only needs its existing nullable column backfilled and
+  made `NOT NULL`.
+- **Constraints:** at least 1 definite (`transactions.external_id`'s
+  global `UNIQUE`), 2 more conditional on the categories/settings
+  decision. `budgets`'s constraint is already correct as designed.
+- **Endpoints:** 21 of 25 need `user_id` threaded through in some form
+  (only the 4 budget endpoints don't). Of those 21, two are worse than
+  "needs scoping" — `GET /api/jobs/{job_id}` and `PATCH
+  /api/transactions/{id}` both look up a single resource by its own ID
+  with zero ownership check today, which is an authorization gap, not
+  just a missing filter.
+
+**Highest risk of silent cross-user leakage:**
+`transactions.external_id`'s global `UNIQUE (external_id)` constraint,
+without question. Every other gap on this list produces *visible*
+breakage or a *loud* failure once multi-user is live and something goes
+wrong — a missing `WHERE user_id = ...` on a list endpoint shows the
+wrong rows on screen, which someone notices fast. This one is different:
+if two different real users' banks both hand Enable Banking the same
+`external_id` (unverified whether Enable Banking guarantees global
+uniqueness across all its client apps, not just within one bank), the
+existing `ON CONFLICT (external_id) DO UPDATE` in `crud.upsert_
+transactions` means the second user's sync silently *overwrites* the
+first user's transaction row with their own data — no error, no 409, no
+visible sign anything went wrong, just one user's bank data quietly
+replaced by another's on the next sync. It's also structurally the exact
+same incident class as S4-01 (account_id churn), just with a different
+column doing the false-uniqueness job — which is exactly the kind of
+repeat failure a written plan like this is supposed to prevent.
+
+Do not start S5-02 until confirmed, per the ticket.
