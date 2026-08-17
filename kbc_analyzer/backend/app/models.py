@@ -35,7 +35,13 @@ class Transaction(Base):
     amount = Column(Numeric(10, 2), nullable=False)
     currency = Column(Text, server_default="EUR")
     description = Column(Text)
-    category = Column(Text)
+    # References categories.name (S5-02) — same natural-key reasoning as
+    # Budget.category. ON UPDATE CASCADE so a category rename (if that
+    # feature ever ships) carries every transaction along automatically;
+    # ON DELETE SET NULL so deleting a category nulls the transaction's
+    # category instead of orphaning it. subcategory has no FK — it's a
+    # free-text refinement, not itself a first-class entity with a table.
+    category = Column(Text, ForeignKey("categories.name", onupdate="CASCADE", ondelete="SET NULL"))
     subcategory = Column(Text)
     # True once a human has set category/subcategory/description by hand
     # (S3-05) — the categorization agent's query excludes these rows even

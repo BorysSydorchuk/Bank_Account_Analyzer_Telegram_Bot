@@ -85,6 +85,26 @@ async def categorize_transactions(
         results = await agent.run(payloads, on_batch_complete=on_batch_complete)
 
         if results:
+            # S5-02: transactions.category is now FK'd to categories.name, so a
+            # category the LLM invents (drifts off the fixed CATEGORIES list, a
+            # typo, a provider hallucination) can no longer be written at all —
+            # the FK would reject the whole statement. Filtering here, before
+            # the write, keeps that one bad row from taking out the rest of the
+            # batch's otherwise-valid results; it's treated the same as any
+            # other per-transaction categorization failure (counted in `failed`
+            # below), not a reason to fail the run.
+            known_category_names = {c.name for c in crud.list_categories(db)}
+            unknown = [r for r in results if r.get("category") not in known_category_names]
+            if unknown:
+                logger.warning(
+                    "Categorization agent returned %d unknown category name(s) not in "
+                    "categories table, skipping: %s",
+                    len(unknown),
+                    sorted({r.get("category") for r in unknown}),
+                )
+            results = [r for r in results if r.get("category") in known_category_names]
+
+        if results:
             crud.update_transaction_categories(db, results)
 
     if seeded_category_names:

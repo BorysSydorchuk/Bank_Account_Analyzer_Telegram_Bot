@@ -30,7 +30,46 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
 
 ## OPEN
 
-*(Re-confirmed 2026-08-17, S4-10 sprint close — both entries below re-checked against current state, dates and closure conditions still accurate.)*
+### Categories FK backfill validation & live constraint test — Docker unreachable this session (S5-02)
+
+- **What was deferred:** The ticket's Part 2 requirement to show backfill
+  validation output (every distinct `transactions.category` value has a
+  matching `categories.name` row) *before* the migration is applied, then
+  verify the FK live (rename a category, confirm transactions follow) and
+  confirm the categorization agent's unknown-category handling against a
+  real LLM run.
+- **Why:** `docker compose ps` / `docker version` hung indefinitely (no
+  output after 90s+) every time this session tried to reach the local
+  stack — the Docker Desktop backend processes are running (confirmed via
+  `Get-Process`) but not responding to the CLI, so Postgres is unreachable
+  from here. This matches the known cloud-agent/local-stack limit already
+  noted in AGENTS.md (added S5-00): a session that can't reach
+  `localhost:8000` can't run live verification, and "retry later" isn't
+  something this session can act on itself.
+- **What was verified instead:** The migration's pre-flight check
+  (`d3f8a5c6b9e2_add_fk_transactions_category.py`) queries for orphaned
+  `transactions.category` values and raises with the offending list before
+  attempting `ADD CONSTRAINT`, rather than relying on a human reading a
+  report — so the "surface, don't silently fix" requirement is enforced by
+  the migration itself even though nobody has watched it run yet. Migration
+  logic, `models.py`'s matching `ForeignKey` declaration, and
+  `analysis_service.py`'s unknown-category filter were reviewed by reading
+  (no `python -m py_compile` run either, same blocker — no working
+  Python env confirmed reachable outside the container this session).
+- **What would close it:** With Docker Desktop responsive: `docker compose
+  up -d`, `docker compose exec backend alembic upgrade head`, capture the
+  real output (either a clean apply, or the pre-flight `RuntimeError` with
+  real orphaned category names if any exist); if clean, `UPDATE categories
+  SET name = 'Test Rename' WHERE name = 'Other'` and confirm via
+  `SELECT category FROM transactions WHERE category = 'Test Rename'` that
+  every previously-'Other' transaction followed, then rename back; run one
+  real categorization sync and inspect `docker compose logs backend` for
+  the unknown-category warning path (or confirm it never fires because the
+  LLM stayed within `CATEGORIES`).
+- **Status:** OPEN — blocked on Borys resuming this session (or a new one)
+  once Docker Desktop responds locally.
+
+*(Two entries below re-confirmed 2026-08-17, S4-10 sprint close — dates and closure conditions still accurate.)*
 
 ### Non-root file-permission protection — unverifiable on Windows Docker Desktop (S4-09 Item 1)
 

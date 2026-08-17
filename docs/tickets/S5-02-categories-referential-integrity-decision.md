@@ -70,6 +70,26 @@ ACCEPTANCE CRITERIA:
 - If B: invariant documented in both places
 - ARCHITECTURE.md updated in the same commit
 
+## AMENDMENT (2026-08-17)
+
+Borys's decision: **Option A** (add the FK), per the PM's recommendation.
+
+Part 2 implemented: migration `d3f8a5c6b9e2_add_fk_transactions_category.py`
+(pre-flight backfill validation that raises with offending category values
+before `ADD CONSTRAINT`, then the FK itself, `ON UPDATE CASCADE ON DELETE
+SET NULL`), `models.py`'s matching `ForeignKey` declaration, and
+`analysis_service.categorize_transactions`'s unknown-category filter on the
+categorization agent's write path. ARCHITECTURE.md updated (Database Tables
+row + new Invariants entry).
+
+**Blocked:** live backfill validation output and live constraint test
+(rename a category, confirm transactions follow) could not be run this
+session — Docker Desktop's backend processes are up but not responding to
+the CLI (`docker compose ps` hangs indefinitely). Tracked in
+`docs/verification_debt.md`. Status stays `in-progress` until that runs for
+real — not `delivered` on structural verification alone, per the ticket's
+own acceptance criteria.
+
 WHEN DONE:
 - State the chosen option and show the implementation
 - If A: show the backfill validation output and a live

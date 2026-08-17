@@ -156,7 +156,7 @@ in the app reads a comparison result.
 
 | Table | Purpose | Key constraints |
 |---|---|---|
-| `transactions` | One row per bank transaction | `external_id` **UNIQUE** (not `account_id` — see below); `manually_edited` boolean, default `false` |
+| `transactions` | One row per bank transaction | `external_id` **UNIQUE** (not `account_id` — see below); `manually_edited` boolean, default `false`; `category` FK → `categories(name)` `ON UPDATE CASCADE ON DELETE SET NULL` (S5-02) |
 | `settings` | Flat key/value store (LLM provider + encrypted API keys) | `key` TEXT primary key; avoids a migration per new setting |
 | `categories` | Category → display color | `name` TEXT primary key; `source` ∈ `seed`\|`ai`\|`user`; `ai_color` holds the last AI color separately so "reset to AI" survives a user override |
 | `insights` | Generated AI insight cards per date range | indexed on `(date_from, date_to)`; **delete-and-replace** per range on every successful sync — no history retained |
@@ -217,6 +217,18 @@ with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
 - **Colors come only from the `categories` table.** No component stores
   or hardcodes a per-transaction color; the donut chart and category
   pills read the same source, and validation is centralized in `colors.py`.
+- **`transactions.category` must exist in `categories.name` (S5-02, enforced by FK).**
+  A category can no longer be renamed by updating `categories.name` in place
+  without every referencing transaction following automatically — the FK's
+  `ON UPDATE CASCADE` makes that happen at the database level, not by
+  convention. The categorization agent's write path
+  (`analysis_service.categorize_transactions`) filters LLM output against
+  known category names before writing, so an unknown/hallucinated category
+  name is skipped and logged (counted in that sync's `failed`), not a hard
+  failure of the whole batch. `PATCH /api/transactions/{id}` already
+  validated its `category` field against known categories before this FK
+  existed (S3-05) — the FK is a second, database-level guarantee, not a
+  replacement for that check.
 - **Insight history is not retained (S4-04, decided).** `insights` is
   delete-and-replace per date range on every successful sync
   (`crud.replace_insights`) — "history" means whatever the latest sync
