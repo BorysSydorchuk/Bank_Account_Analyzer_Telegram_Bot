@@ -66,3 +66,7 @@ understands the structure immediately.
 - Ground truth for "what the system does" is
   ARCHITECTURE.md + the code, never an agent's memory or
   a chat transcript.
+- Cloud agents cannot reach Borys's local stack
+  (localhost:8000). Any instruction to "retry later" or
+  "run tomorrow" is unexecutable — deferred live
+  verification requires Borys to resume the session.
