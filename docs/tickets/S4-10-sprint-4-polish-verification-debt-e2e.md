@@ -1,6 +1,11 @@
 Status: confirmed
 Source: issued directly in Claude Code session, 2026-08-17
 
+*(S5-07 repo-wide check: this file carries real spending/budget totals
+from live verification, predating verification_debt.md's Conventions
+shape-only-evidence rule — flagged as a known exception, not retroactively
+scrubbed, same treatment as that file's own pre-existing entries.)*
+
 ---
 
 ================================================================

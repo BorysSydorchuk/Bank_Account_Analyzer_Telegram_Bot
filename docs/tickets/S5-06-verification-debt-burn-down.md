@@ -1,6 +1,11 @@
 Status: delivered
 Source: issued directly in Claude Code session, 2026-08-18
 
+*(S5-07 repo-wide check: this file carries a real transaction amount and
+real merchant names from live verification — the same exception already
+flagged in verification_debt.md's Claude CLOSED entry, which this ticket
+produced. Not retroactively scrubbed.)*
+
 ---
 
 ================================================================

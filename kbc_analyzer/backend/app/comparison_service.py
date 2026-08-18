@@ -10,21 +10,11 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from . import crud
+from .date_range import InvalidDateRangeError, validate_date_range
 from .schemas import CategoryChange, ComparisonDelta, InsightItem, PeriodComparison
 from .statistics import compute_statistics, format_date_range
 
-MAX_RANGE_DAYS = 365
-
-
-class InvalidDateRangeError(Exception):
-    """A comparison range fails CLAUDE.md's date-range rules — a 400, not a 500."""
-
-
-def _validate_range(date_from: date, date_to: date, label: str) -> None:
-    if date_from > date_to:
-        raise InvalidDateRangeError(f"{label}: date_from must be before or equal to date_to.")
-    if (date_to - date_from).days > MAX_RANGE_DAYS:
-        raise InvalidDateRangeError(f"{label}: range cannot exceed {MAX_RANGE_DAYS} days.")
+__all__ = ["InvalidDateRangeError", "compare_periods"]
 
 
 def _build_period(db: Session, date_from: date, date_to: date) -> PeriodComparison:
@@ -83,8 +73,8 @@ def compare_periods(
     Raises InvalidDateRangeError if either range is backwards or exceeds
     MAX_RANGE_DAYS.
     """
-    _validate_range(period_a_from, period_a_to, "period_a")
-    _validate_range(period_b_from, period_b_to, "period_b")
+    validate_date_range(period_a_from, period_a_to, "period_a")
+    validate_date_range(period_b_from, period_b_to, "period_b")
 
     period_a = _build_period(db, period_a_from, period_a_to)
     period_b = _build_period(db, period_b_from, period_b_to)

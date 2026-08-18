@@ -67,6 +67,25 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
 
 ## OPEN
 
+### Date-range validation regression tests — not built (S5-07)
+
+- **What was deferred:** Automated tests for the S5-07 date-range fix
+  across all five endpoints (`GET /api/statistics`, `GET
+  /api/transactions`, `GET /api/insights`, `POST /api/transactions/sync`,
+  `GET /api/insights/compare`) — one backwards-range and one >365-day
+  case per endpoint, asserting the shared `{"detail": "date_from/date_to:
+  ..."}` error shape from `date_range.py`.
+- **Why:** Test-suite structure (`tests/`, `pyproject.toml`'s `test`
+  dependency group) is Tester-owned this sprint, matching the convention
+  established at S5-04/S5-05 — Codee flags what's needed rather than
+  extending that suite directly.
+- **What would close it:** Ten small tests (five endpoints × two cases),
+  most naturally alongside `test_error_contracts.py` or a new
+  `test_date_range.py` — each just needs a live TestClient call with a
+  backwards or >365-day range and an assertion on the 400 body.
+- **Status:** OPEN (2026-08-18) — no target session assigned yet; belongs
+  to the Tester's S5-04 follow-on work, same as the sync-lock entry below.
+
 ### Sync lock release on two failure early-returns — never empirically triggered (S5-05)
 
 - **What was deferred:** `sync_lock.release()` (S5-05) sits in a single

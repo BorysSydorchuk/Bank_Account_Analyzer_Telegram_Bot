@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import comparison_service, crud
+from ..date_range import require_valid_date_range
 from ..db import get_db
 from ..schemas import CachedInsightsResponse, ComparisonResponse
 
@@ -18,7 +19,11 @@ router = APIRouter(prefix="/api/insights", tags=["insights"])
 
 
 @router.get("", response_model=CachedInsightsResponse)
-def get_insights(date_from: date, date_to: date, db: Session = Depends(get_db)) -> CachedInsightsResponse:
+def get_insights(
+    date_range: tuple[date, date] = Depends(require_valid_date_range),
+    db: Session = Depends(get_db),
+) -> CachedInsightsResponse:
+    date_from, date_to = date_range
     rows = crud.list_insights(db, date_from, date_to)
     if not rows:
         return CachedInsightsResponse(insights=[])

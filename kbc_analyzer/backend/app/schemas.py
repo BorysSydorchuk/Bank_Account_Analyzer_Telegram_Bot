@@ -24,7 +24,15 @@ class PatchCategoryRequest(BaseModel):
 
 
 class CreateCategoryRequest(BaseModel):
-    name: str
+    # S5-07: categories.name is a Text primary key with no DB-level length
+    # bound — an unconstrained request field would let a client create an
+    # arbitrarily large PK/index entry. 100 chars is generous for a
+    # category name (the longest seed name, "Restaurants and Cafes", is 22).
+    # No min_length here on purpose — the router's own "can't be empty"
+    # check (after .strip()) already covers that case with a clear 400;
+    # duplicating it as a Pydantic constraint would turn that same, common
+    # user mistake into a generic 422 instead.
+    name: str = Field(max_length=100)
     color: str
 
 
@@ -312,11 +320,23 @@ class PatchBudgetRequest(BaseModel):
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str
+    # S5-07: capped for the same cost reason as ChatRequest.message below —
+    # this is echoed straight into the next request's prompt as history.
+    content: str = Field(max_length=4000)
 
 
 class ChatRequest(BaseModel):
     # history is entirely client-held (S4-06) — the backend is stateless
     # across turns and never persists a conversation.
-    message: str
-    history: list[ChatMessage] = Field(default_factory=list)
+    #
+    # S5-07: message and history were both previously unconstrained — every
+    # chat request is a real, billed LLM call (Item 3's rate limiting caps
+    # *how often*; these caps bound *how much* each call can cost). No
+    # min_length on message: the router checks for empty/whitespace-only
+    # with its own clear 400, the same pattern as category name, rather
+    # than letting Pydantic turn that common case into a generic 422.
+    # history capped at 50 turns — generous for a real conversation, a real
+    # bound against a client fabricating an enormous history to inflate
+    # every subsequent call's token cost.
+    message: str = Field(max_length=4000)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=50)

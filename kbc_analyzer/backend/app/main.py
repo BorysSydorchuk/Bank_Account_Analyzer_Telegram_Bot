@@ -9,11 +9,13 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from .db import engine
 from .eb_service import EnableBankingAuthError, EnableBankingError
+from .rate_limit import limiter
 from .routers import analysis, auth, budgets, categories, chat, insights, jobs, settings, statistics, transactions
 from .sync_lock import SyncAlreadyRunningError
 
@@ -29,6 +31,7 @@ from .sync_lock import SyncAlreadyRunningError
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 app = FastAPI(title="KBC Analyzer API")
+app.state.limiter = limiter
 
 # The Vite dev server runs on a different origin (port) than the API, so the
 # browser needs an explicit CORS allowance during local development.
@@ -80,6 +83,17 @@ async def sync_already_running_handler(request: Request, exc: SyncAlreadyRunning
     return JSONResponse(
         status_code=409,
         content={"message": str(exc), "job_id": exc.in_flight_job_id},
+    )
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    # S5-07: 429 Too Many Requests — the request is otherwise valid, it's
+    # just arriving faster than the endpoint's limit allows. exc.detail is
+    # slowapi's own "N per M" description of the limit that was hit.
+    return JSONResponse(
+        status_code=429,
+        content={"message": f"Rate limit exceeded ({exc.detail}). Please try again shortly."},
     )
 
 

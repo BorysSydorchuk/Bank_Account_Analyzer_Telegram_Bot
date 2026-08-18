@@ -4,11 +4,13 @@ from datetime import date
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from .. import crud, job_store, sync_lock
+from ..date_range import require_valid_date_range, validate_date_range_body
 from ..db import get_db
+from ..rate_limit import SYNC_RATE_LIMIT, limiter
 from ..schemas import PatchTransactionRequest, SyncRequest, SyncResponse, TransactionOut, TransactionsListResponse
 from ..sync_lock import SyncAlreadyRunningError
 from ..tasks.analysis import run_sync_job
@@ -17,13 +19,18 @@ router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
 
 @router.post("/sync", response_model=SyncResponse)
-def sync_transactions(body: SyncRequest) -> SyncResponse:
+@limiter.limit(SYNC_RATE_LIMIT)
+def sync_transactions(request: Request, body: SyncRequest) -> SyncResponse:
     # S4-02: the Enable Banking fetch used to happen here, synchronously,
     # before this endpoint could return — 4 to 18 seconds of the request just
     # waiting on a third-party API. Fetch, store, categorize, and generate
     # insights now all happen inside the one Celery job; this endpoint's only
     # job is to create that job and hand back its id, which is why it no
     # longer needs `db` or an EnableBankingService of its own at all.
+    # S5-07: validated before the lock is touched — a rejected request
+    # should never acquire (and then have to release) sync_lock.
+    validate_date_range_body(body.date_from, body.date_to)
+
     job_id = str(uuid4())
 
     # S5-05: the lock's value IS this job_id, so a successful acquire means
@@ -59,14 +66,14 @@ def sync_transactions(body: SyncRequest) -> SyncResponse:
 
 @router.get("", response_model=TransactionsListResponse)
 def get_transactions(
-    date_from: date,
-    date_to: date,
+    date_range: tuple[date, date] = Depends(require_valid_date_range),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     category: list[str] | None = Query(None),
     amount_type: Literal["all", "spent", "received"] = "all",
     db: Session = Depends(get_db),
 ) -> TransactionsListResponse:
+    date_from, date_to = date_range
     rows, total = crud.list_transactions_paginated(db, date_from, date_to, page, limit, category, amount_type)
     return TransactionsListResponse(
         transactions=rows,
@@ -78,7 +85,7 @@ def get_transactions(
 
 @router.get("/search", response_model=TransactionsListResponse)
 def search_transactions(
-    q: str = Query(..., min_length=1),
+    q: str = Query(..., min_length=1, max_length=200),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> TransactionsListResponse:

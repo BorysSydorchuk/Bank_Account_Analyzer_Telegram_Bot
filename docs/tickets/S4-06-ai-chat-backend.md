@@ -1,6 +1,11 @@
 Status: confirmed
 Source: sprint4_tickets_v2.txt (revised set)
 
+*(S5-07 repo-wide check: this file carries a real transaction amount/date
+from live verification, predating verification_debt.md's Conventions
+shape-only-evidence rule — flagged as a known exception, not retroactively
+scrubbed, same treatment as that file's own pre-existing entries.)*
+
 ---
 
 # TICKET S4-06 — AI CHAT: BACKEND

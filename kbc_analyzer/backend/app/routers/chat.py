@@ -3,7 +3,7 @@ data (S4-06)."""
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,7 @@ from .. import chat_service
 from ..agents.providers.base import LLMProvider
 from ..agents.registry import ProviderNotConfiguredError
 from ..db import get_db
+from ..rate_limit import CHAT_RATE_LIMIT, limiter
 from ..schemas import ChatRequest
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,8 @@ async def _event_stream(stream, provider: LLMProvider):
 
 
 @router.post("")
-async def chat(body: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
+@limiter.limit(CHAT_RATE_LIMIT)
+async def chat(request: Request, body: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
     """Streams the assistant's reply as Server-Sent Events: one
     {"token": "...", "done": false} frame per chunk of text, then a final
     {"token": "", "done": true, "usage": {"input": N, "output": M}} frame.
@@ -60,6 +62,12 @@ async def chat(body: ChatRequest, db: Session = Depends(get_db)) -> StreamingRes
     StreamingResponse, so a missing API key is a normal 400 JSON error, not
     a broken stream.
     """
+    # S5-07: same pattern as categories' name check — a plain Pydantic
+    # min_length would turn this common case (submit, then clear, the
+    # input box) into a generic 422 instead of a clear 400.
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="Message can't be empty.")
+
     try:
         stream, provider = chat_service.start_chat_stream(
             db, body.message, [m.model_dump() for m in body.history]

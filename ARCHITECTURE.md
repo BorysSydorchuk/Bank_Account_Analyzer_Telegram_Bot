@@ -281,10 +281,68 @@ with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
   that 11 minutes. The OAuth callback port (3001) lock is unrelated — it
   guards a second concurrent *reconnect*, a different flow.
 - **CLAUDE.md's date-range validation (`date_from <= date_to`, ≤365 days)
-  is enforced only on `GET /api/insights/compare` (S4-08) — NOT on
-  `GET /api/statistics`, `POST /api/transactions/sync`,
-  `GET /api/transactions`, or `GET /api/insights`.** Discovered during the
-  S4-10 sprint-close audit while verifying the compare endpoint's own
-  validation. Pre-existing on every endpoint except the newest one, not
-  introduced this sprint — documented here as-is; candidate for a shared
-  validation helper in a future sprint rather than four copy-pasted checks.
+  is enforced on all five date-range endpoints (S5-07).** `date_range.py`
+  is the one source of truth (`validate_date_range` /
+  `require_valid_date_range` for query-param endpoints /
+  `validate_date_range_body` for `POST /api/transactions/sync`'s body) —
+  extracted from `GET /api/insights/compare`'s original S4-08
+  implementation, which was the only endpoint that had this until now.
+  `GET /api/statistics`, `GET /api/transactions`, `GET /api/insights`, and
+  `POST /api/transactions/sync` all now 400 with the same message shape
+  (`"date_from/date_to: ..."`) on a backwards or >365-day range. Found
+  missing by the S4-10 sprint-close audit; closed by S5-07. `POST
+  /api/analysis/categorize` (optional dates) and `POST
+  /api/analysis/insights` (required dates) were **not** included — outside
+  this ticket's named scope, flagged as a related gap for a PM decision,
+  not fixed unprompted.
+- **Rate limiting on cost/third-party-hitting endpoints (S5-07).**
+  `rate_limit.py`, `slowapi`, keyed on remote address (single-user era —
+  no caller identity to key on yet; Sprint 6 should key on `user_id`
+  instead once real auth exists, since IP-keying behind a shared proxy
+  would throttle unrelated users together). In-memory storage — fine
+  while `backend` is one uvicorn process; move to Redis (already in this
+  stack) if it ever runs with more than one worker. `POST /api/chat`: 20
+  requests/minute. `POST /api/transactions/sync`, `POST
+  /api/analysis/categorize`, `POST /api/analysis/insights`: 10/minute
+  each. Generous for real single-user use — the point is a ceiling before
+  Sprint 6 exposes this publicly, not throttling normal use. A 429 uses
+  the same `{"message": ...}` error shape as every other handled
+  exception in `main.py`.
+- **CORS never accepts a wildcard origin.** `main.py`'s `CORSMiddleware`
+  has exactly one configuration path — `allow_origins=[frontend_origin]`,
+  always a single explicit origin read from `FRONTEND_ORIGIN`, never `"*"`
+  and never a hardcoded list (verified: no other CORS configuration exists
+  anywhere in the codebase). `docker-compose.yml` currently hardcodes
+  `FRONTEND_ORIGIN: http://localhost:${FRONTEND_PORT:-5173}` for the
+  `backend` service — a dev-only value. **Sprint 6 must set
+  `FRONTEND_ORIGIN` to the real production frontend URL** (e.g.
+  `https://app.example.com`), not derived from `FRONTEND_PORT` at all;
+  there is no production compose file or override yet, so this is a real
+  gap to close before any public deployment, not just a value to swap.
+- **`settings_service.VALID_PROVIDERS` is derived from
+  `API_KEY_FIELD_BY_PROVIDER` (S5-07), not a second hand-kept set.** The
+  two used to be independent literals — S5-06 found this let
+  `patch_setting()` accept an `llm_provider` value that
+  `get_decrypted_api_key()` then `KeyError`'d on, an unhandled 500. Adding
+  a provider now only ever means editing `API_KEY_FIELD_BY_PROVIDER`.
+- **Chat and category-name inputs are length-capped (S5-07).**
+  `ChatRequest.message`/`ChatMessage.content` (4000 chars),
+  `ChatRequest.history` (50 turns), `CreateCategoryRequest.name` (100
+  chars — `categories.name` is an unbounded `Text` primary key with no
+  DB-level bound), `GET /api/transactions/search`'s `q` (200 chars). Chat
+  message emptiness is checked in the router (a clear 400), not via a
+  Pydantic `min_length`, so that common case doesn't turn into a generic
+  422 the way the length caps above deliberately do — hitting a cap is
+  meant to be rare. `PatchTransactionRequest.description`/`subcategory`
+  remain unconstrained — flagged, not fixed (what's a reasonable
+  transaction-description length is a product call, not an obvious one).
+- **No transaction amounts/descriptions reach `backend`/`celery_worker`
+  logs at any level (S5-07 audit, every `logger.*` call site checked).**
+  Confirmed safe: all `logger.info`/`.warning`/`.exception` calls in
+  `app/` log only ids, counts, provider/category names, or exception
+  messages — none embed a real amount or description. One pre-existing,
+  unrelated finding: `kbc_analyzer/backend/kbc_analyzer/analysis.py` (the
+  legacy CLI/Telegram-bot module, untouched by the web app) hardcodes real
+  IBANs and the account holder's real name directly in its Gemini system
+  prompt — not a logging issue, a real PII/financial-identifier exposure
+  in committed source, flagged to Borys rather than edited.

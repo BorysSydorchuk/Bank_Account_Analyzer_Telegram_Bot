@@ -13,7 +13,6 @@ from .crypto import decrypt, encrypt
 __all__ = ["InvalidSettingError", "get_settings", "patch_setting", "get_decrypted_api_key"]
 
 API_KEY_FIELDS = {"gemini_api_key", "anthropic_api_key"}
-VALID_PROVIDERS = {"gemini", "claude"}
 
 # The settings field is named after the vendor (Anthropic); the provider name
 # used everywhere else in code (llm_provider's value, registry.py's branch,
@@ -23,7 +22,18 @@ VALID_PROVIDERS = {"gemini", "claude"}
 # assumption was silently wrong for Claude since S2-04 — "claude_api_key"
 # was never a real field — and nothing surfaced it until a real
 # ANTHROPIC_API_KEY finally existed to exercise this path).
+#
+# S5-07: VALID_PROVIDERS is derived from this map, not a second hand-kept
+# set — the two used to be independent literals (S5-06 review flagged
+# this), so a provider added to one but not the other would let
+# patch_setting() accept an llm_provider value that get_decrypted_api_key
+# then KeyErrors on — an unhandled 500 with a raw traceback, not the clean
+# 400 CLAUDE.md requires. Deriving VALID_PROVIDERS here makes that drift
+# structurally impossible: a new provider is a one-line addition to this
+# dict, and both sets of code that need to know "which providers exist"
+# see it automatically.
 API_KEY_FIELD_BY_PROVIDER = {"gemini": "gemini_api_key", "claude": "anthropic_api_key"}
+VALID_PROVIDERS = set(API_KEY_FIELD_BY_PROVIDER)
 
 # Fixed-length mask regardless of real key length, so the response never leaks
 # even how long the stored secret is.
@@ -65,5 +75,15 @@ def get_decrypted_api_key(db: Session, provider: str) -> str:
     """Return the real, usable API key for a provider ("gemini" or "claude").
     Empty string if none is saved yet.
     """
-    stored = crud.get_all_settings(db).get(API_KEY_FIELD_BY_PROVIDER[provider], "")
+    field = API_KEY_FIELD_BY_PROVIDER.get(provider)
+    if field is None:
+        # Should be unreachable in practice — patch_setting() already
+        # rejects any llm_provider value outside VALID_PROVIDERS, and that
+        # set is now derived from this same map (see the comment above).
+        # Still raised as the module's own domain exception, not a bare
+        # KeyError, so a caller one layer removed from this defense (a
+        # future direct call, a test) gets a message it can act on instead
+        # of an unhandled 500.
+        raise InvalidSettingError(f"Unknown provider: {provider!r}")
+    stored = crud.get_all_settings(db).get(field, "")
     return decrypt(stored)
