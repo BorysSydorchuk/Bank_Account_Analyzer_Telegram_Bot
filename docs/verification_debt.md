@@ -10,6 +10,28 @@ Formal creation of this file is an S4-10 deliverable; created early per the
 S4-06 handoff instruction ("if you defer any verification before then,
 create it early rather than tracking by memory").
 
+## Conventions (S5-06)
+
+- **Every OPEN entry needs, at minimum:** what was deferred, why (the actual
+  blocker, not just "not done yet"), what would close it (a concrete,
+  actionable procedure — not "verify this eventually"), and a `Status:`
+  line that is both current-dated and states a real closure condition
+  (an event: "closes at Sprint 6," "closes once a real API key exists" —
+  not an open-ended "someday").
+- **An entry with no plausible closure date** (e.g. blocked on a platform
+  limitation this host can't fix) still needs a *closure condition*, even
+  if that condition is itself a future sprint or an external dependency.
+  "Can't close on this host" is acceptable; "not sure when" is not.
+- **Re-dating at sprint close:** every sprint-close ticket (S4-10 did this
+  for Sprint 4; S5-06 for Sprint 5) re-confirms every remaining OPEN entry
+  against current reality — re-date it if still accurate, restate it if the
+  situation changed, close it if something (a new test, a new credential, a
+  new environment) finally made closure possible.
+- **CLOSED entries stay in this file** (a `CLOSED (recent)` section, not
+  deleted) as long as they're useful evidence of *how* something was
+  verified — trimmed or archived once stale enough that git history alone
+  is a sufficient record.
+
 ---
 
 ## SPRINT 5 AUDIT SCOPE
@@ -27,6 +49,11 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   (keyed on `(user_id, provider_name)` or moved into a per-request/
   per-session scope) or one user's cached provider instance — and API
   key — could leak across users. Flagged in S4-09 review.
+- **Status (re-confirmed 2026-08-18, S5-06):** OPEN — architectural debt,
+  not verification debt in the "unverified" sense; closes naturally as
+  part of Sprint 6's multi-user migration (`docs/multi_user_migration_plan.md`
+  covers the exact sequencing). No test can meaningfully close this in the
+  single-user era — there's only ever one provider selection to observe.
 
 ## OPEN
 
@@ -68,8 +95,6 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
 - **Status:** OPEN — belongs to the Tester agent's S5-04 follow-on work,
   no target session assigned yet.
 
-*(Two entries below re-confirmed 2026-08-17, S4-10 sprint close — dates and closure conditions still accurate.)*
-
 ### Three regression tests deferred — no frontend test harness yet (S5-04)
 
 - **What was deferred:** Automated regression tests for S2-02 (the
@@ -94,8 +119,10 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   banner, one asserting a stalled poll still times out on identical
   payloads, one asserting the api client surfaces an error message from
   either JSON shape.
-- **Status:** OPEN — flagged to PM for a frontend-test-infrastructure
-  ticket; no target sprint assigned yet.
+- **Status (re-confirmed 2026-08-18, S5-06 sprint close):** OPEN —
+  `kbc_analyzer/frontend/package.json` still has no `test` script and no
+  vitest/jest dependency; nothing has changed since S5-04. Flagged to PM
+  for a frontend-test-infrastructure ticket; no target sprint assigned yet.
 
 ### Non-root file-permission protection — unverifiable on Windows Docker Desktop (S4-09 Item 1)
 
@@ -116,43 +143,80 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   host (real bind-mount ownership, not synthesized 777) — create a file as
   root inside a container, confirm `appuser` genuinely cannot write it,
   confirm the app still runs correctly end-to-end as non-root.
-- **Status:** OPEN — closes naturally at Sprint 6, when production
-  deployment moves off Windows Docker Desktop onto a real (Linux) host.
-
-### Claude provider — chat streaming, no API key (S4-06)
-
-- **What was deferred:** Live verification of
-  `backend/app/agents/providers/claude.py::ClaudeProvider.stream_complete`
-  against the real Anthropic API.
-- **Why:** No `ANTHROPIC_API_KEY` has ever been available in this project
-  (approval still pending as of this ticket). Same underlying gap as
-  `ClaudeProvider.complete()`/`complete_json()` from Sprint 2 — never
-  live-tested for the same reason. (Gemini's equivalent gap closed
-  2026-08-16 — see CLOSED below; Docker being down was never Claude's only
-  blocker.)
-- **What was verified instead:** `anthropic` 0.122.0's
-  `messages.stream()` / `AsyncMessageStreamManager` / `get_final_message()`
-  signatures read directly from installed source (matching this project's
-  `anthropic>=0.40.0` floor) to confirm the async-context-manager usage and
-  the `usage.input_tokens` / `usage.output_tokens` fields this code relies
-  on. `python -m py_compile` confirms the module has no syntax errors. No
-  request was ever sent to Anthropic's API.
-- **What would close it:** A real `ANTHROPIC_API_KEY` saved via Settings,
-  provider switched to Claude, and a real multi-turn `POST /api/chat`
-  conversation run against it (mirroring the Gemini verification below) —
-  then commit as `chore: close Sprint 2 Claude provider gap` per the
-  existing handoff note, updating this entry alongside.
-- **Status:** OPEN — blocked on Borys/PM providing a real Anthropic API key.
-  Re-checked 2026-08-17 twice: as S4-09 Item 5 (conditional Claude live
-  test) and again at S4-10 sprint close — both times `GET /api/settings`
-  showed `anthropic_api_key: ""`; explicitly deferred again, no new
-  information. Suggested next checkpoint: S5-06 (per Sprint 5's schema
-  audit) or whenever a real key arrives, whichever is first. This entry
-  already covers the exact close-out procedure needed.
+- **Status (re-confirmed 2026-08-18, S5-06 sprint close):** OPEN — closes
+  naturally at Sprint 6, when production deployment moves off Windows
+  Docker Desktop onto a real (Linux) host. Closure condition unchanged
+  from S4-09/S4-10; nothing about this host changed.
 
 ---
 
 ## CLOSED (recent)
+
+### Claude provider — full live verification (S2-04/S2-05/S2-06/S4-06, closed 2026-08-18)
+
+A real `ANTHROPIC_API_KEY` became available (saved via `PATCH /api/settings`,
+provider switched to `claude`). First live attempt against
+`POST /api/analysis/categorize` (5 transactions manually cleared back to
+`category IS NULL`, values recorded first, for a real categorization call —
+everything else was already categorized from prior sessions) failed
+immediately with `"No API key configured for claude"` despite the key
+showing as saved — **a real bug, not a missing-key situation**:
+`settings_service.get_decrypted_api_key(db, provider)` looked up
+`f"{provider}_api_key"`, i.e. `"claude_api_key"` for the Claude provider,
+but the actual stored field has always been named `"anthropic_api_key"`
+(named after the vendor, not the model family — Gemini's provider name and
+field prefix happen to match, which is why this never surfaced there).
+This means **every previously-closed Claude ledger entry back to S2-04 was
+blocked on two things, not one** — no key ever existed to expose the second
+blocker until now. Flagged to Borys, who chose the explicit
+`API_KEY_FIELD_BY_PROVIDER` mapping fix (`settings_service.py`) over
+renaming the field — zero blast radius, no frontend/DB changes.
+
+With the fix live-reloaded (`docker compose logs backend` confirmed a
+clean reload, no traceback), re-ran everything:
+
+- **Categorization** (`POST /api/analysis/categorize`, same 5 transactions):
+  `{"categorized":5,"skipped_already_categorized":40,"failed":0,"provider":"claude","error_message":null}`.
+  4 of 5 matched the original Gemini-assigned categories exactly (Groceries,
+  Traveling/Transport ×2, Restaurants and Cafes); the fifth (a €233.93
+  KU LEUVEN payment) got `Other/Shopping` from Claude versus the original
+  `Other/Rest` from Gemini — a real, defensible difference in model
+  judgment, not an error. All 5 transactions restored to their original
+  recorded values afterward.
+- **Insights** (`POST /api/analysis/insights`, same date range): 5 real
+  insights generated, `"provider":"claude"`. Style is genuinely
+  distinguishable from Gemini's (see the S4-06 CLOSED entry below for a
+  Gemini sample from the same kind of data): Claude's insights lean
+  quantitative and prescriptive — precise percentages and ratios ("83% of
+  daily spend," "3.2× the first," a concrete "20–30% reduction" estimate
+  with a specific suggested action) — where Gemini's read more narrative/
+  descriptive. Not restored (insights are documented as delete-and-replace,
+  ephemeral by design — see ARCHITECTURE.md Invariants; a future sync with
+  Gemini active regenerates them normally).
+- **Chat streaming** (`POST /api/chat`, real SSE via `curl -N`): two-turn
+  conversation. Turn 1 ("what was my biggest expense, groceries vs
+  transport") returned real incremental token frames (not one flush),
+  correct grounded numbers matching `GET /api/statistics`/`GET /api/budgets`
+  exactly (€800,00 biggest expense; Groceries €772,92/11.4%; Traveling
+  €583,11/8.6%; budget overages 511.9% and 623.0%), and real
+  `usage: {"input": 1046, "output": 229}` from `stream_complete()`'s
+  `get_final_message()` path — the exact code path S4-06's entry could only
+  verify structurally before. Turn 2, with turn 1 in `history`, correctly
+  built on it (recommended cutting groceries first, referencing the same
+  budget figures and specific real merchants — Carrefour, Delhaize, Too
+  Good To Go, NMBS, De Lijn — from the actual transaction data), confirming
+  multi-turn history works identically to Gemini's already-verified path.
+
+Provider switched back to `gemini` afterward, matching the ticket's
+explicit instruction and this project's normal running state.
+
+This closes **S2-04** (provider structural verification — now live, and the
+`get_decrypted_api_key` bug it never caught is fixed), **S2-05**
+(categorization), **S2-06** (insights), and **S4-06**'s Claude half (chat
+streaming) — all four were tracked as one entry
+("Claude provider — chat streaming, no API key (S4-06)") since the
+underlying blocker (no key) was identical; that entry is removed from OPEN
+above as of this closure.
 
 ### Categories FK backfill validation & live constraint test (S5-02, closed 2026-08-18)
 

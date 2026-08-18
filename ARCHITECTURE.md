@@ -220,11 +220,15 @@ name must also force a fresh instance). Gemini alias:
 **not** read from `.env` by the running app — only
 `scripts/smoke_test_providers.py` does that. The app reads them from the
 `settings` table, Fernet-encrypted at rest, masked on every read except
-the one internal decrypt used by the provider registry. Both providers also
-implement `stream_complete()` (S4-06, chat) — Gemini's is live-verified
-(2026-08-16); Claude's is structurally verified only, since no
-`ANTHROPIC_API_KEY` has ever been available, the same gap as its
-non-streaming methods (see docs/verification_debt.md).
+the one internal decrypt used by the provider registry.
+`settings_service.get_decrypted_api_key` maps provider name to settings
+field explicitly (`API_KEY_FIELD_BY_PROVIDER`) rather than assuming
+`f"{provider}_api_key"` — that assumption silently broke Claude specifically
+(the field is `anthropic_api_key`, named after the vendor, not
+`claude_api_key`) from S2-04 until a real key finally existed to expose it
+at S5-06. Both providers also implement `stream_complete()` (S4-06, chat) —
+both are now live-verified (Gemini 2026-08-16, Claude 2026-08-18, see
+docs/verification_debt.md's CLOSED section for both).
 
 **mkcert certificate**: `backend/certs/localhost.pem`, valid
 2026-08-08 → **2028-11-08**, SANs `localhost`/`127.0.0.1`/`::1`. Regenerate

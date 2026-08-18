@@ -15,6 +15,16 @@ __all__ = ["InvalidSettingError", "get_settings", "patch_setting", "get_decrypte
 API_KEY_FIELDS = {"gemini_api_key", "anthropic_api_key"}
 VALID_PROVIDERS = {"gemini", "claude"}
 
+# The settings field is named after the vendor (Anthropic); the provider name
+# used everywhere else in code (llm_provider's value, registry.py's branch,
+# ClaudeProvider) is named after the model family (Claude) — a deliberate
+# distinction, not an inconsistency, so get_decrypted_api_key needs an
+# explicit map rather than assuming f"{provider}_api_key" (S5-06: that
+# assumption was silently wrong for Claude since S2-04 — "claude_api_key"
+# was never a real field — and nothing surfaced it until a real
+# ANTHROPIC_API_KEY finally existed to exercise this path).
+API_KEY_FIELD_BY_PROVIDER = {"gemini": "gemini_api_key", "claude": "anthropic_api_key"}
+
 # Fixed-length mask regardless of real key length, so the response never leaks
 # even how long the stored secret is.
 MASK = "••••••••"
@@ -55,5 +65,5 @@ def get_decrypted_api_key(db: Session, provider: str) -> str:
     """Return the real, usable API key for a provider ("gemini" or "claude").
     Empty string if none is saved yet.
     """
-    stored = crud.get_all_settings(db).get(f"{provider}_api_key", "")
+    stored = crud.get_all_settings(db).get(API_KEY_FIELD_BY_PROVIDER[provider], "")
     return decrypt(stored)
