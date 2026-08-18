@@ -30,6 +30,44 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
 
 ## OPEN
 
+### Sync lock release on two failure early-returns — never empirically triggered (S5-05)
+
+- **What was deferred:** `sync_lock.release()` (S5-05) sits in a single
+  `finally` block wrapping the whole task body in `tasks/analysis.py`, so
+  it runs on every exit path by Python's own unconditional `finally`
+  guarantee — but only the success path and a hard-killed-worker path
+  were actually exercised live. The two in-code failure early-returns
+  never had a real run go through them while checking the lock
+  afterward:
+  1. The Enable Banking auth/error early-return (`tasks/analysis.py`
+     around line 67-72, `except (EnableBankingAuthError,
+     EnableBankingError)`).
+  2. The `every_batch_failed` early-return (line 130-142) — every
+     categorization batch call to the LLM failing while a provider *is*
+     configured. Distinct from, and not covered by, the existing
+     `test_categorizing_stage_failure_when_no_provider_configured_reports_failed_status`
+     test, which exercises the earlier "no API key configured" branch in
+     `analysis_service.categorize_transactions`, not this one.
+- **Why:** Reasoned from Python's `finally` semantics instead — the same
+  block already covers the success path, which was live-verified (a
+  completed job's lock released immediately, a following sync got `200`
+  without waiting on TTL). Forcing either failure path live in this
+  session would have meant deliberately breaking the real Enable Banking
+  session or the real Gemini API key, which per CLAUDE.md's testing
+  standard on destructive verifications isn't something to do
+  unilaterally — Borys's call, not made yet.
+- **What would close it:** The same monkeypatch technique
+  `test_storing_stage_failure_reports_failed_status_naming_that_stage`
+  and `test_fetching_stage_failure_reports_failed_status_naming_that_stage`
+  already use in `tests/test_job_pipeline.py` (`mock_enable_banking_client
+  .expire_session()` for the first path; a fake provider whose batches all
+  raise, for the `every_batch_failed` path) — extended in each case to
+  also assert `sync_lock.get_holder()` is `None` after the run, not just
+  that `job_store` reports `status: "failed"`. This is Tester-agent scope
+  (S5-04's follow-on suite), not something to build here.
+- **Status:** OPEN — belongs to the Tester agent's S5-04 follow-on work,
+  no target session assigned yet.
+
 *(Two entries below re-confirmed 2026-08-17, S4-10 sprint close — dates and closure conditions still accurate.)*
 
 ### Three regression tests deferred — no frontend test harness yet (S5-04)
