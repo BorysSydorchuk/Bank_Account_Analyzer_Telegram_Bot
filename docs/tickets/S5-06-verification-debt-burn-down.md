@@ -85,8 +85,13 @@ WHEN DONE:
 closure condition unchanged — still Sprint 6's move to a Linux host.
 
 **Item 3 (remaining OPEN entries reviewed):**
-- `Sync lock release on two failure early-returns` (S5-05) — added this
-  session, already current-dated, left as-is (nothing to re-check yet).
+- `Sync lock release on two failure early-returns` (S5-05) — **review
+  bounce (2026-08-18):** the Reviewer caught that this entry's `Status:`
+  line, added the prior S5-05 session, had never actually been dated —
+  it read `OPEN — belongs to the Tester agent's...` with no date at all,
+  not the current-dated status this ticket's own Item 4/Conventions rule
+  requires. Corrected to `Status: OPEN (2026-08-18) — no target session
+  assigned yet; belongs to the Tester's S5-04 follow-on work.`
 - `Three regression tests deferred` (S5-04) — re-checked
   `kbc_analyzer/frontend/package.json` directly: still no `test` script,
   no vitest/jest. Re-dated, restated, nothing closeable.
@@ -108,10 +113,12 @@ current-dated `Status:` line with a concrete closure condition.
 
 **Before/after ledger state:**
 - Before: 1 SPRINT 5 AUDIT SCOPE item (no dated status), 4 OPEN entries
-  (sync-lock, frontend tests, non-root permissions, Claude — all four
-  S4-06/S4-10-dated or older), no Conventions section.
+  (sync-lock — added S5-05, no date at all on its `Status:` line; frontend
+  tests, non-root permissions, Claude — S4-06/S4-10-dated or older), no
+  Conventions section.
 - After: 1 SPRINT 5 AUDIT SCOPE item (dated, closure condition stated), 3
-  OPEN entries (sync-lock — current; frontend tests and non-root
-  permissions — re-dated 2026-08-18, closure conditions confirmed
-  unchanged), 1 new CLOSED entry (Claude, closing S2-04/S2-05/S2-06/S4-06
+  OPEN entries (sync-lock — dated 2026-08-18 per the review bounce above;
+  frontend tests and non-root permissions — re-dated 2026-08-18, closure
+  conditions confirmed unchanged), 1 new CLOSED entry (Claude, closing
+  S2-04/S2-05/S2-06/S4-06
   together), Conventions section added.

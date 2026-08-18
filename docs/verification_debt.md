@@ -31,6 +31,16 @@ create it early rather than tracking by memory").
   deleted) as long as they're useful evidence of *how* something was
   verified — trimmed or archived once stale enough that git history alone
   is a sufficient record.
+- **Evidence for a CLOSED entry must be shape-and-schema only** (field
+  names, response structure, counts) — never real transaction amounts,
+  real merchant names, or real budget figures. Use placeholder values
+  (`€XXX.XX`, `Merchant Name`) even when the real live-test output had
+  specifics. This file is meant to stay safe to read/share without being
+  a second copy of financial data (CLAUDE.md's logging rules exist for
+  the same reason). Pre-existing entries written before this rule
+  (S4-06, S5-06) are **not** retroactively edited for it — flagged as
+  known exceptions in place rather than rewriting a two-sprint-old
+  exposure that isn't worth a force-push.
 
 ---
 
@@ -92,8 +102,8 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   also assert `sync_lock.get_holder()` is `None` after the run, not just
   that `job_store` reports `status: "failed"`. This is Tester-agent scope
   (S5-04's follow-on suite), not something to build here.
-- **Status:** OPEN — belongs to the Tester agent's S5-04 follow-on work,
-  no target session assigned yet.
+- **Status:** OPEN (2026-08-18) — no target session assigned yet; belongs
+  to the Tester's S5-04 follow-on work.
 
 ### Three regression tests deferred — no frontend test harness yet (S5-04)
 
@@ -153,6 +163,11 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
 ## CLOSED (recent)
 
 ### Claude provider — full live verification (S2-04/S2-05/S2-06/S4-06, closed 2026-08-18)
+
+*(Pre-existing exception to the Conventions section's shape-only evidence
+rule, added after this entry was written — contains real transaction
+amounts, a real merchant name, and real budget figures. Not retroactively
+scrubbed.)*
 
 A real `ANTHROPIC_API_KEY` became available (saved via `PATCH /api/settings`,
 provider switched to `claude`). First live attempt against
@@ -284,6 +299,10 @@ Both matched `onError`'s two branches (`hadPartialResponse: false` /
 `true`) exactly as code-reviewed at S4-07. No regressions.
 
 ### `POST /api/chat` — Gemini live verification (S4-06, closed 2026-08-16)
+
+*(Pre-existing exception to the Conventions section's shape-only evidence
+rule, added after this entry was written — contains real spending totals
+and budget figures. Not retroactively scrubbed.)*
 
 Docker Desktop came up; ran a real 3-exchange conversation against the real
 331-transaction dataset with the actually-configured Gemini key. Confirmed:
