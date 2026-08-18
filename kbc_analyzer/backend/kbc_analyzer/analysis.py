@@ -36,15 +36,26 @@ SUBCATEGORIES_OF_TRAVELING = ("Transport, Housing, Food, Entertainment")
 # secrets/PII in code or comments). Each rule is only added to the prompt if
 # its env var is actually set, so a checkout with none of these configured
 # just runs without account-specific rules rather than matching on blanks.
+# S5-07 correction: the investing-account rule originally read "Treat
+# transactions to {IBAN} ({NAME}) as ...". Real transaction descriptions
+# from this account never contain an IBAN (confirmed against the live
+# synced dataset — every description is a person's or business's name),
+# so the name was the only part of this rule the LLM could ever actually
+# match; the IBAN is documentary only. The first pass of this fix dropped
+# the name and kept only the IBAN, silently turning this rule into a
+# no-op. Restored below with its own variable.
 _INVESTING_ACCOUNT_IBAN = os.getenv("KBC_INVESTING_ACCOUNT_IBAN")
+_INVESTING_ACCOUNT_HOLDER_NAME = os.getenv("KBC_INVESTING_ACCOUNT_HOLDER_NAME")
 _SELF_TRANSFER_IBAN_A = os.getenv("KBC_SELF_TRANSFER_IBAN_A")
 _SELF_TRANSFER_IBAN_B = os.getenv("KBC_SELF_TRANSFER_IBAN_B")
 _SAVINGS_ACCOUNT_IBAN = os.getenv("KBC_SAVINGS_ACCOUNT_IBAN")
 _LAUNDRY_COUNTERPARTY_NAME = os.getenv("KBC_LAUNDRY_COUNTERPARTY_NAME")
 
 _account_specific_rules: list[str] = []
-if _INVESTING_ACCOUNT_IBAN:
-    _account_specific_rules.append(f'- Treat transactions to {_INVESTING_ACCOUNT_IBAN} as an "Investing" category')
+if _INVESTING_ACCOUNT_IBAN and _INVESTING_ACCOUNT_HOLDER_NAME:
+    _account_specific_rules.append(
+        f'- Treat transactions to {_INVESTING_ACCOUNT_IBAN} ({_INVESTING_ACCOUNT_HOLDER_NAME}) as an "Investing" category'
+    )
 if _SELF_TRANSFER_IBAN_A and _SELF_TRANSFER_IBAN_B:
     _account_specific_rules.append(
         f"- Neglect all the transactions between two observed accounts "
@@ -55,7 +66,7 @@ if _SAVINGS_ACCOUNT_IBAN:
 if _LAUNDRY_COUNTERPARTY_NAME:
     _account_specific_rules.append(
         f'- Transactions/payments to "{_LAUNDRY_COUNTERPARTY_NAME}" are expenditures on laundry, '
-        f"so it's a part of Other/Utilities and Bills"
+        f"so its a part of Other/Utilities and Bills"
     )
 ACCOUNT_SPECIFIC_RULES = "\n".join(_account_specific_rules)
 
