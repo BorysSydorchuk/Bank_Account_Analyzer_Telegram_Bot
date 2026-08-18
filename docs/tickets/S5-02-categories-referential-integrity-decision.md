@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 Source: docs/tickets/S5-00-sprint-plan.md
 
 ---
@@ -82,13 +82,19 @@ SET NULL`), `models.py`'s matching `ForeignKey` declaration, and
 categorization agent's write path. ARCHITECTURE.md updated (Database Tables
 row + new Invariants entry).
 
-**Blocked:** live backfill validation output and live constraint test
-(rename a category, confirm transactions follow) could not be run this
-session — Docker Desktop's backend processes are up but not responding to
-the CLI (`docker compose ps` hangs indefinitely). Tracked in
-`docs/verification_debt.md`. Status stays `in-progress` until that runs for
-real — not `delivered` on structural verification alone, per the ticket's
-own acceptance criteria.
+**Blocked, then closed (2026-08-18):** live backfill validation and the
+live constraint test were blocked in the prior session — Docker Desktop's
+backend processes were up but not responding to the CLI. Borys restarted
+Docker Desktop; `docker compose up -d` brought the stack up, and the
+backend's own startup applied migration `d3f8a5c6b9e2` automatically with
+no pre-flight `RuntimeError` against the real 350-row dataset. Live-verified:
+the FK exists exactly as designed (`\d transactions`), a rename of `'Other'`
+→ `'Test Rename'` carried all 62 transactions with zero orphans then was
+reverted, and a raw `UPDATE` to an unknown category name was rejected live
+by the FK (rolled back cleanly) while the exact filter now in
+`analysis_service.py` was confirmed to exclude that same value using the
+real `categories` table. Full detail in `docs/verification_debt.md`'s
+CLOSED section.
 
 WHEN DONE:
 - State the chosen option and show the implementation
