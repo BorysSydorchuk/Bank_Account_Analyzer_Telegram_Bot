@@ -12,6 +12,17 @@ healthy, port bindings match exactly. (Originally written S4-03 against
 static config only, since Docker Desktop's daemon wasn't running then;
 that gap is now closed.)
 
+**Sprint 5 close re-verification (2026-08-19, S5-08):** every claim in this
+file re-checked against the running system and current source, top to
+bottom — non-root UIDs confirmed live (`docker compose exec backend
+whoami` / `celery_worker` → `appuser`), every referenced symbol name
+confirmed to still exist at its stated location, Database Tables
+cross-checked against `models.py` column-by-column (no drift), sync-lock
+enforcement re-confirmed live. All line-number references (`file.py:NN`)
+replaced with stable section/symbol names throughout this file — line
+numbers had already gone stale twice during Sprint 4 and are no longer
+used as anchors here.
+
 ## Services & Ports
 
 | Service | Image/build | Port | Serves |
@@ -23,7 +34,7 @@ that gap is now closed.)
 | `celery_worker` | `backend/Dockerfile` (same image as backend) | **3001** | `celery -A app.celery_app worker`, **and** the Enable Banking OAuth callback catcher |
 
 `celery_worker`, not `backend`, publishes port 3001 — deliberate
-(`docker-compose.yml:59-64`): the OAuth redirect lands in the user's real
+(`docker-compose.yml`'s `celery_worker` service, `ports:` mapping): the OAuth redirect lands in the user's real
 browser on the host, and the catcher (`app/eb_callback_server.py`) runs
 inside the Celery process (`app/tasks/auth.py`), not the FastAPI process.
 It's a Celery task (`catch_enable_banking_callback`), TLS via
@@ -58,9 +69,9 @@ CLI flag already configures its own root logger.
 
 | URL | Value | Served by |
 |---|---|---|
-| Enable Banking redirect URI | `https://localhost:3001/callback` | `celery_worker` / `eb_callback_server.py` (`enablebanking.py:37`) |
-| Frontend origin (CORS) | `FRONTEND_ORIGIN`, default `http://localhost:5173` | `backend/app/main.py:34-40`, `CORSMiddleware` |
-| Frontend's API base | `VITE_API_URL`, default `http://localhost:8000` | `frontend/src/lib/api.ts:22`, injected via compose, no `.env` file on disk |
+| Enable Banking redirect URI | `https://localhost:3001/callback` | `celery_worker` / `app/eb_callback_server.py`'s `CALLBACK_PORT` constant |
+| Frontend origin (CORS) | `FRONTEND_ORIGIN`, default `http://localhost:5173` | `backend/app/main.py`'s `CORSMiddleware` setup |
+| Frontend's API base | `VITE_API_URL`, default `http://localhost:8000` | `frontend/src/lib/api.ts`'s `API_URL` constant, injected via compose, no `.env` file on disk |
 
 The redirect URI must be `https://` — Enable Banking's `/auth` endpoint
 rejects `http://` live (400), which is why the mkcert cert exists.
@@ -144,7 +155,7 @@ fell in the 90-day window tested), so a "what was my single biggest
 expense" question couldn't be answered from it — the assistant correctly
 said so rather than guessing. Review caught that this was a one-line
 omission, not a design limitation: `compute_statistics()` already returns
-`summary.biggest_expense` (`statistics.py:151-159`), and `_summary_text()`
+`summary.biggest_expense`, and `_summary_text()`
 just wasn't surfacing it. Fixed in-ticket (S4-06 review bounce,
 2026-08-17) — `summary_text` now includes a `Biggest expense: ...` line,
 re-verified live against the same dataset: exact match on amount,
@@ -341,8 +352,11 @@ with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
   Confirmed safe: all `logger.info`/`.warning`/`.exception` calls in
   `app/` log only ids, counts, provider/category names, or exception
   messages — none embed a real amount or description. One pre-existing,
-  unrelated finding: `kbc_analyzer/backend/kbc_analyzer/analysis.py` (the
-  legacy CLI/Telegram-bot module, untouched by the web app) hardcodes real
-  IBANs and the account holder's real name directly in its Gemini system
-  prompt — not a logging issue, a real PII/financial-identifier exposure
-  in committed source, flagged to Borys rather than edited.
+  unrelated finding, now resolved: `kbc_analyzer/backend/kbc_analyzer/
+  analysis.py` (the legacy CLI/Telegram-bot module, untouched by the web
+  app) hardcoded real IBANs and the account holder's real name directly
+  in its Gemini system prompt — not a logging issue, a real
+  PII/financial-identifier exposure in committed source. Moved to
+  environment variables and a precautionary full git history rewrite was
+  performed and verified. See `docs/security_excursion_2026-08.md` for
+  the full record.

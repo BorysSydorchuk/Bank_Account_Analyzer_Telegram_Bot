@@ -59,7 +59,7 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   (keyed on `(user_id, provider_name)` or moved into a per-request/
   per-session scope) or one user's cached provider instance — and API
   key — could leak across users. Flagged in S4-09 review.
-- **Status (re-confirmed 2026-08-18, S5-06):** OPEN — architectural debt,
+- **Status (re-confirmed 2026-08-19, S5-08 sprint close):** OPEN — architectural debt,
   not verification debt in the "unverified" sense; closes naturally as
   part of Sprint 6's multi-user migration (`docs/multi_user_migration_plan.md`
   covers the exact sequencing). No test can meaningfully close this in the
@@ -83,8 +83,9 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   most naturally alongside `test_error_contracts.py` or a new
   `test_date_range.py` — each just needs a live TestClient call with a
   backwards or >365-day range and an assertion on the 400 body.
-- **Status:** OPEN (2026-08-18) — no target session assigned yet; belongs
-  to the Tester's S5-04 follow-on work, same as the sync-lock entry below.
+- **Status (re-confirmed 2026-08-19, S5-08 sprint close):** OPEN — no
+  target session assigned yet; belongs to the Tester's S5-04 follow-on
+  work, same as the sync-lock entry below.
 
 ### Sync lock release on two failure early-returns — never empirically triggered (S5-05)
 
@@ -121,8 +122,9 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   also assert `sync_lock.get_holder()` is `None` after the run, not just
   that `job_store` reports `status: "failed"`. This is Tester-agent scope
   (S5-04's follow-on suite), not something to build here.
-- **Status:** OPEN (2026-08-18) — no target session assigned yet; belongs
-  to the Tester's S5-04 follow-on work.
+- **Status (re-confirmed 2026-08-19, S5-08 sprint close):** OPEN — no
+  target session assigned yet; belongs to the Tester's S5-04 follow-on
+  work.
 
 ### Three regression tests deferred — no frontend test harness yet (S5-04)
 
@@ -148,7 +150,7 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   banner, one asserting a stalled poll still times out on identical
   payloads, one asserting the api client surfaces an error message from
   either JSON shape.
-- **Status (re-confirmed 2026-08-18, S5-06 sprint close):** OPEN —
+- **Status (re-confirmed 2026-08-19, S5-08 sprint close):** OPEN —
   `kbc_analyzer/frontend/package.json` still has no `test` script and no
   vitest/jest dependency; nothing has changed since S5-04. Flagged to PM
   for a frontend-test-infrastructure ticket; no target sprint assigned yet.
@@ -172,7 +174,7 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
   host (real bind-mount ownership, not synthesized 777) — create a file as
   root inside a container, confirm `appuser` genuinely cannot write it,
   confirm the app still runs correctly end-to-end as non-root.
-- **Status (re-confirmed 2026-08-18, S5-06 sprint close):** OPEN — closes
+- **Status (re-confirmed 2026-08-19, S5-08 sprint close):** OPEN — closes
   naturally at Sprint 6, when production deployment moves off Windows
   Docker Desktop onto a real (Linux) host. Closure condition unchanged
   from S4-09/S4-10; nothing about this host changed.
@@ -251,6 +253,13 @@ streaming) — all four were tracked as one entry
 ("Claude provider — chat streaming, no API key (S4-06)") since the
 underlying blocker (no key) was identical; that entry is removed from OPEN
 above as of this closure.
+
+**Re-confirmed 2026-08-19 (S5-08 sprint close):** still accurate and still
+closed. Live-verified again during S5-08's regression sweep — switched
+the provider to Claude and back to Gemini via the real Settings UI (not
+just the API), both round-trips clean, `GET /api/settings` correctly
+reflecting each switch, no console errors. Nothing about this has
+regressed since S5-06.
 
 ### Categories FK backfill validation & live constraint test (S5-02, closed 2026-08-18)
 

@@ -9,6 +9,16 @@ is stated at the end of each section.
 No code changes were made producing this document — S5-01 is audit only,
 per its own acceptance criteria.
 
+**Re-verified 2026-08-19 (S5-08 sprint close)** against everything S5-02,
+S5-05, and S5-07 changed after this plan was originally written. Three
+real gaps found and closed below (marked **[S5-08]**): S5-02's new
+`transactions.category` foreign key wasn't accounted for against the
+already-DECIDED `categories` primary-key change; `sync_lock.py` (S5-05)
+and `rate_limit.py` (S5-07) are both new module-level state this plan
+never catalogued. Everything else re-checked line-by-line against current
+`app/models.py`, `app/routers/*.py`, and `app/crud.py` — no other drift
+found; the rest of this document is unchanged from S5-01.
+
 ---
 
 ## Tables
@@ -55,6 +65,28 @@ source (Alembic's `env.py` autogenerates against exactly this file).*
 | `categories` — `PRIMARY KEY (name)` | Global | `PRIMARY KEY (user_id, name)` **— DECIDED, categories go per-user** (PM ruling, 2026-08-17) | Confirmed change, not conditional: two users couldn't both have a category named "Groceries" without this. |
 | `budgets` — `UNIQUE NULLS NOT DISTINCT (user_id, category, period)` | **Already correct** — built this way in S4-05 specifically anticipating multi-user | Add `NOT NULL` to `user_id` once backfilled; the constraint shape itself needs no change | None — this is the one table already done right. |
 | `settings` — `PRIMARY KEY (key)` | Global | `PRIMARY KEY (user_id, key)` **— DECIDED, settings go per-user** (PM ruling, 2026-08-17) | Confirmed change, not conditional — see Tables above for why leaving this global is a billing hole, not a neutral default. |
+
+**[S5-08] `categories(name)`'s foreign-key references — a gap this plan
+didn't originally cover.** S5-02 (after this plan was written) added
+`transactions.category FK → categories(name) ON UPDATE CASCADE ON DELETE
+SET NULL`, alongside the pre-existing `budgets.category` FK with the same
+target. Both currently reference `categories.name` as a single-column
+key — which only works while `name` is `categories`' primary key. Once
+`categories`' primary key becomes `(user_id, name)` (DECIDED above), a
+single-column FK to `name` alone is no longer valid: Postgres requires a
+foreign key to reference a unique constraint or primary key on the
+*exact* column set it points at, and `name` alone won't be either
+anymore. **Both FKs must become composite — `(user_id, category)` on the
+referencing side, `(user_id, name)` on `categories`** — added to step 6
+of the Ordering section below (constraint updates), same migration
+window as `categories`' own primary-key change, since a FK update to a
+table whose PK is mid-change has to land in the same step or the FK
+would reference a stale shape for however long the gap lasted. Not
+optional or deferrable: leaving these as single-column FKs after
+`categories`' PK changes would either break the migration outright (FK
+creation fails against a non-matching target) or, worse, silently keep
+matching only on `name` — meaning `transactions.category`/`budgets.category`
+could point at a *different user's* category row with the same name.
 
 **`transactions.external_id` uniqueness — CLAUDE.md EXTERNAL SYSTEM
 ASSUMPTIONS violation, flagged 2026-08-17 (PM):** the risk description
@@ -157,6 +189,26 @@ the IDOR-shaped gaps on `PATCH /api/transactions/{id}` and `GET
   so Sprint 6 changes exactly one line at each site, not a function
   signature. This is the pattern every other table/endpoint above should
   be built to match.
+- **[S5-08] `sync_lock.py`'s Redis key (S5-05) — already multi-user-ready,
+  no migration work needed.** `sync_lock:{user_id or 'global'}` — the key
+  derivation already takes `user_id` as a parameter (currently always
+  called with `None`, hence `'global'`); Sprint 6 changes exactly one
+  call site (the same `CURRENT_USER_ID` pattern `budgets`/`chat_service`
+  already establish) to start passing a real value. Built this way
+  deliberately at S5-05 time, anticipating this exact migration — the
+  same "already done right" category as `budgets`.
+- **[S5-08] `rate_limit.py`'s in-memory limiter (S5-07) — needs Sprint 6
+  attention, not yet ready.** Keyed on remote address (`get_remote_address`),
+  not `user_id` — there was no caller identity to key on when this was
+  built (pre-auth, single-user). Once real users exist behind a shared
+  reverse proxy or NAT, IP-keying would throttle unrelated users together
+  under one shared limit instead of giving each their own. Must become
+  keyed on the authenticated `user_id` at Sprint 6; also consider moving
+  storage off in-memory onto Redis (already in this stack) if `backend`
+  ever runs with more than one worker process, since in-memory state
+  isn't shared across processes. Already flagged in ARCHITECTURE.md's
+  Invariants at the point it was built; restated here since this document
+  is the canonical singleton inventory Sprint 6 should work from.
 - **`job_store.py`'s `_client`** (module-level Redis client) is a
   connection pool, not per-user state itself — fine to stay global. The
   keys it manages (`job:{job_id}`) are the actual gap, covered under
@@ -172,13 +224,17 @@ the IDOR-shaped gaps on `PATCH /api/transactions/{id}` and `GET
   ARCHITECTURE.md already notes Sprint 6 retires this whole mechanism in
   favor of real public HTTPS — this item is the reason that retirement is
   a hard requirement, not an optional cleanup.
-- **Nothing else found.** Searched every module-level assignment across
-  `app/*.py`, `app/agents/**/*.py`, `app/tasks/*.py`, and `app/routers/
-  *.py`; every other module-level name is either a pure constant
-  (thresholds, model name strings, prompt templates), a `__all__` export
-  list, or `db.py`'s `engine`/`SessionLocal` (a connection pool/session
-  factory — the standard SQLAlchemy pattern, not per-user state; per-user
-  scoping happens in the *queries* run through it, covered above).
+- **Nothing else found (S5-01 original scope), re-swept 2026-08-19
+  [S5-08]** across everything S5-05/S5-07 added since — `sync_lock.py`
+  and `rate_limit.py` above are the only two new module-level names those
+  tickets introduced, both now catalogued. Searched every module-level
+  assignment across `app/*.py`, `app/agents/**/*.py`, `app/tasks/*.py`,
+  and `app/routers/*.py`; every other module-level name is either a pure
+  constant (thresholds, model name strings, prompt templates), a
+  `__all__` export list, or `db.py`'s `engine`/`SessionLocal` (a
+  connection pool/session factory — the standard SQLAlchemy pattern, not
+  per-user state; per-user scoping happens in the *queries* run through
+  it, covered above).
 
 *Verified via: `grep -rn "^[A-Za-z_][A-Za-z0-9_]* = " app/*.py
 app/agents/*.py app/agents/providers/*.py app/tasks/*.py app/routers/
@@ -272,7 +328,12 @@ sequence — see "Separate workstream: authorization gaps" below for why.
 6. **Update constraints**: `transactions`'s `UNIQUE (external_id)` → the
    shape step 0 determined (the highest-risk item in this plan — see
    Constraints), and `categories`'s primary key to `(user_id, name)`
-   (confirmed, not conditional). Must happen *after* step 5, not before —
+   (confirmed, not conditional). **[S5-08]** In the same migration,
+   redefine `transactions.category` and `budgets.category`'s foreign
+   keys as composite — `(user_id, category) → categories(user_id, name)`
+   — since both currently reference `categories.name` alone and that
+   stops being valid the moment `categories`' primary key changes shape
+   (see Constraints). Must happen *after* step 5, not before —
    a `UNIQUE (user_id, external_id)` constraint is meaningless (and in
    Postgres, actually still permits full duplicates) while `user_id` can
    be `NULL` on every row.
