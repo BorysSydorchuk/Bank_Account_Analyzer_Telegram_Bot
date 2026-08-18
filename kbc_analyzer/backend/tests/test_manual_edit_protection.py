@@ -63,6 +63,16 @@ def test_race_condition_row_edited_between_select_and_update_stays_protected(db_
     eligible), then a manual edit happens (simulating the user acting during
     the LLM round-trip), then the UPDATE runs with the id the SELECT saw —
     exactly the interleaving a real race would produce.
+
+    The simulated edit clears the category to NULL (a manual "clear," same
+    as S3-05) rather than setting it to some other category name. That's
+    deliberate (review finding): update_transaction_categories' WHERE
+    clause checks BOTH `category IS NULL` and `manually_edited IS FALSE` —
+    if the simulated edit set a non-null category, the UPDATE would be
+    blocked by the category-not-null condition alone, and the test would
+    pass even if the manually_edited re-check were deleted entirely. Only
+    an edit that leaves category NULL isolates that manually_edited is
+    actually the thing doing the protecting here.
     """
     row = transaction_factory(category=None, manually_edited=False, description="Ambiguous Merchant")
     db_session.add(row)
@@ -71,12 +81,12 @@ def test_race_condition_row_edited_between_select_and_update_stays_protected(db_
     eligible_before_the_race = crud.get_uncategorized_transactions(db_session)
     assert row.id in {t.id for t in eligible_before_the_race}
 
-    crud.update_transaction(db_session, row.id, {"category": "Groceries"})
+    crud.update_transaction(db_session, row.id, {"category": None})
 
     crud.update_transaction_categories(
         db_session, [{"id": str(row.id), "category": "Other", "subcategory": "Shopping"}]
     )
 
     db_session.refresh(row)
-    assert row.category == "Groceries"
+    assert row.category is None
     assert row.manually_edited is True
