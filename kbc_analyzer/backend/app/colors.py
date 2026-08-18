@@ -110,6 +110,9 @@ def describe_validation_failure(hex_color: str) -> str | None:
         return "Too vivid — pick a slightly more muted color."
     if lightness_pct < LIGHTNESS_RANGE[0]:
         return "Too dark — pick a lighter shade."
+    # Currently unreachable within the valid 40-80% saturation range: contrast
+    # against white always fails first before lightness reaches this bound.
+    # Kept as defense in depth in case the saturation bounds change.
     if lightness_pct > LIGHTNESS_RANGE[1]:
         return "Too light — won't be visible on white backgrounds."
 
