@@ -1,4 +1,4 @@
-Status: delivered
+Status: confirmed
 Source: docs/tickets/S5-00-sprint-plan.md
 
 ---
@@ -104,3 +104,33 @@ WHEN DONE:
 - Explain: why does budgets.category already have this
   FK while transactions.category does not?
 - Do not start S5-03 until confirmed
+
+## WHEN DONE — answered:
+
+- **Chosen option:** A (add the FK), Borys's call per the PM's
+  recommendation. Implementation: migration
+  `d3f8a5c6b9e2_add_fk_transactions_category.py`, `models.py`'s matching
+  `ForeignKey` declaration, and `analysis_service.categorize_transactions`'s
+  unknown-category filter (all in `c6926a6`).
+- **Backfill validation output:** the migration's pre-flight check ran
+  automatically on backend container startup. Alembic log: `Running
+  upgrade c4a91d6e0f3b -> d3f8a5c6b9e2, add fk transactions.category ->
+  categories.name` — no `RuntimeError`, meaning zero orphaned
+  `transactions.category` values across the real 350-row dataset.
+- **Live constraint test:** `\d transactions` confirmed
+  `fk_transactions_category_categories_name FOREIGN KEY (category)
+  REFERENCES categories(name) ON UPDATE CASCADE ON DELETE SET NULL`.
+  Renamed `'Other'` → `'Test Rename'` at the database level: all 62
+  previously-`'Other'` transactions read back as `'Test Rename'` with zero
+  orphans and no manual reassignment, then reverted — category counts
+  matched the pre-test snapshot exactly.
+- **Why does `budgets.category` already have this FK while
+  `transactions.category` did not?** (verbatim from the migration's
+  docstring, `d3f8a5c6b9e2_add_fk_transactions_category.py`, and commit
+  `c6926a6`): "budgets.category already has this exact FK (see
+  c4a91d6e0f3b) — it was added when the table was still empty, so there
+  was no backfill risk to weigh. transactions already holds real synced
+  data, so this migration validates before constraining rather than
+  assuming the data is clean." In short: `budgets` got the FK for free at
+  table-creation time; `transactions` needed this ticket's validation step
+  first because it already held real data the FK could have broken.
