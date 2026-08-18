@@ -8,7 +8,7 @@ import asyncio
 import logging
 from datetime import date
 
-from .. import analysis_service, crud, job_store
+from .. import analysis_service, crud, job_store, sync_lock
 from ..celery_app import celery_app
 from ..db import SessionLocal
 from ..eb_service import EnableBankingAuthError, EnableBankingError, EnableBankingService
@@ -198,4 +198,11 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
             },
         )
     finally:
+        # S5-05: released on every exit path — success, a handled failure
+        # (either early-return above), or the catch-all except block — so a
+        # normal-completing job never holds the lock past its own finish.
+        # A worker that crashes hard enough to skip even this (killed, not
+        # raising) leaves the lock to expire on its own TTL instead; that's
+        # the deliberate backstop, not a gap this line is meant to cover.
+        sync_lock.release(job_id)
         db.close()

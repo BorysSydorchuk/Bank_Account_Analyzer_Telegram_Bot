@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
-import { ApiError, getJob, getStatistics, syncTransactions } from "@/lib/api"
+import { ApiError, SyncConflictError, getJob, getStatistics, syncTransactions } from "@/lib/api"
 import { getThisMonthRange, type DateRangePreset } from "@/lib/dateRangePresets"
 import { insightsKey, statisticsKey } from "@/lib/queryKeys"
 import type { InsightsCacheEntry } from "@/lib/types"
@@ -69,7 +69,21 @@ export function useDashboard() {
         startedAt: Date.now(),
       })
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, variables) => {
+      // S5-05: a 409 means a sync is already running, not that this request
+      // failed — the user clicked sync, a sync is happening, that's not an
+      // error state. Attach to the in-flight job's polling instead of
+      // showing a toast, same as a normal onSuccess would.
+      if (error instanceof SyncConflictError) {
+        setStatusMessage("A sync is already in progress...")
+        setActiveJob({
+          jobId: error.jobId,
+          dateFrom: variables.dateFrom,
+          dateTo: variables.dateTo,
+          startedAt: Date.now(),
+        })
+        return
+      }
       toast.error(error instanceof ApiError ? error.message : "Something went wrong. Please try again.")
     },
   })

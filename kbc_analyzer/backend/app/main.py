@@ -15,6 +15,7 @@ from sqlalchemy.exc import OperationalError
 from .db import engine
 from .eb_service import EnableBankingAuthError, EnableBankingError
 from .routers import analysis, auth, budgets, categories, chat, insights, jobs, settings, statistics, transactions
+from .sync_lock import SyncAlreadyRunningError
 
 # S4-09 Item 3 surfaced this: without any handler configured, Python's root
 # logger only emits WARNING and above (its built-in "handler of last
@@ -68,6 +69,18 @@ async def eb_error_handler(request: Request, exc: EnableBankingError) -> JSONRes
     # Enable Banking itself rejected or failed the request — we're a client of a
     # remote service that misbehaved, hence 502 (bad gateway) rather than 500.
     return JSONResponse(status_code=502, content={"message": str(exc)})
+
+
+@app.exception_handler(SyncAlreadyRunningError)
+async def sync_already_running_handler(request: Request, exc: SyncAlreadyRunningError) -> JSONResponse:
+    # 409 Conflict: the request is well-formed but can't proceed against the
+    # server's current state (a sync is already in flight) — distinct from a
+    # 400 (bad request) or 401/403 (auth). job_id lets the frontend attach to
+    # the existing job's polling instead of just showing an error.
+    return JSONResponse(
+        status_code=409,
+        content={"message": str(exc), "job_id": exc.in_flight_job_id},
+    )
 
 
 @app.exception_handler(OperationalError)

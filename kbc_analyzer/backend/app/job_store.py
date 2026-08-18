@@ -6,6 +6,7 @@ so it doesn't belong in the durable, backed-up database.
 """
 import json
 import os
+from datetime import datetime, timezone
 
 import redis
 
@@ -20,8 +21,17 @@ def _job_key(job_id: str) -> str:
 
 def set_job(job_id: str, status: dict) -> None:
     """Overwrites the job's status wholesale and resets its 24h TTL — callers
-    always pass the complete status object, not a partial patch."""
-    _client.set(_job_key(job_id), json.dumps(status), ex=JOB_TTL_SECONDS)
+    always pass the complete status object, not a partial patch.
+
+    Stamps heartbeat_at (S5-05) on every call, not just a dedicated "still
+    alive" ping — every stage transition and every categorization batch
+    already calls this, so it's already the natural checkpoint frequency a
+    separate heartbeat mechanism would have had to invent. GET
+    /api/jobs/{job_id} uses this to detect a worker that died mid-job: no
+    write means no progress, however long it's actually been running.
+    """
+    payload = {**status, "heartbeat_at": datetime.now(timezone.utc).isoformat()}
+    _client.set(_job_key(job_id), json.dumps(payload), ex=JOB_TTL_SECONDS)
 
 
 def get_job(job_id: str) -> dict | None:

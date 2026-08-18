@@ -7,9 +7,10 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from .. import crud, job_store
+from .. import crud, job_store, sync_lock
 from ..db import get_db
 from ..schemas import PatchTransactionRequest, SyncRequest, SyncResponse, TransactionOut, TransactionsListResponse
+from ..sync_lock import SyncAlreadyRunningError
 from ..tasks.analysis import run_sync_job
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -24,6 +25,23 @@ def sync_transactions(body: SyncRequest) -> SyncResponse:
     # job is to create that job and hand back its id, which is why it no
     # longer needs `db` or an EnableBankingService of its own at all.
     job_id = str(uuid4())
+
+    # S5-05: the lock's value IS this job_id, so a successful acquire means
+    # this job is now the one and only in-flight sync — no separate "create
+    # the job" step could race a concurrent request in between, since
+    # acquire() is a single atomic Redis command.
+    if not sync_lock.acquire(job_id):
+        in_flight_job_id = sync_lock.get_holder()
+        if in_flight_job_id is None:
+            # Rare race: the lock was released (TTL expiry, or the holder
+            # finishing) between our failed acquire() and this read — it's
+            # free again, so retry once rather than reporting a conflict
+            # against a job that no longer exists.
+            if not sync_lock.acquire(job_id):
+                raise SyncAlreadyRunningError(sync_lock.get_holder() or job_id)
+        else:
+            raise SyncAlreadyRunningError(in_flight_job_id)
+
     job_store.set_job(
         job_id,
         {

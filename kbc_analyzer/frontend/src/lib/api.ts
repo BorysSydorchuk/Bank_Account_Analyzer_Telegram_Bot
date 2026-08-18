@@ -32,6 +32,19 @@ export class ApiError extends Error {
   }
 }
 
+// S5-05: a 409 from POST /api/transactions/sync means a sync is already
+// running, not that this request failed — sync_already_running_handler
+// (main.py) includes the in-flight job's id precisely so the caller can
+// attach to it instead of treating this like any other error.
+export class SyncConflictError extends ApiError {
+  jobId: string
+  constructor(message: string, jobId: string) {
+    super(409, message)
+    this.name = "SyncConflictError"
+    this.jobId = jobId
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -52,11 +65,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export function syncTransactions(dateFrom: string, dateTo: string) {
-  return request<SyncResponse>("/api/transactions/sync", {
+export async function syncTransactions(dateFrom: string, dateTo: string) {
+  const res = await fetch(`${API_URL}/api/transactions/sync`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ date_from: dateFrom, date_to: dateTo }),
   })
+  if (res.status === 409) {
+    const body = await res.json().catch(() => null)
+    throw new SyncConflictError(body?.message ?? "A sync is already running.", body?.job_id)
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => null)
+    throw new ApiError(res.status, body?.message ?? body?.detail ?? `Request failed with status ${res.status}`)
+  }
+  return res.json() as Promise<SyncResponse>
 }
 
 export function getStatistics(dateFrom: string, dateTo: string) {

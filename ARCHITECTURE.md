@@ -78,27 +78,47 @@ exactly as described above, not just as designed.
 
 ## Data Flow
 
-`POST /api/transactions/sync` (`routers/transactions.py:18-39`) does
-almost nothing synchronously: creates a `job_id`, seeds Redis with
-`{"status": "processing", "stage": "fetching"}`, dispatches
-`run_sync_job.delay(...)`, returns immediately.
+`POST /api/transactions/sync` (`routers/transactions.py`) does almost
+nothing synchronously: creates a `job_id`, acquires `sync_lock` (S5-05,
+below) for it, seeds Redis with `{"status": "processing", "stage":
+"fetching"}`, dispatches `run_sync_job.delay(...)`, returns immediately.
+If the lock is already held, no job is created — the endpoint raises
+`SyncAlreadyRunningError`, mapped by `main.py`'s
+`sync_already_running_handler` to `409 {"message": ..., "job_id":
+<in-flight job's id>}`.
 
-Celery task `run_sync_job` (`tasks/analysis.py:19-201`) runs the pipeline,
+Celery task `run_sync_job` (`tasks/analysis.py`) runs the pipeline,
 updating the Redis job record as it progresses:
 `fetching` → `storing` (`crud.upsert_transactions`, upsert on
 `external_id` conflict) → `categorizing` (batch progress reported via
 `on_batch_complete`) → `generating_insights` (only on success does
 `crud.replace_insights` run — a failed generation leaves prior insights
-untouched) → `complete`/`failed`.
+untouched) → `complete`/`failed`. `sync_lock.release()` runs in a
+`finally` block around the whole task (S5-05) — released on every path
+that returns or raises inside the task; a worker killed hard enough to
+skip even that leaves the lock to its own TTL instead (see Invariants).
 
 Job state lives only in Redis (`job_store.py`, key `job:{job_id}`, 24h
-TTL) — never Postgres. `GET /api/jobs/{job_id}` 404s once the key expires.
+TTL) — never Postgres. Every `job_store.set_job` call (every stage
+transition, every categorization batch) also stamps `heartbeat_at`
+(S5-05). `GET /api/jobs/{job_id}` 404s once the key expires; while a job
+is `processing`, it also checks `heartbeat_at` against a 2-minute
+staleness threshold and reports `status: "failed"` (naming the stage) if
+exceeded — this is computed at read time, not written back to Redis, and
+does not itself release `sync_lock` (see Invariants).
 
 Frontend polling (`frontend/src/hooks/useDashboard.ts`): `useQuery` with
 `refetchInterval` of 2s while `status === "processing"`,
 `refetchIntervalInBackground: true`, plus an independent `setTimeout`
-enforcing a 10-minute cap (React Query's structural sharing means a dead
-worker never produces a new `data` reference to key an effect off).
+enforcing a 10-minute cap — now mostly a backstop behind the 2-minute
+server-side staleness check above, kept because it also covers a job
+whose Redis key vanished outright (React Query's structural sharing means
+a dead worker never produces a new `data` reference to key an effect
+off, so a plain state-comparison effect can't detect it either). On a
+sync request's `409`, the frontend attaches to the in-flight job's
+polling instead of showing an error (`useDashboard.ts`'s
+`syncMutation.onError`, `SyncConflictError`) — the user asked for a sync,
+one is already running, that's not a failure.
 
 `POST /api/chat` (`routers/chat.py`, S4-06) streams a chat reply as
 Server-Sent Events. `chat_service.start_chat_stream` runs everything
@@ -240,13 +260,22 @@ with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
   "latest per range" query — a clean addition, not a fix to a bug.
 - **Job state is Redis-only.** No `jobs` table exists in any migration;
   sync progress never touches Postgres.
-- **One sync job at a time (per user) — NOT currently enforced.** No
-  locking exists around `POST /api/transactions/sync`; nothing server-side
-  stops two overlapping sync jobs. The only related lock in the codebase
-  guards the OAuth callback port (3001) against a second concurrent
-  *reconnect*, which is a different flow. The only guard against duplicate
-  syncs today is client-side (`useDashboard.ts`'s sync-in-flight state).
-  Flagged separately below — documented here as-is, not as-intended.
+- **One sync job at a time (per user), enforced server-side (S5-05).**
+  `sync_lock.py`, Redis key `sync_lock:{user_id or 'global'}` (always
+  `global` pre-Sprint 6 — the key derivation already takes `user_id` so
+  Sprint 6 only needs to start passing a real one). `SET NX EX` on
+  acquire (atomic — no check-then-set race between two concurrent
+  requests); release is an atomic Lua compare-and-delete (`sync_lock.py`'s
+  `_RELEASE_SCRIPT`) so a job never deletes a *different* job's lock. TTL
+  11 minutes — deliberately longer than the frontend's 10-minute give-up
+  timeout, so a crashed worker's lock cannot deadlock sync permanently;
+  it expires on its own even though nothing ever calls `release()` for a
+  hard-killed worker. This is a separate mechanism from the 2-minute
+  heartbeat-staleness check above — a worker crash is typically reported
+  to the user (via a "failed" job status) well before the lock itself
+  expires, meaning a fast retry can still 409 for up to the remainder of
+  that 11 minutes. The OAuth callback port (3001) lock is unrelated — it
+  guards a second concurrent *reconnect*, a different flow.
 - **CLAUDE.md's date-range validation (`date_from <= date_to`, ≤365 days)
   is enforced only on `GET /api/insights/compare` (S4-08) — NOT on
   `GET /api/statistics`, `POST /api/transactions/sync`,
