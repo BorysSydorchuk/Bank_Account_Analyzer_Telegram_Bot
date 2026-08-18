@@ -19,6 +19,8 @@ __pycache__/
 dist/
 build/
 .eggs/
+.coverage
+.pytest_cache/
 
 # Virtual environments
 .venv/

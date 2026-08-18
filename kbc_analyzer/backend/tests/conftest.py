@@ -204,6 +204,58 @@ def client(db_session):
     app.dependency_overrides.clear()
 
 
+# Mirrors app/migrations/versions/fbde2dbcc78d_add_categories_table.py's
+# SEED_COLORS exactly — duplicated here (not imported) so this fixture keeps
+# working even if that migration file is ever renamed, and so a test reading
+# this file doesn't have to go find the migration to know what it resets to.
+_CATEGORY_SEED_COLORS = {
+    "Restaurants and Cafes": "#F97316",
+    "Groceries": "#10B981",
+    "Traveling": "#F59E0B",
+    "Rent/Housing": "#6366F1",
+    "Income": "#0EA5E9",
+    "Transfers": "#8B5CF6",
+    "Other": "#64748B",
+}
+
+
+@pytest.fixture
+def raw_db(test_db_engine):
+    """A SessionLocal()-backed session — real commits against the disposable
+    test database, NOT wrapped in db_session's rollback-only SAVEPOINT.
+
+    Only tests/test_job_pipeline.py needs this: app/tasks/analysis.py's
+    _run() calls SessionLocal() directly (it's a Celery task, not a FastAPI
+    route, so there's no `get_db` dependency for the `client` fixture to
+    override) — on its own connection, outside whatever transaction
+    db_session might be holding open. A test using db_session to set up data
+    and then invoking _run() would see _run() unable to read that data at
+    all (it's uncommitted on a different connection), so tests that exercise
+    _run() must write their fixture data through this same kind of session
+    instead.
+
+    Because these writes are real, teardown must undo them explicitly rather
+    than relying on rollback: every row in transactions/insights created
+    during the test is deleted, and categories are reset to their seeded
+    color/source so a test that triggers AI color assignment doesn't leave
+    later tests (in this same session-scoped database) starting from a
+    different state depending on run order.
+    """
+    from app.db import SessionLocal
+    from app.models import Category, Insight, Transaction
+
+    session = SessionLocal()
+    yield session
+    session.rollback()
+    session.query(Transaction).delete()
+    session.query(Insight).delete()
+    session.query(Category).update({"source": "seed", "ai_color": None})
+    for name, color in _CATEGORY_SEED_COLORS.items():
+        session.query(Category).filter(Category.name == name).update({"color": color})
+    session.commit()
+    session.close()
+
+
 @pytest.fixture
 def seeded_categories(db_session):
     """The 7 categories are seeded by the Alembic migration itself

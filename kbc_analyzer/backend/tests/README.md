@@ -9,8 +9,8 @@
   and drop a separate `kbc_analyzer_test` database of their own on the same
   server (see `tests/conftest.py` for the connection-string logic).
 - Test dependencies installed: `pip install -e ".[test]"` from `backend/`
-  (installs pytest, pytest-asyncio, httpx, freezegun on top of the app's own
-  runtime dependencies, which the test suite also imports).
+  (installs pytest, pytest-asyncio, pytest-cov, httpx, freezegun on top of
+  the app's own runtime dependencies, which the test suite also imports).
 
 ## Run everything
 
@@ -23,7 +23,10 @@ pytest
 That's the one command — configuration lives in `pyproject.toml`
 (`[tool.pytest.ini_options]`), so no extra flags are needed. `conftest.py`
 creates the test database and runs the real Alembic chain against it once
-per run (session-scoped), then tears it down when the run finishes.
+per run (session-scoped), then tears it down when the run finishes. Every
+run also prints a coverage table (`--cov=app --cov-report=term-missing` in
+`addopts`) — S5-04 isn't chasing a target percentage this sprint, just
+keeping the number visible on the one command.
 
 ## What each test gets
 
@@ -48,6 +51,15 @@ per run (session-scoped), then tears it down when the run finishes.
   session) — no worker process, no real broker.
 - A dedicated Redis logical database (index 15, on the same local Redis
   container) backs `app.job_store`, isolated from the dev app's indexes 0/1.
+- `raw_db` (S5-04) — a real `SessionLocal()` session, NOT wrapped in
+  `db_session`'s rollback. Only needed by `tests/test_job_pipeline.py`:
+  `app/tasks/analysis.py`'s `_run()` is a Celery task, so it opens its own
+  database session directly rather than receiving one through `get_db`
+  dependency injection — `db_session`'s connection is invisible to it. Its
+  writes are real, so its teardown explicitly deletes every
+  transaction/insight it created and resets `categories` back to seeded
+  state, keeping later tests deterministic regardless of run order. Prefer
+  `db_session` for everything else.
 
 None of this reaches a live external service — see "No live external calls"
 in the S5-03 delivery report for how that's enforced, not just intended.

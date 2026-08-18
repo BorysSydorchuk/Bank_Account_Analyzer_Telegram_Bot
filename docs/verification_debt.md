@@ -32,6 +32,33 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
 
 *(Two entries below re-confirmed 2026-08-17, S4-10 sprint close — dates and closure conditions still accurate.)*
 
+### Three regression tests deferred — no frontend test harness yet (S5-04)
+
+- **What was deferred:** Automated regression tests for S2-02 (the
+  `Math.ceil` expiry-warning rounding bug), S3-04 (job-timeout must fire
+  even when poll responses are byte-identical), and the frontend half of
+  S3-06 (the `{"message"}` vs `{"detail"}` error-shape parser).
+- **Why:** All three bugs — and their fixes — live in frontend TypeScript
+  (`SessionBanner.tsx`'s `WARNING_THRESHOLD_DAYS` comparison,
+  `useDashboard.ts`'s poll-timeout timer, `lib/api.ts`'s error parser), not
+  backend Python. `kbc_analyzer/frontend/` has no test runner configured at
+  all yet (no vitest/jest, no `package.json` test script) — TESTER.md's own
+  SUITE RULES anticipate this ("`npm test` from frontend/ when frontend
+  tests exist"). Standing up a frontend test harness from scratch is
+  itself an S5-03-sized task, not something to fold unprompted into S5-04's
+  backend invariant/regression ticket (PROMPT 5 scope discipline). The
+  backend half of S3-06 (that both response shapes are genuinely,
+  currently produced by the live API) IS covered —
+  `tests/test_error_contracts.py::test_both_message_and_detail_error_shapes_are_genuinely_live_S3_06_regression`.
+- **What would close it:** A frontend test ticket (vitest + React Testing
+  Library, most likely) standing up `npm test`, followed by three targeted
+  regression tests: one asserting the 7.7-day case renders the warning
+  banner, one asserting a stalled poll still times out on identical
+  payloads, one asserting the api client surfaces an error message from
+  either JSON shape.
+- **Status:** OPEN — flagged to PM for a frontend-test-infrastructure
+  ticket; no target sprint assigned yet.
+
 ### Non-root file-permission protection — unverifiable on Windows Docker Desktop (S4-09 Item 1)
 
 - **What was deferred:** Confirming that the non-root `appuser` (added
@@ -127,6 +154,11 @@ Migration downgrade path, `models.py`'s `ForeignKey` declaration, and
 `analysis_service.py`'s filter were already reviewed by reading at commit
 time (2026-08-17) — this closure is the live-execution half.
 
+**S5-04 (2026-08-18):** both layers verified here by hand are now permanent,
+automated regression tests — `tests/test_referential_integrity.py::test_fk_rejects_an_unknown_category_at_the_db_level`
+and `::test_categorization_pre_write_filter_excludes_unknown_categories_before_any_write`
+— so this can never silently regress without the suite catching it.
+
 Both consented tests executed exactly per the procedure Borys approved at
 S4-07 confirmation:
 
@@ -180,3 +212,6 @@ wasn't surfacing it. Fixed in-ticket; re-verified live against the same
 dataset (exact match: €800.00, [REDACTED-NAME], 2026-07-27). See
 `docs/tickets/S4-06-ai-chat-backend.md`'s amendment history for the full
 sequence.
+
+**S5-04 (2026-08-18):** this omission is now a permanent regression test —
+`tests/test_chat_context.py::test_chat_context_summary_mentions_biggest_expense`.
