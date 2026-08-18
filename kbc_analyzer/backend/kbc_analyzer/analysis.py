@@ -30,6 +30,35 @@ SUBCATEGORIES_OF_OTHER = ("Entertainment, Health, Shopping, Utilities & Bills, R
 # Traveling expenses are broken into these subcategories
 SUBCATEGORIES_OF_TRAVELING = ("Transport, Housing, Food, Entertainment")
 
+# ── Account-specific classification rules (optional, S5-07) ─────────────────────
+# These reference the account holder's own real IBANs and a real counterparty
+# name, so they belong in .env, never hardcoded in source (CLAUDE.md: no
+# secrets/PII in code or comments). Each rule is only added to the prompt if
+# its env var is actually set, so a checkout with none of these configured
+# just runs without account-specific rules rather than matching on blanks.
+_INVESTING_ACCOUNT_IBAN = os.getenv("KBC_INVESTING_ACCOUNT_IBAN")
+_SELF_TRANSFER_IBAN_A = os.getenv("KBC_SELF_TRANSFER_IBAN_A")
+_SELF_TRANSFER_IBAN_B = os.getenv("KBC_SELF_TRANSFER_IBAN_B")
+_SAVINGS_ACCOUNT_IBAN = os.getenv("KBC_SAVINGS_ACCOUNT_IBAN")
+_LAUNDRY_COUNTERPARTY_NAME = os.getenv("KBC_LAUNDRY_COUNTERPARTY_NAME")
+
+_account_specific_rules: list[str] = []
+if _INVESTING_ACCOUNT_IBAN:
+    _account_specific_rules.append(f'- Treat transactions to {_INVESTING_ACCOUNT_IBAN} as an "Investing" category')
+if _SELF_TRANSFER_IBAN_A and _SELF_TRANSFER_IBAN_B:
+    _account_specific_rules.append(
+        f"- Neglect all the transactions between two observed accounts "
+        f"({_SELF_TRANSFER_IBAN_A} to {_SELF_TRANSFER_IBAN_B} and the other way round)"
+    )
+if _SAVINGS_ACCOUNT_IBAN:
+    _account_specific_rules.append(f'- Treat transactions to {_SAVINGS_ACCOUNT_IBAN} as "Savings" category')
+if _LAUNDRY_COUNTERPARTY_NAME:
+    _account_specific_rules.append(
+        f'- Transactions/payments to "{_LAUNDRY_COUNTERPARTY_NAME}" are expenditures on laundry, '
+        f"so it's a part of Other/Utilities and Bills"
+    )
+ACCOUNT_SPECIFIC_RULES = "\n".join(_account_specific_rules)
+
 # ── System prompt ──────────────────────────────────────────────────────────────
 # This is the instruction set sent to Gemini as the "system" message. It defines
 # the output format, classification rules, and account-specific business logic.
@@ -51,10 +80,7 @@ CLASSIFICATION RULES:
 - total_received = sum of all positive amounts
 - category_totals = only include categories that actually appear in the data
 - For "Other" and "Traveling", always populate their subcategory totals
-- Treat transactions to [REDACTED-IBAN] ([REDACTED-NAME]) as an "Investing" category
-- Neglect all the transactions between two observed accounts ([REDACTED-IBAN] to [REDACTED-IBAN] and the other way round)
-- Treat transactions to [REDACTED-IBAN] as "Savings" category
-- Transactions/payments to "[REDACTED-BUSINESS]" are expenditures on laundry, so its a part of Other/Utilities and Bills
+{ACCOUNT_SPECIFIC_RULES}
 
 
 SPENDING RHYTHM:
