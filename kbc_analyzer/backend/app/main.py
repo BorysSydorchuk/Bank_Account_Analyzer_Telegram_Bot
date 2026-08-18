@@ -51,6 +51,11 @@ app.include_router(budgets.router)
 app.include_router(chat.router)
 
 
+# Currently unreachable — S4-02 moved the Enable Banking fetch into the background
+# job, so no live route raises this synchronously today. Kept registered because
+# Sprint 6's web-based bank authorization (see Sprint 5→6 handoff) will likely add
+# a route that does. Flagged as dead code in S5-04's review; PM decision: keep,
+# documented, 2026-08.
 @app.exception_handler(EnableBankingAuthError)
 async def eb_auth_error_handler(request: Request, exc: EnableBankingAuthError) -> JSONResponse:
     # No valid cached session — this is a client-fixable problem (re-authorize), not a
