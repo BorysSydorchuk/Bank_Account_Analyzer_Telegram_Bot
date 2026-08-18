@@ -16,21 +16,36 @@ repo-wide check for real financial data (amounts, merchant names) found
 that `kbc_analyzer/backend/kbc_analyzer/analysis.py` — the legacy
 CLI/Telegram-bot module, not the FastAPI web app — hardcoded four real
 Belgian IBANs, the account holder's real full name, and a real
-counterparty business name directly in its Gemini system prompt. This
-had been present in the repository's very first commit and unchanged
-since.
+counterparty business name directly in its Gemini system prompt.
 
 The IBANs and name were removed from the source in a same-sprint commit
 and moved to optional environment variables (`.env`, gitignored),
 preserving the underlying feature's behavior — verified via exact string
 reconstruction, not just a visual diff.
 
-Because this data had existed unchanged since the repository's root
-commit, it was present in every commit's snapshot of that file
-throughout the project's entire history — not isolated to one or two
-recent commits. Given that scope, a precautionary full history rewrite
-(`git filter-repo --replace-text`) was performed rather than a targeted
-fix to only the latest commit.
+**Both the credential removal and the subsequent history rewrite were
+directed and explicitly authorized by Borys**, in direct conversation
+with the PM across multiple exchanges on 2026-08-18/19, before either
+action was taken. That authorization exists in the product-management
+conversation record, not as an in-repo commit trailer — noted here
+explicitly so it isn't lost, and as a marker for how authorization for a
+future incident of this kind should be recorded going forward.
+
+This data was believed to have been present since the repository's
+original root commit and unchanged since — based on direct recollection
+at the time, not on a claim that remains independently checkable today.
+One piece of evidence is consistent with that belief: during the
+history rewrite, the root commit's hash changed (`9cb7d77` →
+`592d368`), which can only happen if `git filter-repo`'s content
+replacement found and rewrote matching text in that specific commit.
+That is evidence the flagged strings existed in the root commit at the
+time of the rewrite — it is not independent, current proof of exactly
+what the original root commit contained, since the pre-rewrite objects
+were later purged (a separate, later, explicitly authorized step — see
+below) and are no longer available to re-examine. Given the recollected
+scope (present since the root commit, unchanged throughout), a
+precautionary full history rewrite (`git filter-repo --replace-text`)
+was performed rather than a targeted fix to only the latest commit.
 
 ## What the rewrite did, and how it was verified
 
@@ -55,6 +70,24 @@ fix to only the latest commit.
   (`git reflog expire` + `git gc --prune=now --aggressive`), confirmed
   by attempting to resolve the old commit hashes afterward and getting
   `fatal: Not a valid object name`.
+
+## Current state — unambiguous, independent of the uncertainty above
+
+To be explicit, since the correction above is easy to over-read as
+casting doubt on the outcome rather than just the historical record:
+**current exposure is a clean no, confirmed independently, not just
+asserted.** GitHub's `origin/master` was checked via a completely fresh,
+independent clone after the force-push — no flagged strings anywhere in
+74 (now 75) reachable commits. This local machine was checked via
+`git fsck --full` after the purge — clean, no dangling or missing
+objects, and the old hashes fail to resolve at all
+(`fatal: Not a valid object name`). No other clone or machine holds this
+repository — confirmed directly by Borys. No fork, watcher, or other
+copy of this repository existed before the rewrite. The only thing that
+is *not* independently re-verifiable after the purge is the exact
+original content of the pre-rewrite root commit, addressed above — that
+uncertainty is scoped entirely to the historical record, not to whether
+anything is currently exposed anywhere.
 
 ## Was this a confirmed leak, or a false alarm?
 
