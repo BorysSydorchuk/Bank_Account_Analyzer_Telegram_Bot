@@ -210,6 +210,73 @@ table/constraint/endpoint/singleton needs before Sprint 6's auth lands.
 `insights` delete-and-replace is a deliberate decision (S4-04), not an
 oversight — see Invariants below.
 
+## Auth
+
+**S6-01 — infrastructure only. No route is wired to auth yet; this section
+describes the session model and cookie contract every login flow (S6-03
+Google OAuth, S6-04 email/password) and every protected route (S6-05,
+S6-06) will use once built.**
+
+Sessions are server-side state in Redis, referenced by an opaque cookie
+value — not a JWT. The cookie carries no claims of its own; every request
+looks the session id up in Redis to resolve the real user, so a session
+can be killed server-side (logout) with the client having no way to keep
+using a token it still physically holds, unlike a JWT that stays valid
+until its own expiry regardless of server-side state.
+
+`users` table (`app/models.py`'s `User`, migration `1f7634448483`):
+`id` UUID PK, `email` TEXT unique, `password_hash` TEXT nullable
+(NULL = OAuth-only account), `google_id` TEXT unique nullable (NULL =
+password-only account), `display_name` TEXT nullable, `created_at`.
+`CHECK (password_hash IS NOT NULL OR google_id IS NOT NULL)` — a row with
+neither is unrepresentable, enforced at the database level, not just in
+application code.
+
+Password hashing: `app/auth/password.py`, passlib's bcrypt scheme (bcrypt
+chosen over argon2id — no unusual threat model here, and no extra native
+dependency beyond what `passlib[bcrypt]` already pulls in). `bcrypt`
+pinned `<4.1` in `requirements.txt` — passlib 1.7.4's bcrypt backend reads
+an attribute bcrypt 4.1 removed, otherwise logging a spurious warning on
+every hash/verify call.
+
+Session storage: `app/auth/session.py`, Redis key `session:{session_id}`
+→ `{"user_id": ..., "created_at": ...}`. `session_id` is
+`secrets.token_urlsafe(32)` (256 bits from Python's CSPRNG) — not derived
+from anything guessable. TTL 30 days, **sliding**: `get_session()`
+re-issues the full 30-day TTL once less than `REFRESH_THRESHOLD_SECONDS`
+(5 days) remains, rather than on every request — bounds Redis `EXPIRE`
+writes to roughly once per 5 days of continuous use per session instead of
+once per API call, while still keeping any actively-used session alive
+indefinitely. A fixed (non-sliding) expiry was rejected: it would log out
+a daily active user exactly as readily as an abandoned session, when the
+thing actually worth expiring is inactivity, not elapsed time.
+
+Cookie (`app/auth/session.py`'s `set_session_cookie`/`clear_session_cookie`,
+not called by any route yet): name `session_id`, `httpOnly` (never
+readable by client-side JS — closes the main XSS session-theft path),
+`SameSite=Lax` (sent on top-level navigation, including the OAuth-callback
+redirect, but not cross-site subrequests — CSRF protection sufficient for
+a cookie-only session with no state-changing GET routes), `Secure`
+controlled by the `COOKIE_SECURE` env var, **default `false`**. Not
+hardcoded `true`: `backend`/`frontend` both run over plain `http://` in
+every environment this app runs in today (see URLs & Redirects — the only
+TLS in this stack is the unrelated port-3001 OAuth-callback catcher's
+mkcert cert), and a browser refuses to ever send a `Secure` cookie back to
+a plain-`http://` origin. Chromium-family browsers do special-case
+`http://localhost` as a "potentially trustworthy" origin for some
+secure-context APIs, but that exemption isn't reliably specified to also
+cover the cookie `Secure` attribute across every browser/version — an
+explicit env flag (same dev/prod split pattern as `FRONTEND_ORIGIN`) was
+chosen over relying on an implicit browser quirk for a security-relevant
+attribute. **Sprint 7's real production HTTPS is expected to set
+`COOKIE_SECURE=true`.**
+
+`app/auth/dependency.py`'s `get_current_user` (FastAPI dependency, not
+wired to any route until S6-05/S6-06): reads the `session_id` cookie,
+resolves it via `get_session`, loads the `User` row, raises `401` if the
+cookie is missing, the session is expired/invalid, or the session's
+`user_id` no longer has a matching row.
+
 ## External Dependencies & Their Guarantees
 
 **Enable Banking** — rely on: `external_id` is stable and unique across

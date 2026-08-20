@@ -18,6 +18,27 @@ from sqlalchemy.orm import declarative_base
 Base = declarative_base()
 
 
+class User(Base):
+    __tablename__ = "users"
+    # Google-only and password-only accounts are both valid (S6-03/S6-04);
+    # what's never valid is neither — a row with no way to ever authenticate
+    # as it. Enforced here, not just in application code, so a bug in the
+    # registration/OAuth-creation path can't silently write an unusable row.
+    __table_args__ = (
+        CheckConstraint(
+            "password_hash IS NOT NULL OR google_id IS NOT NULL",
+            name="users_has_auth_method",
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    email = Column(Text, nullable=False, unique=True)
+    password_hash = Column(Text)
+    google_id = Column(Text, unique=True)
+    display_name = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
     # Declared here too (not just in the migration) so `alembic revision
