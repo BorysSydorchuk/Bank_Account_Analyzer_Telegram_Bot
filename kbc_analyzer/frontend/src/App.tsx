@@ -1,27 +1,29 @@
 import { Monitor } from "lucide-react"
-import { BrowserRouter, Route, Routes } from "react-router-dom"
+import { BrowserRouter, Outlet, Route, Routes } from "react-router-dom"
 
 import { Sidebar } from "@/components/layout/Sidebar"
 import { ChatPage } from "@/pages/ChatPage"
 import { DashboardPage } from "@/pages/DashboardPage"
+import { LoginPage } from "@/pages/LoginPage"
 import { SettingsPage } from "@/pages/SettingsPage"
 import { TransactionsPage } from "@/pages/TransactionsPage"
 
-function App() {
+// The sidebar/mobile-fallback shell every route except /login uses. A
+// layout route (rendered via <Outlet/>) rather than repeating this shell
+// per page — /login can't use it at all, since it's the one route
+// reachable before a session exists (S6-05 adds the actual
+// redirect-to-login guard around this shell; it just needs to exist
+// separately from /login first).
+function AppShell() {
   return (
-    <BrowserRouter>
+    <>
       {/* Sprint 1 targets 1024px+ only; below that, a plain message rather
           than a half-broken layout. Tailwind's `lg` breakpoint is 1024px,
           so it lines up exactly with the ticket's minimum width. */}
       <div className="hidden h-screen bg-background font-sans lg:flex">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Routes>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="/transactions" element={<TransactionsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Routes>
+          <Outlet />
         </div>
       </div>
 
@@ -32,6 +34,22 @@ function App() {
           <p className="text-sm text-text-secondary">KBC Analyzer is best viewed on a larger screen.</p>
         </div>
       </div>
+    </>
+  )
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route element={<AppShell />}>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/transactions" element={<TransactionsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Route>
+      </Routes>
     </BrowserRouter>
   )
 }

@@ -16,7 +16,19 @@ from sqlalchemy.exc import OperationalError
 from .db import engine
 from .eb_service import EnableBankingAuthError, EnableBankingError
 from .rate_limit import limiter
-from .routers import analysis, auth, budgets, categories, chat, insights, jobs, settings, statistics, transactions
+from .routers import (
+    analysis,
+    auth,
+    budgets,
+    categories,
+    chat,
+    insights,
+    jobs,
+    settings,
+    statistics,
+    transactions,
+    user_auth,
+)
 from .sync_lock import SyncAlreadyRunningError
 
 # S4-09 Item 3 surfaced this: without any handler configured, Python's root
@@ -41,11 +53,19 @@ app.add_middleware(
     allow_origins=[frontend_origin],
     allow_methods=["*"],
     allow_headers=["*"],
+    # S6-03: the session cookie only ever gets attached to a cross-origin
+    # fetch (frontend :5173 -> backend :8000) if the browser is told both
+    # sides allow it — this flag on the server side, `credentials:
+    # "include"` on the client side (lib/api.ts). Safe alongside a single
+    # explicit allow_origins entry (never "*", per CLAUDE.md) — the browser
+    # itself refuses to honor allow_credentials with a wildcard origin.
+    allow_credentials=True,
 )
 
 app.include_router(transactions.router)
 app.include_router(statistics.router)
 app.include_router(auth.router)
+app.include_router(user_auth.router)
 app.include_router(settings.router)
 app.include_router(analysis.router)
 app.include_router(categories.router)

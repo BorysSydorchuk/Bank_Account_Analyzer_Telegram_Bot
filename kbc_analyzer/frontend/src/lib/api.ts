@@ -48,6 +48,12 @@ export class SyncConflictError extends ApiError {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
+    // S6-03: the session cookie is set by the backend (a different origin
+    // in local dev — :5173 vs :8000), so the browser only attaches it to
+    // a fetch that explicitly opts in. Paired with main.py's
+    // allow_credentials=True — both sides have to agree, or the browser
+    // silently drops the cookie either direction.
+    credentials: "include",
     ...init,
   })
   if (!res.ok) {
@@ -69,6 +75,7 @@ export async function syncTransactions(dateFrom: string, dateTo: string) {
   const res = await fetch(`${API_URL}/api/transactions/sync`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ date_from: dateFrom, date_to: dateTo }),
   })
   if (res.status === 409) {
@@ -80,6 +87,10 @@ export async function syncTransactions(dateFrom: string, dateTo: string) {
     throw new ApiError(res.status, body?.message ?? body?.detail ?? `Request failed with status ${res.status}`)
   }
   return res.json() as Promise<SyncResponse>
+}
+
+export function logout() {
+  return request<void>("/api/auth/logout", { method: "POST" })
 }
 
 export function getStatistics(dateFrom: string, dateTo: string) {
@@ -244,6 +255,7 @@ export function streamChat(message: string, history: ChatHistoryEntry[], handler
       const res = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ message, history }),
         signal: controller.signal,
       })

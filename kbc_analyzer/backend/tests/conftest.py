@@ -78,6 +78,15 @@ os.environ.setdefault("SETTINGS_SECRET", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 # to be syntactically present so unrelated imports don't KeyError.
 os.environ.setdefault("ENABLEBANKING_APP_ID", "test-app-id")
 os.environ.setdefault("ENABLEBANKING_PRIVATE_KEY_PATH", str(Path(__file__).parent / "fixtures" / "unused.pem"))
+# Google OAuth (S6-03): never real credentials. app/google_oauth.py's
+# build_authorize_url() reads these directly (no dependency-injection seam
+# to override) — tests/test_google_oauth.py monkeypatches the actual
+# outbound HTTP calls (exchange_code_for_tokens/fetch_userinfo), but
+# building the initial redirect URL still needs a syntactically present
+# client id, same reasoning as the Enable Banking values above.
+os.environ.setdefault("GOOGLE_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
+os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
+os.environ.setdefault("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback")
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402

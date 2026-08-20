@@ -9,7 +9,38 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .models import Budget, Category, Insight, Setting, Transaction
+from .models import Budget, Category, Insight, Setting, Transaction, User
+
+
+def get_user_by_google_id(db: Session, google_id: str) -> User | None:
+    return db.execute(select(User).where(User.google_id == google_id)).scalar_one_or_none()
+
+
+def get_user_by_email(db: Session, email: str) -> User | None:
+    return db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+
+
+def create_user_from_google(db: Session, google_id: str, email: str, display_name: str | None) -> User:
+    """A brand-new account created by a first Google sign-in — no
+    password_hash, google_id-only (satisfies users_has_auth_method)."""
+    user = User(google_id=google_id, email=email, display_name=display_name)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def link_google_id(db: Session, user: User, google_id: str) -> User:
+    """Attaches a Google identity to an existing (password-registered)
+    account — the account-linking case (S6-03): same email, first time
+    signing in via Google. Never overwrites an existing google_id (a user
+    already linked to a different Google account never gets silently
+    re-pointed by this call — routers/user_auth.py only calls this when
+    user.google_id is None)."""
+    user.google_id = google_id
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[int, int]:

@@ -46,6 +46,37 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Real live Google OAuth flow — not run (S6-03)
+
+- **What was deferred:** S6-03's own acceptance criteria requires "a real
+  live Google OAuth flow works end-to-end." No `GOOGLE_CLIENT_ID`/
+  `GOOGLE_CLIENT_SECRET` existed anywhere in this project before this
+  ticket; Borys is setting up a real Google Cloud OAuth client in
+  parallel. The full flow (`GET /api/auth/google/login` -> real Google
+  consent screen -> `GET /api/auth/google/callback` -> real session) was
+  verified structurally instead: `tests/test_google_oauth.py` (6 tests)
+  drives the exact same code path with `exchange_code_for_tokens`/
+  `fetch_userinfo` monkeypatched at the same seam `routers/user_auth.py`
+  imports them through — real Redis sessions, real Postgres user rows,
+  only the two outbound calls to Google itself are faked. Also could not
+  visually verify `/login` renders/behaves correctly in a real browser —
+  the Chrome extension wasn't connected in this session; verified instead
+  via a clean `tsc -b`, a clean `oxlint`, and Vite serving the compiled
+  module with no transform error.
+- **Why:** No real Google OAuth credentials exist yet, and completing a
+  real Google consent screen requires a human clicking through it in a
+  real browser — same posture as Enable Banking's real KBC login
+  (ARCHITECTURE.md: "Codee never handles bank credentials"), extended to
+  Google credentials for the same reason.
+- **What would close it:** Once Borys adds real `GOOGLE_CLIENT_ID`/
+  `GOOGLE_CLIENT_SECRET`/`GOOGLE_REDIRECT_URI` to `.env`, a real sign-in
+  click-through (new account, then the account-linking case against an
+  existing password-registered email) with the resulting session/cookie
+  inspected in DevTools — this also closes the `/login` browser-rendering
+  gap, since it requires actually loading the page.
+- **Status (2026-08-20):** OPEN — closes once Borys completes the real
+  sign-in himself and confirms back, per S6-03's own WHEN DONE.
+
 ### Date-range validation regression tests — not built (S5-07)
 
 - **What was deferred:** Automated tests for the S5-07 date-range fix

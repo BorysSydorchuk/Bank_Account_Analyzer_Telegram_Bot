@@ -70,7 +70,8 @@ CLI flag already configures its own root logger.
 | URL | Value | Served by |
 |---|---|---|
 | Enable Banking redirect URI | `https://localhost:3001/callback` | `celery_worker` / `app/eb_callback_server.py`'s `CALLBACK_PORT` constant |
-| Frontend origin (CORS) | `FRONTEND_ORIGIN`, default `http://localhost:5173` | `backend/app/main.py`'s `CORSMiddleware` setup |
+| Google OAuth redirect URI (S6-03) | `GOOGLE_REDIRECT_URI`, default `http://localhost:8000/api/auth/google/callback` | `backend` / `routers/user_auth.py`'s `google_callback` — must exactly match a redirect URI registered on the Google Cloud OAuth client, or Google rejects the request outright |
+| Frontend origin (CORS) | `FRONTEND_ORIGIN`, default `http://localhost:5173` | `backend/app/main.py`'s `CORSMiddleware` setup, `allow_credentials=True` as of S6-03 (session cookie must reach a cross-origin frontend fetch) |
 | Frontend's API base | `VITE_API_URL`, default `http://localhost:8000` | `frontend/src/lib/api.ts`'s `API_URL` constant, injected via compose, no `.env` file on disk |
 
 The redirect URI must be `https://` — Enable Banking's `/auth` endpoint
@@ -221,10 +222,9 @@ oversight — see Invariants below.
 
 ## Auth
 
-**S6-01 — infrastructure only. No route is wired to auth yet; this section
-describes the session model and cookie contract every login flow (S6-03
-Google OAuth, S6-04 email/password) and every protected route (S6-05,
-S6-06) will use once built.**
+**S6-01 built the session/cookie infrastructure; S6-03 is the first login
+flow to actually use it (Google OAuth). Email/password (S6-04) and
+protecting real routes with it (S6-05, S6-06) are still ahead.**
 
 Sessions are server-side state in Redis, referenced by an opaque cookie
 value — not a JWT. The cookie carries no claims of its own; every request
@@ -285,6 +285,50 @@ wired to any route until S6-05/S6-06): reads the `session_id` cookie,
 resolves it via `get_session`, loads the `User` row, raises `401` if the
 cookie is missing, the session is expired/invalid, or the session's
 `user_id` no longer has a matching row.
+
+**Google OAuth sign-in (S6-03).** `app/google_oauth.py` — plain `requests`
+calls against Google's documented endpoints (authorize URL, token
+exchange, `openidconnect.googleapis.com/v1/userinfo`), not a dedicated
+SDK; this app only ever needs those three calls. `routers/user_auth.py`
+(`/api/auth` prefix — disjoint sub-paths from `routers/auth.py`'s
+`/api/auth/enable-banking/*`, no collision):
+
+- `GET /api/auth/google/login` — generates a random `state`
+  (`secrets.token_urlsafe(24)`), stores it in a short-lived (`10 min`)
+  `oauth_state` cookie, redirects to Google's consent screen. The state
+  round-trip is this flow's CSRF protection: the callback only proceeds if
+  the `state` query param Google echoes back matches this cookie.
+- `GET /api/auth/google/callback` — rejects on a missing/mismatched
+  `state` or a Google-side failure (redirects to `/login?error=
+  google_sign_in_failed`, no session created — never a raw 500, including
+  when `GOOGLE_CLIENT_ID` itself isn't configured yet). On success:
+  resolves the user by `google_id` first; if none, by `email` (**account
+  linking** — attaches this Google identity to an existing
+  password-registered account with the same, Google-verified email rather
+  than creating a duplicate row; `fetch_userinfo` rejects an unverified
+  email outright, since trusting an unverified address for linking would
+  let anyone claim an existing account just by typing its email into a
+  Google signup); if neither, creates a new `google_id`-only row. Then
+  `create_session` + `set_session_cookie`, redirect to `FRONTEND_ORIGIN`.
+- `POST /api/auth/logout` — destroys the session, clears the cookie. Not
+  gated behind `get_current_user` (a no-op on an already-invalid session
+  is fine — nothing to protect by requiring one first).
+
+**CORS + credentials.** `main.py`'s `CORSMiddleware` gained
+`allow_credentials=True` as of S6-03 — the session cookie only reaches a
+cross-origin `fetch` (frontend `:5173` -> backend `:8000` in local dev) if
+both the server (`allow_credentials`) and the client
+(`lib/api.ts`'s `request()`/`syncTransactions`/`streamChat`, all now pass
+`credentials: "include"`) opt in. Safe alongside `allow_origins`'s single
+explicit origin (never `"*"`, per CLAUDE.md) — browsers refuse to honor
+`allow_credentials` with a wildcard origin anyway.
+
+`/login` (`frontend/src/pages/LoginPage.tsx`) — a layout route outside
+`AppShell` (`App.tsx`), since it's the one route reachable before a
+session exists. The Google button is a plain `<a href>` to
+`GET /api/auth/google/login`, not a `fetch` — signing in is a real
+top-level browser navigation through Google's own consent screen, which a
+CORS-bound `fetch` can't follow the way a real navigation does.
 
 ## External Dependencies & Their Guarantees
 
