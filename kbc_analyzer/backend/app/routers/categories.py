@@ -1,20 +1,29 @@
 """GET /api/categories, PATCH /api/categories/{name}, POST /api/categories,
 and POST /api/categories/{name}/reset (S3-06).
+
+GET is the only one of these four protected/scoped so far (S6-05, a
+first real test of get_current_user before S6-06's full sweep) — PATCH,
+POST, and reset stay open and unscoped until then, a deliberate partial
+state, not an oversight.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import crud
+from ..auth.dependency import get_current_user
 from ..colors import describe_validation_failure
 from ..db import get_db
+from ..models import User
 from ..schemas import CategoryOut, CreateCategoryRequest, PatchCategoryRequest
 
 router = APIRouter(prefix="/api/categories", tags=["categories"])
 
 
 @router.get("", response_model=list[CategoryOut])
-def get_categories(db: Session = Depends(get_db)) -> list[CategoryOut]:
-    return crud.list_categories(db)
+def get_categories(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> list[CategoryOut]:
+    return crud.list_categories(db, current_user.id)
 
 
 @router.patch("/{name}", response_model=CategoryOut)

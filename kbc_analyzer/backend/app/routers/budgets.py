@@ -1,5 +1,15 @@
 """GET /api/budgets, POST /api/budgets, PATCH /api/budgets/{category}, and
 DELETE /api/budgets/{category} (S4-05).
+
+GET is the only one of these four protected/scoped so far (S6-05, a
+first real test of get_current_user before S6-06's full sweep) — POST,
+PATCH, and DELETE still use the CURRENT_USER_ID=None placeholder below,
+a deliberate partial state, not an oversight. Since S6-02 made
+budgets.user_id NOT NULL, CURRENT_USER_ID=None means those three routes
+now query/write against a user_id no real budget has (`WHERE user_id IS
+NULL` matches nothing, `INSERT ... user_id=NULL` fails outright) — the
+same tracked, deliberate breakage as every other un-threaded crud.py
+write path (see docs/tickets/S6-02-schema-migration-user-id-everywhere.md).
 """
 from decimal import Decimal
 
@@ -7,14 +17,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import crud
+from ..auth.dependency import get_current_user
 from ..db import get_db
+from ..models import User
 from ..schemas import BudgetOut, CreateBudgetRequest, PatchBudgetRequest
 
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
 
-# TODO(Sprint 6): replace with the authenticated user's id once auth exists.
-# Every crud.* call below already takes user_id as an explicit parameter so
-# that sprint only has to change this one value, not the function signatures.
+# TODO(Sprint 6, S6-06): replace with the authenticated user's id on the
+# three routes below once they're wired to get_current_user too. GET
+# (below) no longer uses this — it takes current_user.id directly.
 CURRENT_USER_ID = None
 
 
@@ -29,8 +41,8 @@ def _budget_out(db: Session, category: str) -> BudgetOut:
 
 
 @router.get("", response_model=list[BudgetOut])
-def get_budgets(db: Session = Depends(get_db)) -> list[BudgetOut]:
-    return [BudgetOut(**b) for b in crud.list_budgets_with_status(db, CURRENT_USER_ID)]
+def get_budgets(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> list[BudgetOut]:
+    return [BudgetOut(**b) for b in crud.list_budgets_with_status(db, current_user.id)]
 
 
 @router.post("", response_model=BudgetOut, status_code=201)

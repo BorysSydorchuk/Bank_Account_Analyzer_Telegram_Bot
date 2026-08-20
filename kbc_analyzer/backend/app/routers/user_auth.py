@@ -158,6 +158,18 @@ def logout(request: Request, response: Response) -> None:
     clear_session_cookie(response)
 
 
+@router.get("/me", response_model=UserOut)
+def get_me(current_user: User = Depends(get_current_user)) -> User:
+    """S6-05 — the frontend's route guard calls this once on load to
+    decide "does a valid session exist," rather than inferring it from
+    whichever page-specific query happens to run first. get_current_user
+    already does all the real work (401 on missing/expired/invalid
+    session); this endpoint exists only to give the frontend one
+    reliable, page-independent thing to ask.
+    """
+    return current_user
+
+
 @router.post("/register", status_code=201, response_model=UserOut)
 @limiter.limit(REGISTER_RATE_LIMIT)
 def register(request: Request, body: RegisterRequest, response: Response, db: Session = Depends(get_db)) -> User:

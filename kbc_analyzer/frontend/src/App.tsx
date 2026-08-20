@@ -1,7 +1,8 @@
 import { Monitor } from "lucide-react"
-import { BrowserRouter, Outlet, Route, Routes } from "react-router-dom"
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom"
 
 import { Sidebar } from "@/components/layout/Sidebar"
+import { useCurrentUser } from "@/hooks/useCurrentUser"
 import { ChatPage } from "@/pages/ChatPage"
 import { DashboardPage } from "@/pages/DashboardPage"
 import { LoginPage } from "@/pages/LoginPage"
@@ -9,20 +10,35 @@ import { RegisterPage } from "@/pages/RegisterPage"
 import { SettingsPage } from "@/pages/SettingsPage"
 import { TransactionsPage } from "@/pages/TransactionsPage"
 
-// The sidebar/mobile-fallback shell every route except /login uses. A
-// layout route (rendered via <Outlet/>) rather than repeating this shell
-// per page — /login can't use it at all, since it's the one route
-// reachable before a session exists (S6-05 adds the actual
-// redirect-to-login guard around this shell; it just needs to exist
-// separately from /login first).
+// The sidebar/mobile-fallback shell every route except /login and
+// /register uses — and, as of S6-05, the actual redirect-to-login guard:
+// GET /api/auth/me runs once on mount; any failure (no session, expired
+// session — see useCurrentUser's docstring for why every error is
+// treated the same) sends the visitor to /login instead of rendering
+// whatever page they asked for. A layout route (rendered via <Outlet/>)
+// rather than repeating this shell/check per page.
 function AppShell() {
+  const { data: user, isPending, isError } = useCurrentUser()
+
+  if (isPending) {
+    // No spinner/skeleton here on purpose — this resolves in one fast
+    // local request (Redis-backed session lookup), and a flash of
+    // loading UI before either the app or /login would be more jarring
+    // than a blank frame for that long.
+    return null
+  }
+
+  if (isError) {
+    return <Navigate to="/login" replace />
+  }
+
   return (
     <>
       {/* Sprint 1 targets 1024px+ only; below that, a plain message rather
           than a half-broken layout. Tailwind's `lg` breakpoint is 1024px,
           so it lines up exactly with the ticket's minimum width. */}
       <div className="hidden h-screen bg-background font-sans lg:flex">
-        <Sidebar />
+        <Sidebar user={user} />
         <div className="flex min-w-0 flex-1 flex-col">
           <Outlet />
         </div>

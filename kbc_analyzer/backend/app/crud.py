@@ -275,8 +275,19 @@ def update_transaction(db: Session, transaction_id: UUID, updates: dict) -> Tran
     return transaction
 
 
-def list_categories(db: Session) -> list[Category]:
-    return list(db.execute(select(Category).order_by(Category.name)).scalars())
+def list_categories(db: Session, user_id: UUID | None = None) -> list[Category]:
+    """All categories, ordered by name — scoped to user_id when given.
+    Optional (default None = unscoped, every user's rows) rather than
+    required: S6-05 only protects/scopes GET /api/categories; POST
+    /api/categories' own duplicate-name check still calls this unscoped,
+    since that route isn't authenticated yet (S6-06's job) — this matches
+    the same optional-user_id pattern already used by
+    agents/registry.get_provider and sync_lock's key derivation.
+    """
+    query = select(Category).order_by(Category.name)
+    if user_id is not None:
+        query = query.where(Category.user_id == user_id)
+    return list(db.execute(query).scalars())
 
 
 def list_seeded_category_names(db: Session) -> list[str]:

@@ -90,6 +90,10 @@ export async function syncTransactions(dateFrom: string, dateTo: string) {
   return res.json() as Promise<SyncResponse>
 }
 
+export function getCurrentUser() {
+  return request<UserOut>("/api/auth/me")
+}
+
 export function logout() {
   return request<void>("/api/auth/logout", { method: "POST" })
 }

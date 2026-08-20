@@ -223,10 +223,10 @@ oversight — see Invariants below.
 ## Auth
 
 **S6-01 built the session/cookie infrastructure; S6-03 (Google) and S6-04
-(email/password) are both live login methods now. Protecting real
-application routes with `get_current_user` (S6-05, S6-06) is still
-ahead — every route below is auth-related infrastructure itself, not yet
-a route it guards.**
+(email/password) are both live login methods. S6-05 is the first real
+protection of application routes (`GET /api/categories`, `GET
+/api/budgets`) and the frontend route guard — proof-of-concept for
+S6-06's full sweep across every remaining endpoint.**
 
 Sessions are server-side state in Redis, referenced by an opaque cookie
 value — not a JWT. The cookie carries no claims of its own; every request
@@ -285,12 +285,10 @@ attribute. **Sprint 7's real production HTTPS is expected to set
 `app/auth/dependency.py`'s `get_current_user` (FastAPI dependency): reads
 the `session_id` cookie, resolves it via `get_session`, loads the `User`
 row, raises `401` if the cookie is missing, the session is expired/
-invalid, or the session's `user_id` no longer has a matching row. Not
-wired to any *application* route until S6-05/S6-06 — its first real use
-is S6-04's `POST /api/auth/set-password` below, an auth-settings action
-on the caller's own account, not one of the app's actual feature routes
-(categories, budgets, transactions, ...), which is what S6-05/S6-06 are
-specifically about.
+invalid, or the session's `user_id` no longer has a matching row. First
+used by S6-04's `POST /api/auth/set-password` (an auth-settings action on
+the caller's own account); S6-05 is its first use on an actual feature
+route (below).
 
 **Google OAuth sign-in (S6-03).** `app/google_oauth.py` — plain `requests`
 calls against Google's documented endpoints (authorize URL, token
@@ -382,6 +380,39 @@ top-level browser navigation through Google's own consent screen, which a
 CORS-bound `fetch` can't follow the way a real navigation does. Also has
 an email/password form (S6-04) below a divider. `/register`
 (`RegisterPage.tsx`) is the same shape without the Google button.
+
+**Auth middleware rollout, partial (S6-05).** First real protection of
+application routes, proving the whole login -> protected-route -> logout
+loop before S6-06's full sweep:
+
+- `GET /api/categories` and `GET /api/budgets` — both now require
+  `get_current_user` and both actually filter by the caller's `user_id`
+  (`crud.list_categories(db, user_id)`, `crud.list_budgets_with_status
+  (db, user_id)`), not just gated access. `list_categories`'s `user_id`
+  param is optional, default `None` (unscoped) — `POST /api/categories`'s
+  own duplicate-name check still calls it that way, since that route
+  isn't authenticated yet (S6-06). `routers/budgets.py`'s
+  `CURRENT_USER_ID = None` placeholder is now only used by `POST`/
+  `PATCH`/`DELETE` — since S6-02 made `budgets.user_id` `NOT NULL`, those
+  three currently query/write against a `user_id` no real budget has
+  (`WHERE user_id IS NULL` matches nothing; an `INSERT` with `user_id=
+  NULL` fails outright) — the same tracked, deliberate S6-02 breakage,
+  now scoped down to exactly three routes instead of four.
+- `GET /api/health` — confirmed to still need nothing (a liveness/DB
+  check, never behind auth).
+- `GET /api/auth/me` (new) — the frontend's route guard's one
+  page-independent way to ask "does a valid session exist," rather than
+  inferring it from whichever page-specific query happens to fire first.
+- `AppShell` (`App.tsx`) — the layout route wrapping every route except
+  `/login`/`/register` — calls `GET /api/auth/me` once on mount via
+  `useCurrentUser` (`retry: false`; any error, not just `401`, is treated
+  as "no valid session" — there's no other failure mode worth
+  distinguishing for a route guard) and redirects to `/login` on failure.
+- `Sidebar.tsx` gained a user menu (avatar initial, truncated email,
+  logout button) at the bottom — `logout()` clears the entire React Query
+  cache (`queryClient.clear()`, not just the current-user query) before a
+  full-page redirect to `/login`, so no stale cached data from this
+  session survives into whatever session comes next in the same browser.
 
 ## External Dependencies & Their Guarantees
 
