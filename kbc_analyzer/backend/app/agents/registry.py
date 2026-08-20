@@ -3,6 +3,7 @@ through get_provider() — nothing instantiates GeminiProvider/ClaudeProvider
 directly, so switching providers in Settings changes behavior everywhere at once.
 """
 import logging
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -20,14 +21,20 @@ class ProviderNotConfiguredError(Exception):
     """The selected provider's API key hasn't been set in Settings yet."""
 
 
-# S4-09 Item 3: one provider instance per name, reused across requests
-# instead of re-authenticating a fresh SDK client on every call. Keyed on
-# provider name, not on the API key value — routers/settings.py calls
-# invalidate_provider_cache() after ANY successful PATCH /api/settings, not
-# just an llm_provider switch, because editing a key in place (same
-# provider name, new key) would otherwise keep serving a cached instance
-# built from the old key.
-_provider_cache: dict[str, LLMProvider] = {}
+# S4-09 Item 3: one provider instance per (user, provider name), reused
+# across requests instead of re-authenticating a fresh SDK client on every
+# call. Keyed on user_id too as of S6-02 — settings (and so API keys) are
+# per-user from this sprint on, so a cache keyed on provider name alone
+# would let the first user to call a given provider's API key serve every
+# other user's requests. user_id defaults to None (single-user era, same
+# pattern as sync_lock.py's lock key and job_store.py) — every caller
+# passes None today; S6-06 threading a real value through is a one-line
+# change at each call site, not a signature change here.
+# routers/settings.py calls invalidate_provider_cache() after ANY
+# successful PATCH /api/settings, not just an llm_provider switch, because
+# editing a key in place (same provider name, new key) would otherwise
+# keep serving a cached instance built from the old key.
+_provider_cache: dict[tuple[UUID | None, str], LLMProvider] = {}
 
 
 def invalidate_provider_cache() -> None:
@@ -36,11 +43,12 @@ def invalidate_provider_cache() -> None:
     _provider_cache.clear()
 
 
-def get_provider(db: Session) -> LLMProvider:
+def get_provider(db: Session, user_id: UUID | None = None) -> LLMProvider:
     settings = settings_service.get_settings(db)
     provider_name = settings["llm_provider"]
+    cache_key = (user_id, provider_name)
 
-    cached = _provider_cache.get(provider_name)
+    cached = _provider_cache.get(cache_key)
     if cached is not None:
         logger.info("Provider cache hit for %r", provider_name)
         return cached
@@ -58,6 +66,6 @@ def get_provider(db: Session) -> LLMProvider:
     else:
         raise ProviderNotConfiguredError(f"Unknown provider: {provider_name!r}")
 
-    _provider_cache[provider_name] = provider
+    _provider_cache[cache_key] = provider
     logger.info("Provider cache miss for %r — created a new instance", provider_name)
     return provider

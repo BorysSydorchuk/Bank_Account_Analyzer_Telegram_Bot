@@ -6,6 +6,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Numeric,
     Text,
@@ -42,27 +43,46 @@ class User(Base):
 class Transaction(Base):
     __tablename__ = "transactions"
     # Declared here too (not just in the migration) so `alembic revision
-    # --autogenerate` diffs against the real constraint instead of proposing
-    # to drop it, which it silently did once already (S2-03) before this was
-    # added. external_id alone (S4-01) — Enable Banking's own transaction
-    # reference is unique across the whole bank, unlike account_id, which
-    # changes on every reconnect.
-    __table_args__ = (UniqueConstraint("external_id"),)
+    # --autogenerate` diffs against the real constraints instead of proposing
+    # to drop them, which happened once already (S2-03) before this was
+    # added. external_id (S4-01) — Enable Banking's own transaction
+    # reference is stable across reconnects, unlike account_id — but is not
+    # globally unique (S6-02 Step 0, vendor-confirmed: see
+    # docs/multi_user_migration_plan.md), hence scoped to (user_id,
+    # external_id), not external_id alone, from Sprint 6 on. category's FK
+    # is composite for the same reason as Budget.category below — see that
+    # column's comment.
+    __table_args__ = (
+        UniqueConstraint("user_id", "external_id", name="uq_transactions_user_id_external_id"),
+        ForeignKeyConstraint(
+            ["user_id", "category"],
+            ["categories.user_id", "categories.name"],
+            onupdate="CASCADE",
+            ondelete="SET NULL",
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    # Sprint 6 (S6-02) — every row backfilled to the single bootstrap user at
+    # migration time; NOT NULL from the start of this column's life (no
+    # nullable-first period like Budget's original S4-05 addition, since
+    # this migration backfills before adding the column's NOT NULL, all
+    # within the same ticket — see the migration files for the exact
+    # add-nullable -> backfill -> NOT NULL sequence actually run).
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     account_id = Column(Text, nullable=False)
     external_id = Column(Text, nullable=False)
     booking_date = Column(Date)
     amount = Column(Numeric(10, 2), nullable=False)
     currency = Column(Text, server_default="EUR")
     description = Column(Text)
-    # References categories.name (S5-02) — same natural-key reasoning as
-    # Budget.category. ON UPDATE CASCADE so a category rename (if that
-    # feature ever ships) carries every transaction along automatically;
-    # ON DELETE SET NULL so deleting a category nulls the transaction's
-    # category instead of orphaning it. subcategory has no FK — it's a
-    # free-text refinement, not itself a first-class entity with a table.
-    category = Column(Text, ForeignKey("categories.name", onupdate="CASCADE", ondelete="SET NULL"))
+    # No column-level ForeignKey here (unlike pre-S6-02) — category's FK is
+    # composite (user_id, category) -> categories(user_id, name), declared
+    # in __table_args__ above, since categories' primary key is now
+    # composite too (Sprint 6: a category name is only unique per user).
+    # subcategory has no FK — it's a free-text refinement, not itself a
+    # first-class entity with a table.
+    category = Column(Text)
     subcategory = Column(Text)
     # True once a human has set category/subcategory/description by hand
     # (S3-05) — the categorization agent's query excludes these rows even
@@ -77,7 +97,13 @@ class Setting(Base):
     __tablename__ = "settings"
 
     # Simple key/value store — deliberately not one column per setting, so adding a
-    # new setting later never needs a migration, just a new seeded row.
+    # new setting later never needs a migration, just a new seeded row. Sprint 6
+    # (S6-02): widened to a composite (user_id, key) primary key rather than a
+    # separate user_settings table — a shared API key funds every other user's
+    # LLM calls otherwise (a billing hole, PM ruling 2026-08-17), and widening
+    # the existing key-value shape needed no redesign of encrypt-on-write
+    # (crypto.py) — only the row identity changed, not what a row holds.
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
     key = Column(Text, primary_key=True)
     value = Column(Text, nullable=False)
 
@@ -85,9 +111,14 @@ class Setting(Base):
 class Category(Base):
     __tablename__ = "categories"
 
-    # name is the primary key, not a surrogate UUID — categories are referenced by
-    # name everywhere already (transactions.category is a free-text column, not a
-    # foreign key), so this is the natural key rather than an invented one.
+    # Sprint 6 (S6-02): composite (user_id, name) primary key, not name alone
+    # — a personal color override (S3-06) is meaningless as a *shared*
+    # override once a second user exists (PM ruling 2026-08-17). Categories
+    # are still referenced by name within a user's own data (transactions.category
+    # is a free-text column, matched via the composite FK on Transaction/Budget
+    # above/below), so (user_id, name) is the natural key, not an invented
+    # surrogate.
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
     name = Column(Text, primary_key=True)
     color = Column(Text, nullable=False)
     is_custom = Column(Boolean, server_default="false")
@@ -115,6 +146,14 @@ class Insight(Base):
     # not a natural key, since "date_from + date_to + type" isn't unique
     # across regenerations for the same range.
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    # Sprint 6 (S6-02) — without this, two users syncing overlapping date
+    # ranges would silently share insight rows (list_insights' query gains
+    # the matching user_id filter in S6-06; this column alone doesn't
+    # scope reads yet — see docs/multi_user_migration_plan.md's Endpoints
+    # section). ix_insights_date_range is left as (date_from, date_to)
+    # unchanged — widening it to include user_id is a query-scoping
+    # concern for S6-06, not this ticket's schema work.
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     date_from = Column(Date, nullable=False)
     date_to = Column(Date, nullable=False)
     type = Column(Text, nullable=False)
@@ -130,9 +169,9 @@ class Budget(Base):
     # Declared here too (not just in the migration), same reason as
     # Transaction's UniqueConstraint (S2-03): so autogenerate diffs against
     # the real constraint instead of proposing to drop it. NULLS NOT DISTINCT
-    # matters even in the single-user era — every row's user_id is NULL today,
-    # and Postgres treats NULL as distinct from NULL by default, so a plain
-    # UNIQUE would silently allow two budgets for the same category.
+    # is kept even though user_id is NOT NULL from Sprint 6 on (see below) —
+    # harmless once NULLs can't occur, and left as-is rather than swapped for
+    # a plain UNIQUE to minimize unrelated changes in this migration.
     __table_args__ = (
         UniqueConstraint(
             "user_id", "category", "period",
@@ -140,17 +179,24 @@ class Budget(Base):
             postgresql_nulls_not_distinct=True,
         ),
         CheckConstraint("amount > 0", name="ck_budgets_amount_positive"),
+        ForeignKeyConstraint(
+            ["user_id", "category"],
+            ["categories.user_id", "categories.name"],
+            onupdate="CASCADE",
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    # NULL = single-user era. Sprint 6's multi-user migration backfills this
-    # and adds NOT NULL — added now so that migration doesn't have to
-    # retrofit a whole new column onto a table already holding real budgets.
-    user_id = Column(UUID(as_uuid=True), nullable=True)
-    # References categories.name, not a surrogate id — same natural-key
-    # reasoning as Category itself. ON UPDATE CASCADE so renaming a category
-    # (if that ever becomes possible) carries its budget along automatically.
-    category = Column(Text, ForeignKey("categories.name", onupdate="CASCADE"), nullable=False)
+    # NULL through Sprint 5 (this table was built multi-user-ready at S4-05,
+    # ahead of the rest of the schema). Sprint 6 (S6-02) backfills every row
+    # to the bootstrap user and tightens to NOT NULL, same as every other
+    # table's user_id column.
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    # No column-level ForeignKey here (unlike pre-S6-02) — category's FK is
+    # composite (user_id, category) -> categories(user_id, name), declared
+    # in __table_args__ above, since categories' primary key is now
+    # composite (see Category).
+    category = Column(Text, nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)
     period = Column(Text, nullable=False, server_default="monthly")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

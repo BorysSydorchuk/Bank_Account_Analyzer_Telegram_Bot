@@ -43,7 +43,17 @@ def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[
             raw_data=t,
         )
         stmt = stmt.on_conflict_do_update(
-            index_elements=[Transaction.external_id],
+            # S6-02: transactions' unique constraint is now (user_id,
+            # external_id), not external_id alone — index_elements must
+            # match it exactly or Postgres rejects the ON CONFLICT clause
+            # outright ("no unique or exclusion constraint matching the
+            # specification"). This is a mechanical fix to keep the SQL
+            # valid, not user_id business-logic threading — this function
+            # still writes no user_id (S6-06's job), so it now fails on a
+            # NOT NULL violation instead, a deliberate, tracked gap (see
+            # docs/tickets/S6-02-schema-migration-user-id-everywhere.md's
+            # ruling and docs/verification_debt.md).
+            index_elements=[Transaction.user_id, Transaction.external_id],
             set_={
                 "booking_date": stmt.excluded.booking_date,
                 "amount": stmt.excluded.amount,
@@ -229,7 +239,11 @@ def upsert_category_colors(db: Session, colors_by_name: dict[str, str], source: 
     for name, color in colors_by_name.items():
         stmt = pg_insert(Category).values(name=name, color=color, source=source, ai_color=color)
         stmt = stmt.on_conflict_do_update(
-            index_elements=[Category.name],
+            # S6-02: categories' primary key is now (user_id, name) — see
+            # the note on the transactions ON CONFLICT clause above, same
+            # reasoning. This function still writes no user_id, so it now
+            # fails on a NOT NULL violation (S6-06's job to fix).
+            index_elements=[Category.user_id, Category.name],
             set_={"color": stmt.excluded.color, "source": stmt.excluded.source, "ai_color": stmt.excluded.ai_color},
             where=Category.source != "user",
         )
@@ -440,6 +454,13 @@ def get_all_settings(db: Session) -> dict[str, str]:
 
 def upsert_setting(db: Session, key: str, value: str) -> None:
     stmt = pg_insert(Setting).values(key=key, value=value)
-    stmt = stmt.on_conflict_do_update(index_elements=[Setting.key], set_={"value": stmt.excluded.value})
+    stmt = stmt.on_conflict_do_update(
+        # S6-02: settings' primary key is now (user_id, key) — same
+        # reasoning as the transactions/categories ON CONFLICT clauses
+        # above. This function still writes no user_id, so it now fails on
+        # a NOT NULL violation (S6-06's job to fix).
+        index_elements=[Setting.user_id, Setting.key],
+        set_={"value": stmt.excluded.value},
+    )
     db.execute(stmt)
     db.commit()

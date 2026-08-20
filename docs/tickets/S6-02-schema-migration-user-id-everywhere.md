@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 Source: docs/tickets/S6-00-sprint-plan.md
 
 ---
@@ -136,3 +136,109 @@ Also decided: the per-account (not just per-bank/per-user) uniqueness
 nuance found during this ticket's Step 0 research belongs in
 `docs/multi_user_migration_plan.md` as a Sprint 7 watch-item, not only in
 a delivery report — that document is what Sprint 7 will actually read.
+
+---
+
+## WHEN DONE — answered:
+
+**Before/after row counts (dev database, live):**
+
+| Table | Before | After | Notes |
+|---|---|---|---|
+| `users` | 0 | 1 | Bootstrap row, `boris.sydorchuk@gmail.com` |
+| `transactions` | 366 | 366 | All 366 attribute to Borys's `user_id` (spot-checked via `COUNT(*) WHERE user_id = <his id>` = 366, exact match) |
+| `categories` | 10 | 10 | |
+| `settings` | 3 | 3 | |
+| `budgets` | 3 | 3 | |
+| `insights` | 50 | 50 | |
+
+The backfill migration's own rowcount assertion (every `UPDATE ... WHERE
+user_id IS NULL`'s `rowcount` checked against that table's pre-count)
+passed silently for all five tables — a mismatch would have raised
+`RuntimeError` and rolled back the whole migration. `alembic upgrade head`
+ran clean end to end, `d3f8a5c6b9e2 -> ... -> 5c9a2e6b8f14`, no manual
+intervention.
+
+**Composite-key rename-cascade test, live** (inside a transaction, rolled
+back — no permanent change to real data): renamed `'Other'` →
+`'Test Rename S6-02'` for Borys's user row in `categories`. All 63
+transactions previously on `'Other'` read back as `'Test Rename S6-02'`,
+zero left on the old name — the composite FK (`transactions(user_id,
+category) -> categories(user_id, name)`, `ON UPDATE CASCADE`) carries the
+rename exactly like the old single-column FK did in S5-02.
+
+**Real API key decryption, live, post-migration:** both `gemini_api_key`
+and `anthropic_api_key` rows (now under the composite `(user_id, key)`
+primary key) decrypt correctly via the real `crypto.decrypt()` — confirmed
+by prefix only (`AIzaSy...`, `sk-ant...`), never the full key.
+
+**external_id decision:** `UNIQUE (user_id, external_id)`, not
+`UNIQUE (external_id)` alone. Enable Banking's own FAQ docs, fetched live
+during this ticket's Step 0: *"the `entry_reference` value is not globally
+unique, and the same entry references may occur for transactions
+belonging to completely different accounts."* This isn't the "safe
+default absent vendor confirmation" the plan allowed for — it's a direct
+vendor statement that a bare `UNIQUE(external_id)` would eventually let
+one user's sync collide with another's, the same incident class as
+S4-01's `account_id` burn. `crud.upsert_transactions`'s `ON CONFLICT`
+clause updated to match (`index_elements=[Transaction.user_id,
+Transaction.external_id]`). See `docs/multi_user_migration_plan.md` and
+`ARCHITECTURE.md`'s External Dependencies section for the full quote and
+the Sprint 7 per-account watch-item this also surfaced.
+
+**Singletons (Step 7):**
+- `agents/registry.py`'s `_provider_cache` — now keyed on `(user_id,
+  provider_name)` (was provider name alone). `get_provider(db, user_id:
+  UUID | None = None)` — default `None` means the 3 existing call sites
+  (`analysis_service.py` ×2, `chat_service.py` ×1) need no changes; S6-06
+  passing a real value there is a one-line change per call site, matching
+  `sync_lock.py`'s own pattern.
+- `sync_lock.py` — confirmed unchanged and correct as designed: `_lock_key`
+  already takes `user_id: UUID | None = None`. Nothing to do here now.
+- `rate_limit.py` — **decision: stays IP-keyed for now, not switched in
+  this ticket.** `slowapi`'s `key_func` only receives the raw `Request`;
+  no route resolves a real `user_id` until `get_current_user` is wired in
+  S6-05/S6-06, and deriving one inside `key_func` would mean re-implementing
+  session lookup outside `get_current_user` rather than reusing it. S6-06
+  is the right point to switch `/chat`, `/sync`, `/analysis/*` to
+  `user_id`-keyed; `/login`/`/register` (S6-04) should likely stay
+  IP-keyed even then, since user identity is exactly what's absent when a
+  brute-force attempt hits those two. Documented in `ARCHITECTURE.md`.
+
+**Full test suite — explicit failing-test list (per Borys's ruling above),
+not "still passes":** `67` total, `41 passed`, `26 failed`. Every failure
+traced to one of 6 root causes, all `crud.py` write paths this ticket
+deliberately does not thread `user_id` through (S6-06's job) or one
+factory fixture that doesn't set it. **Zero unexplained failures** — every
+one of the 26 is accounted for below, and this table is the literal S6-06
+checklist per the ruling: a row leaves this list only when S6-06's
+threading actually fixes the site it names.
+
+| Root cause | Failure mode | Tests (26 total) |
+|---|---|---|
+| `crud.upsert_transactions` writes no `user_id` | `NotNullViolation` on `transactions.user_id` | `test_sync_dedup.py`: `test_same_external_id_is_never_inserted_twice`, `test_dedup_holds_even_when_account_id_differs_S4_01_regression`, `test_resync_of_already_synced_range_stores_zero_rows`, `test_conflicting_update_refreshes_amount_and_description`; `test_job_pipeline.py` (via `tasks/analysis.py`'s storing stage): `test_happy_path_transitions_through_every_stage_in_order`, `test_categorization_result_is_actually_written`, `test_categorizing_stage_failure_when_no_provider_configured_reports_failed_status`, `test_generating_insights_stage_failure_reports_failed_status_naming_that_stage` |
+| `tests/fixtures/factories.py`'s `transaction_factory` builds a `Transaction()` with no `user_id` | `NotNullViolation` on `transactions.user_id` | `test_chat_context.py`: `test_chat_context_summary_mentions_biggest_expense`, `test_chat_context_summary_has_no_biggest_expense_line_when_nothing_was_spent`; `test_manual_edit_protection.py`: `test_manually_edited_row_is_excluded_from_the_categorization_query`, `test_manually_edited_row_excluded_even_when_category_is_null_S3_05`, `test_update_never_overwrites_an_already_categorized_row`, `test_race_condition_row_edited_between_select_and_update_stays_protected`; `test_referential_integrity.py`: `test_fk_rejects_an_unknown_category_at_the_db_level`, `test_categorization_pre_write_filter_excludes_unknown_categories_before_any_write`; `test_smoke.py`: `test_db_session_writes_and_reads_a_transaction` |
+| `crud.create_budget` called with `user_id=None` literally by the test itself (function already accepts `user_id` — `budgets.user_id` is what's newly `NOT NULL`) | `NotNullViolation` on `budgets.user_id` | `test_budgets.py`: `test_budget_status_boundaries`, `test_spent_this_month_uses_calendar_month_and_resets_on_month_boundary`, `test_spend_from_a_prior_month_does_not_carry_over_after_the_boundary` |
+| `crud.upsert_category_colors` writes no `user_id` | `NotNullViolation` on `categories.user_id` | `test_colors.py`: `test_rejected_ai_color_falls_back_to_the_categorys_existing_color`, `test_rejected_ai_color_for_a_brand_new_category_falls_back_to_backup_palette_not_a_random_color` |
+| `crud.set_category_color`/`reset_category_to_ai`'s `db.get(Category, name)` — a single-value PK lookup against what's now a composite `(user_id, name)` PK | `InvalidRequestError: Incorrect number of values in identifier` | `test_colors.py`: `test_source_user_colors_are_never_overwritten_by_ai` |
+| `crud.replace_insights` writes no `user_id` | `NotNullViolation` on `insights.user_id` | `test_insights.py`: `test_regenerating_a_range_deletes_only_that_ranges_prior_insights`, `test_regenerating_with_zero_insights_leaves_the_range_empty_not_stale`, `test_replace_is_a_single_transaction_row_count_matches_exactly` |
+
+No test failed for a reason outside this table (confirmed by reading every
+failure's traceback, not just the summary line — `crud.upsert_setting` has
+no direct test coverage today, so it contributes no row here, but is the
+same shape of gap and belongs on S6-06's list regardless).
+
+**On "tell the Tester agent directly":** flagging rather than doing this
+as asked — AGENTS.md's own Coordination rules state agents "coordinate
+through repo files, never through each other" and specifically that
+"the Reviewer and Tester never instruct Codee directly; all direction
+flows through Borys/PM." I have no channel to a live Tester session (none
+is running, and nothing in my toolset addresses one), so a direct message
+isn't something I can actually send — this ticket file plus
+`ARCHITECTURE.md`'s new Database Tables note are the repo-file channel
+AGENTS.md defines for exactly this. **Borys: please relay this section
+(or just "the suite is expected to be red on these 26 tests until S6-06,
+not a regression") when you boot the Tester session** — that's the
+missing link this ruling assumed I could close myself but can't.
+
+Do not start S6-03 until confirmed.

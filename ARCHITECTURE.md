@@ -187,11 +187,12 @@ in the app reads a comparison result.
 
 | Table | Purpose | Key constraints |
 |---|---|---|
-| `transactions` | One row per bank transaction | `external_id` **UNIQUE** (not `account_id` — see below); `manually_edited` boolean, default `false`; `category` FK → `categories(name)` `ON UPDATE CASCADE ON DELETE SET NULL` (S5-02) |
-| `settings` | Flat key/value store (LLM provider + encrypted API keys) | `key` TEXT primary key; avoids a migration per new setting |
-| `categories` | Category → display color | `name` TEXT primary key; `source` ∈ `seed`\|`ai`\|`user`; `ai_color` holds the last AI color separately so "reset to AI" survives a user override |
-| `insights` | Generated AI insight cards per date range | indexed on `(date_from, date_to)`; **delete-and-replace** per range on every successful sync — no history retained |
-| `budgets` | Monthly spending limit per category (S4-05) | `category` FK → `categories(name)` `ON UPDATE CASCADE`; `amount` CHECK `> 0`; `user_id` nullable UUID, always `NULL` today (pre-Sprint 6 multi-user readiness, same pattern as future new tables); `UNIQUE NULLS NOT DISTINCT (user_id, category, period)` so a plain `UNIQUE` wouldn't have blocked duplicate budgets while every row's `user_id` is `NULL` |
+| `users` | Sprint 6 (S6-01) — real accounts | `id` UUID PK; `email` UNIQUE; `password_hash`/`google_id` both nullable, `CHECK (password_hash IS NOT NULL OR google_id IS NOT NULL)` |
+| `transactions` | One row per bank transaction | `user_id` UUID FK → `users(id)`, NOT NULL (S6-02); `UNIQUE (user_id, external_id)` — **not** `external_id` alone: Enable Banking's own docs confirm `entry_reference` is not globally unique (S6-02 Step 0, see `docs/multi_user_migration_plan.md`); `manually_edited` boolean, default `false`; `category` FK → `categories(user_id, name)` `ON UPDATE CASCADE ON DELETE SET NULL`, composite since S6-02 |
+| `settings` | Per-user key/value store (LLM provider + encrypted API keys) | `(user_id, key)` composite PK (S6-02 — was a flat global store through Sprint 5); `user_id` FK → `users(id)` |
+| `categories` | Category → display color, per user | `(user_id, name)` composite PK (S6-02 — a category name is only unique per user); `source` ∈ `seed`\|`ai`\|`user`; `ai_color` holds the last AI color separately so "reset to AI" survives a user override |
+| `insights` | Generated AI insight cards per date range | `user_id` UUID FK → `users(id)`, NOT NULL (S6-02; the `(date_from, date_to)` index itself is not yet user-scoped — query-level scoping is S6-06); **delete-and-replace** per range on every successful sync — no history retained |
+| `budgets` | Monthly spending limit per category (S4-05) | `category` FK composite → `categories(user_id, name)` `ON UPDATE CASCADE` (S6-02); `amount` CHECK `> 0`; `user_id` UUID FK → `users(id)`, NOT NULL as of S6-02 (was nullable, always `NULL`, through Sprint 5 — the first table built multi-user-ready); `UNIQUE NULLS NOT DISTINCT (user_id, category, period)` |
 
 `manually_edited`: true once a human has set category/subcategory/
 description by hand; the categorization agent excludes these rows even
@@ -201,11 +202,19 @@ Enforced in `crud.get_uncategorized_transactions` and
 `manually_edited IS FALSE` server-side. Any `PATCH /api/transactions/{id}`
 sets it to `true` unconditionally, even for a no-op edit.
 
-Only `budgets` has a `user_id` column today; `transactions`, `settings`,
-`categories`, and `insights` are still fully global (every query against
-them is unscoped — there's exactly one user). `docs/multi_user_migration_
-plan.md` (S5-01) is the complete, code-verified inventory of what each
-table/constraint/endpoint/singleton needs before Sprint 6's auth lands.
+**S6-02 (2026-08-20): every table now has a `NOT NULL user_id`, backfilled
+to one real bootstrap user (Borys's real email, seeded via migration
+`7b2e4c9a1d05`).** Schema only — no query anywhere is actually scoped by
+`user_id` yet (`crud.py`'s `list_*`/`get_*` functions still return every
+row unconditionally), and the write paths that don't already accept
+`user_id` (`crud.upsert_transactions`, `upsert_category_colors`,
+`create_category`, `replace_insights`, `upsert_setting`) now fail with a
+`NOT NULL` violation until S6-06 threads a real value through — a
+deliberate, tracked gap, not a bug (see
+`docs/tickets/S6-02-schema-migration-user-id-everywhere.md`'s ruling and
+`docs/multi_user_migration_plan.md`'s Endpoints section for the exact
+list). `docs/multi_user_migration_plan.md` (S5-01, executed by S6-02) is
+the complete, code-verified inventory of what's left.
 
 `insights` delete-and-replace is a deliberate decision (S4-04), not an
 oversight — see Invariants below.
@@ -279,12 +288,22 @@ cookie is missing, the session is expired/invalid, or the session's
 
 ## External Dependencies & Their Guarantees
 
-**Enable Banking** — rely on: `external_id` is stable and unique across
-the whole bank. Do **not** rely on: `account_id` — it changes on every
+**Enable Banking** — rely on: `external_id` (`entry_reference`) is stable
+across reconnects (unlike `account_id` — see below), and immutable within
+one account. Do **not** rely on: `account_id` — it changes on every
 reconnect (burned S4-01: keying the old unique constraint on
 `(account_id, external_id)` caused 78 duplicate rows on reconnect; fixed
 by migration `827da7c749b8`). `account_id` is still stored but is
-first-seen-only and never overwritten on conflict.
+first-seen-only and never overwritten on conflict. **Also do not rely on**
+`external_id` being globally unique — Enable Banking's own FAQ docs
+(S6-02 Step 0, validated 2026-08-20): *"the `entry_reference` value is not
+globally unique, and the same entry references may occur for transactions
+belonging to completely different accounts."* `transactions`' unique
+constraint is `(user_id, external_id)`, not `external_id` alone, as of
+S6-02 — see Database Tables. The vendor's real scope is per-account, not
+per-user; a Sprint 7 watch-item in `docs/multi_user_migration_plan.md`
+flags that a user connecting more than one account (multi-bank, Sprint 7)
+could still collide under this constraint alone.
 
 **AI providers** — resolved via `agents/registry.py`, switching in
 Settings changes behavior everywhere at once. `get_provider()` caches one
@@ -374,10 +393,16 @@ with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
   this ticket's named scope, flagged as a related gap for a PM decision,
   not fixed unprompted.
 - **Rate limiting on cost/third-party-hitting endpoints (S5-07).**
-  `rate_limit.py`, `slowapi`, keyed on remote address (single-user era —
-  no caller identity to key on yet; Sprint 6 should key on `user_id`
-  instead once real auth exists, since IP-keying behind a shared proxy
-  would throttle unrelated users together). In-memory storage — fine
+  `rate_limit.py`, `slowapi`, still keyed on remote address as of S6-02
+  (deliberately not switched yet — `get_current_user` isn't wired to any
+  route until S6-05/S6-06, and `slowapi`'s `key_func` only ever receives
+  the raw `Request`; deriving `user_id` there would mean duplicating the
+  session-lookup logic outside `get_current_user` rather than reusing it).
+  S6-06 is the right point to switch cost-incurring endpoints (chat, sync,
+  analysis) to `user_id`-keyed, once those routes actually resolve one;
+  `/login`/`/register` (S6-04) should very likely stay IP-keyed even then
+  — user identity is exactly what those endpoints don't have yet when a
+  brute-force attempt hits them. In-memory storage — fine
   while `backend` is one uvicorn process; move to Redis (already in this
   stack) if it ever runs with more than one worker. `POST /api/chat`: 20
   requests/minute. `POST /api/transactions/sync`, `POST
