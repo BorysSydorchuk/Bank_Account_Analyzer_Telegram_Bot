@@ -6,6 +6,7 @@ Insights are read from storage exactly as they are for each exact range
 that was never synced with insight generation simply has none to show.
 """
 from datetime import date
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -17,10 +18,10 @@ from .statistics import compute_statistics, format_date_range
 __all__ = ["InvalidDateRangeError", "compare_periods"]
 
 
-def _build_period(db: Session, date_from: date, date_to: date) -> PeriodComparison:
-    transactions = crud.list_transactions(db, date_from, date_to)
+def _build_period(db: Session, user_id: UUID, date_from: date, date_to: date) -> PeriodComparison:
+    transactions = crud.list_transactions(db, user_id, date_from, date_to)
     stats = compute_statistics(transactions, date_from, date_to)
-    insight_rows = crud.list_insights(db, date_from, date_to)
+    insight_rows = crud.list_insights(db, user_id, date_from, date_to)
     return PeriodComparison(
         date_range=format_date_range(date_from, date_to),
         total_spent=stats["summary"]["total_spent"],
@@ -67,7 +68,7 @@ def _build_delta(period_a: PeriodComparison, period_b: PeriodComparison) -> Comp
 
 
 def compare_periods(
-    db: Session, period_a_from: date, period_a_to: date, period_b_from: date, period_b_to: date
+    db: Session, user_id: UUID, period_a_from: date, period_a_to: date, period_b_from: date, period_b_to: date
 ) -> dict:
     """Returns {period_a, period_b, delta} — see schemas.ComparisonResponse.
     Raises InvalidDateRangeError if either range is backwards or exceeds
@@ -76,6 +77,6 @@ def compare_periods(
     validate_date_range(period_a_from, period_a_to, "period_a")
     validate_date_range(period_b_from, period_b_to, "period_b")
 
-    period_a = _build_period(db, period_a_from, period_a_to)
-    period_b = _build_period(db, period_b_from, period_b_to)
+    period_a = _build_period(db, user_id, period_a_from, period_a_to)
+    period_b = _build_period(db, user_id, period_b_from, period_b_to)
     return {"period_a": period_a, "period_b": period_b, "delta": _build_delta(period_a, period_b)}

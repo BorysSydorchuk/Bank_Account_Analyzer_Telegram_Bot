@@ -11,7 +11,7 @@ from app.chat_service import _summary_text
 
 
 @freeze_time("2026-08-18")
-def test_chat_context_summary_mentions_biggest_expense(db_session, transaction_factory):
+def test_chat_context_summary_mentions_biggest_expense(db_session, test_user, transaction_factory):
     db_session.add_all(
         [
             transaction_factory(booking_date=date(2026, 8, 10), amount=Decimal("-12.00"), description="Colruyt Anderlecht"),
@@ -20,7 +20,7 @@ def test_chat_context_summary_mentions_biggest_expense(db_session, transaction_f
     )
     db_session.flush()
 
-    summary = _summary_text(db_session, date(2026, 8, 18))
+    summary = _summary_text(db_session, test_user.id, date(2026, 8, 18))
 
     assert "Biggest expense" in summary
     assert "Kinepolis Brussels" in summary
@@ -28,10 +28,10 @@ def test_chat_context_summary_mentions_biggest_expense(db_session, transaction_f
 
 
 @freeze_time("2026-08-18")
-def test_chat_context_summary_has_no_biggest_expense_line_when_nothing_was_spent(db_session, transaction_factory):
+def test_chat_context_summary_has_no_biggest_expense_line_when_nothing_was_spent(db_session, test_user, transaction_factory):
     db_session.add(transaction_factory(booking_date=date(2026, 8, 10), amount=Decimal("500.00")))
     db_session.flush()
 
-    summary = _summary_text(db_session, date(2026, 8, 18))
+    summary = _summary_text(db_session, test_user.id, date(2026, 8, 18))
 
     assert "Biggest expense" not in summary

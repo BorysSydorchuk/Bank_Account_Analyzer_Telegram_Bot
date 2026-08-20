@@ -99,25 +99,29 @@ If the lock is already held, no job is created — the endpoint raises
 `sync_already_running_handler` to `409 {"message": ..., "job_id":
 <in-flight job's id>}`.
 
-Celery task `run_sync_job` (`tasks/analysis.py`) runs the pipeline,
-updating the Redis job record as it progresses:
-`fetching` → `storing` (`crud.upsert_transactions`, upsert on
-`external_id` conflict) → `categorizing` (batch progress reported via
-`on_batch_complete`) → `generating_insights` (only on success does
-`crud.replace_insights` run — a failed generation leaves prior insights
-untouched) → `complete`/`failed`. `sync_lock.release()` runs in a
-`finally` block around the whole task (S5-05) — released on every path
-that returns or raises inside the task; a worker killed hard enough to
-skip even that leaves the lock to its own TTL instead (see Invariants).
+Celery task `run_sync_job` (`tasks/analysis.py`, takes `user_id` as of
+S6-06 — Celery serializes it as a string, parsed back to `UUID` inside
+the task) runs the pipeline, updating the Redis job record as it
+progresses: `fetching` → `storing` (`crud.upsert_transactions`, upsert on
+`(user_id, external_id)` conflict) → `categorizing` (batch progress
+reported via `on_batch_complete`) → `generating_insights` (only on
+success does `crud.replace_insights` run — a failed generation leaves
+prior insights untouched) → `complete`/`failed`. `sync_lock.release()`
+runs in a `finally` block around the whole task (S5-05) — released on
+every path that returns or raises inside the task; a worker killed hard
+enough to skip even that leaves the lock to its own TTL instead (see
+Invariants).
 
 Job state lives only in Redis (`job_store.py`, key `job:{job_id}`, 24h
 TTL) — never Postgres. Every `job_store.set_job` call (every stage
 transition, every categorization batch) also stamps `heartbeat_at`
-(S5-05). `GET /api/jobs/{job_id}` 404s once the key expires; while a job
-is `processing`, it also checks `heartbeat_at` against a 2-minute
-staleness threshold and reports `status: "failed"` (naming the stage) if
-exceeded — this is computed at read time, not written back to Redis, and
-does not itself release `sync_lock` (see Invariants).
+(S5-05) and, as of S6-06, `user_id` — `GET /api/jobs/{job_id}` compares
+it against the caller and 404s (never `403`) on any mismatch, the same
+as a key that never existed or whose 24h TTL expired. While a job is
+`processing`, it also checks `heartbeat_at` against a 2-minute staleness
+threshold and reports `status: "failed"` (naming the stage) if exceeded
+— this is computed at read time, not written back to Redis, and does
+not itself release `sync_lock` (see Invariants).
 
 Frontend polling (`frontend/src/hooks/useDashboard.ts`): `useQuery` with
 `refetchInterval` of 2s while `status === "processing"`,
@@ -133,12 +137,14 @@ polling instead of showing an error (`useDashboard.ts`'s
 one is already running, that's not a failure.
 
 `POST /api/chat` (`routers/chat.py`, S4-06) streams a chat reply as
-Server-Sent Events. `chat_service.start_chat_stream` runs everything
-synchronous first — resolves the configured provider
-(`agents/registry.get_provider`) and assembles a fresh financial context
-(last-90-days summary, last 20 transactions, active budgets, all read
-straight from Postgres, never cached) — so a missing API key is a normal
-400 JSON error, not a broken stream. Only then does
+Server-Sent Events. `chat_service.start_chat_stream` (takes `user_id` as
+of S6-06, replacing the `CURRENT_USER_ID = None` hardcoding S5-01
+flagged) runs everything synchronous first — resolves the configured
+provider (`agents/registry.get_provider`) and assembles a fresh, scoped
+financial context (last-90-days summary, last 20 transactions, active
+budgets, all read straight from Postgres for this user only, never
+cached) — so a missing API key is a normal 400 JSON error, not a broken
+stream. Only then does
 `ChatAgent.stream()` (`agents/chat.py`) start yielding tokens from
 `LLMProvider.stream_complete()`, forwarded one SSE frame per chunk
 (`{"token": ..., "done": false}`), ending with
@@ -192,7 +198,7 @@ in the app reads a comparison result.
 | `transactions` | One row per bank transaction | `user_id` UUID FK → `users(id)`, NOT NULL (S6-02); `UNIQUE (user_id, external_id)` — **not** `external_id` alone: Enable Banking's own docs confirm `entry_reference` is not globally unique (S6-02 Step 0, see `docs/multi_user_migration_plan.md`); `manually_edited` boolean, default `false`; `category` FK → `categories(user_id, name)` `ON UPDATE CASCADE ON DELETE SET NULL`, composite since S6-02 |
 | `settings` | Per-user key/value store (LLM provider + encrypted API keys) | `(user_id, key)` composite PK (S6-02 — was a flat global store through Sprint 5); `user_id` FK → `users(id)` |
 | `categories` | Category → display color, per user | `(user_id, name)` composite PK (S6-02 — a category name is only unique per user); `source` ∈ `seed`\|`ai`\|`user`; `ai_color` holds the last AI color separately so "reset to AI" survives a user override |
-| `insights` | Generated AI insight cards per date range | `user_id` UUID FK → `users(id)`, NOT NULL (S6-02; the `(date_from, date_to)` index itself is not yet user-scoped — query-level scoping is S6-06); **delete-and-replace** per range on every successful sync — no history retained |
+| `insights` | Generated AI insight cards per date range | `user_id` UUID FK → `users(id)`, NOT NULL (S6-02); `crud.list_insights`/`replace_insights` both scoped by it (S6-06) — the `(date_from, date_to)` index itself stays unchanged, scoping happens in the query's `WHERE`, not the index shape; **delete-and-replace** per range on every successful sync — no history retained |
 | `budgets` | Monthly spending limit per category (S4-05) | `category` FK composite → `categories(user_id, name)` `ON UPDATE CASCADE` (S6-02); `amount` CHECK `> 0`; `user_id` UUID FK → `users(id)`, NOT NULL as of S6-02 (was nullable, always `NULL`, through Sprint 5 — the first table built multi-user-ready); `UNIQUE NULLS NOT DISTINCT (user_id, category, period)` |
 
 `manually_edited`: true once a human has set category/subcategory/
@@ -203,19 +209,13 @@ Enforced in `crud.get_uncategorized_transactions` and
 `manually_edited IS FALSE` server-side. Any `PATCH /api/transactions/{id}`
 sets it to `true` unconditionally, even for a no-op edit.
 
-**S6-02 (2026-08-20): every table now has a `NOT NULL user_id`, backfilled
-to one real bootstrap user (Borys's real email, seeded via migration
-`7b2e4c9a1d05`).** Schema only — no query anywhere is actually scoped by
-`user_id` yet (`crud.py`'s `list_*`/`get_*` functions still return every
-row unconditionally), and the write paths that don't already accept
-`user_id` (`crud.upsert_transactions`, `upsert_category_colors`,
-`create_category`, `replace_insights`, `upsert_setting`) now fail with a
-`NOT NULL` violation until S6-06 threads a real value through — a
-deliberate, tracked gap, not a bug (see
-`docs/tickets/S6-02-schema-migration-user-id-everywhere.md`'s ruling and
-`docs/multi_user_migration_plan.md`'s Endpoints section for the exact
-list). `docs/multi_user_migration_plan.md` (S5-01, executed by S6-02) is
-the complete, code-verified inventory of what's left.
+**S6-02 (2026-08-20) made every table's `user_id` `NOT NULL`, backfilled to
+one real bootstrap user; S6-06 (2026-08-21) is what actually threads a
+real `user_id` through every query and write path** (`crud.py`'s
+`list_*`/`get_*`/`upsert_*` functions all filter/write by it now — see
+the Auth section below for the full endpoint-by-endpoint account).
+`docs/multi_user_migration_plan.md` (S5-01, executed by S6-02, scoped by
+S6-06) is the complete, code-verified inventory this closed out.
 
 `insights` delete-and-replace is a deliberate decision (S4-04), not an
 oversight — see Invariants below.
@@ -381,38 +381,84 @@ CORS-bound `fetch` can't follow the way a real navigation does. Also has
 an email/password form (S6-04) below a divider. `/register`
 (`RegisterPage.tsx`) is the same shape without the Google button.
 
-**Auth middleware rollout, partial (S6-05).** First real protection of
-application routes, proving the whole login -> protected-route -> logout
-loop before S6-06's full sweep:
+**Auth middleware rollout — S6-05 partial, S6-06 full sweep.** S6-05
+protected `GET /api/categories`/`GET /api/budgets` as a first real test
+(proving the login -> protected-route -> logout loop) and shipped
+`GET /api/auth/me` + the frontend guard. S6-06 protected and scoped every
+remaining endpoint, closing S5-01's IDOR findings for real.
 
-- `GET /api/categories` and `GET /api/budgets` — both now require
-  `get_current_user` and both actually filter by the caller's `user_id`
-  (`crud.list_categories(db, user_id)`, `crud.list_budgets_with_status
-  (db, user_id)`), not just gated access. `list_categories`'s `user_id`
-  param is optional, default `None` (unscoped) — `POST /api/categories`'s
-  own duplicate-name check still calls it that way, since that route
-  isn't authenticated yet (S6-06). `routers/budgets.py`'s
-  `CURRENT_USER_ID = None` placeholder is now only used by `POST`/
-  `PATCH`/`DELETE` — since S6-02 made `budgets.user_id` `NOT NULL`, those
-  three currently query/write against a `user_id` no real budget has
-  (`WHERE user_id IS NULL` matches nothing; an `INSERT` with `user_id=
-  NULL` fails outright) — the same tracked, deliberate S6-02 breakage,
-  now scoped down to exactly three routes instead of four.
-- `GET /api/health` — confirmed to still need nothing (a liveness/DB
-  check, never behind auth).
-- `GET /api/auth/me` (new) — the frontend's route guard's one
-  page-independent way to ask "does a valid session exist," rather than
-  inferring it from whichever page-specific query happens to fire first.
-- `AppShell` (`App.tsx`) — the layout route wrapping every route except
-  `/login`/`/register` — calls `GET /api/auth/me` once on mount via
-  `useCurrentUser` (`retry: false`; any error, not just `401`, is treated
-  as "no valid session" — there's no other failure mode worth
-  distinguishing for a route guard) and redirects to `/login` on failure.
-- `Sidebar.tsx` gained a user menu (avatar initial, truncated email,
-  logout button) at the bottom — `logout()` clears the entire React Query
-  cache (`queryClient.clear()`, not just the current-user query) before a
-  full-page redirect to `/login`, so no stale cached data from this
-  session survives into whatever session comes next in the same browser.
+**The full public-route list — everything else requires
+`get_current_user` (or, for the three Enable Banking endpoints,
+`require_enable_banking_owner`, which itself requires `get_current_user`
+first):**
+
+| Route | Why public |
+|---|---|
+| `GET /health` | Liveness/DB check, used by nothing user-facing |
+| `GET /api/auth/google/login` | Starts the sign-in flow — no session to check yet |
+| `GET /api/auth/google/callback` | Google redirects here mid sign-in — same reason |
+| `POST /api/auth/register` | Creates the session this endpoint's caller doesn't have yet |
+| `POST /api/auth/login` | Same reason |
+| `POST /api/auth/logout` | A no-op on an already-invalid session is fine — nothing to protect by requiring one first |
+
+Two scoping shapes, per S6-06's own split:
+
+- **List/create endpoints (query filtered by `user_id`):** every
+  `crud.py` read/write function now takes `user_id` and filters/writes by
+  it — `transactions` (`list_transactions_paginated`, `search_transactions`,
+  sync's `upsert_transactions`), `categories` (all four routes, including
+  `POST`'s duplicate-name check and `PATCH`/reset, both fixed from the
+  `db.get(Category, name)` `InvalidRequestError` S6-02 left tracked —
+  composite-key lookup by `(user_id, name)` doubles as the scoping fix),
+  `budgets` (`POST`/`PATCH`/`DELETE`, closing S6-02's `CURRENT_USER_ID`
+  gap for good), `insights` (list + compare, via `comparison_service`),
+  `statistics`, `settings` (`get_all_settings`/`upsert_setting`, composite
+  `(user_id, key)`), `chat_service.build_context` (the `CURRENT_USER_ID
+  = None` hardcoding S5-01 named explicitly is gone), and
+  `analysis_service`'s categorize/insights/color-assignment chain.
+  `agents/registry.get_provider`'s `user_id` param is no longer optional
+  — every call site now has a real authenticated user.
+- **By-ID lookup endpoints (explicit ownership check, 404 not 403 on
+  mismatch — never confirm another user's resource exists):**
+  `GET /api/jobs/{job_id}` (`job_store`'s status dict now carries
+  `"user_id"`, stamped by every `job_store.set_job` call in
+  `tasks/analysis.py`; the router compares it against the caller) and
+  `PATCH /api/transactions/{id}` (`crud.update_transaction`'s lookup is
+  now `WHERE id = ... AND user_id = ...` together, so a transaction
+  belonging to someone else reads identically to one that doesn't exist).
+
+**Sync is threaded end to end.** `POST /api/transactions/sync` requires
+`require_enable_banking_owner` (below), passes `current_user.id` to
+`sync_lock` (already user-aware since S5-05) and to the Celery task
+(`run_sync_job.delay(job_id, date_from, date_to, str(user_id))` — Celery
+serializes to JSON, so the UUID travels as a string and is parsed back in
+`tasks/analysis.py`). Every stage of `_run()` (fetch, store, categorize,
+generate insights) now writes/reads with that same `user_id`.
+
+**Enable Banking connection restricted to one account (S6-06).** The
+single `eb_session.json` connection is still, physically, one bank
+connection — per-user bank session *storage* is Sprint 7's job (needs
+the public deployment context to do properly). Until then,
+`app/auth/dependency.py`'s `require_enable_banking_owner` (composed on
+top of `get_current_user`) gates `POST /api/transactions/sync` and all
+three `/api/auth/enable-banking/*` endpoints: only the account named by
+the `ENABLE_BANKING_OWNER_EMAIL` env var may use them, `403` for
+everyone else. Not a `404`-shaped IDOR check — this is a real, named
+permission boundary on a feature every authenticated user can see
+exists, not a by-ID lookup hiding whether a resource exists.
+
+`GET /api/auth/me` — the frontend's route guard's one page-independent
+way to ask "does a valid session exist," rather than inferring it from
+whichever page-specific query happens to fire first. `AppShell`
+(`App.tsx`, the layout route wrapping every route except `/login`/
+`/register`) calls it once on mount via `useCurrentUser` (`retry: false`;
+any error, not just `401`, is treated as "no valid session") and
+redirects to `/login` on failure. `Sidebar.tsx`'s user menu (avatar
+initial, truncated email, logout button) `logout()`s by clearing the
+entire React Query cache (`queryClient.clear()`, not just the
+current-user query) before a full-page redirect to `/login`, so no stale
+cached data from this session survives into whatever session comes next
+in the same browser.
 
 ## External Dependencies & Their Guarantees
 
@@ -489,10 +535,12 @@ with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
   "latest per range" query — a clean addition, not a fix to a bug.
 - **Job state is Redis-only.** No `jobs` table exists in any migration;
   sync progress never touches Postgres.
-- **One sync job at a time (per user), enforced server-side (S5-05).**
-  `sync_lock.py`, Redis key `sync_lock:{user_id or 'global'}` (always
-  `global` pre-Sprint 6 — the key derivation already takes `user_id` so
-  Sprint 6 only needs to start passing a real one). `SET NX EX` on
+- **One sync job at a time per user, enforced server-side (S5-05, real as
+  of S6-06).** `sync_lock.py`, Redis key `sync_lock:{user_id}` —
+  `routers/transactions.py`'s `sync_transactions` now passes
+  `current_user.id` (the key derivation was already written to take one
+  at S5-05; this is the one-line change that was waiting on real auth).
+  `SET NX EX` on
   acquire (atomic — no check-then-set race between two concurrent
   requests); release is an atomic Lua compare-and-delete (`sync_lock.py`'s
   `_RELEASE_SCRIPT`) so a job never deletes a *different* job's lock. TTL
@@ -521,16 +569,19 @@ with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
   this ticket's named scope, flagged as a related gap for a PM decision,
   not fixed unprompted.
 - **Rate limiting on cost/third-party-hitting endpoints (S5-07).**
-  `rate_limit.py`, `slowapi`, still keyed on remote address as of S6-02
-  (deliberately not switched yet — `get_current_user` isn't wired to any
-  route until S6-05/S6-06, and `slowapi`'s `key_func` only ever receives
-  the raw `Request`; deriving `user_id` there would mean duplicating the
-  session-lookup logic outside `get_current_user` rather than reusing it).
-  S6-06 is the right point to switch cost-incurring endpoints (chat, sync,
-  analysis) to `user_id`-keyed, once those routes actually resolve one;
-  `/login`/`/register` (S6-04) should very likely stay IP-keyed even then
-  — user identity is exactly what those endpoints don't have yet when a
-  brute-force attempt hits them. In-memory storage — fine
+  `rate_limit.py`, `slowapi`, still keyed on remote address even after
+  S6-06 — flagged, not fixed: every cost-incurring route (`chat`, `sync`,
+  `analysis`) now genuinely resolves a real `current_user`, so switching
+  to `user_id`-keyed is no longer blocked on auth existing, only on the
+  `slowapi` integration work itself (`key_func` only receives the raw
+  `Request`; deriving `user_id` there means either duplicating
+  `get_current_user`'s session lookup outside it, or a custom
+  `key_func` that reads the same cookie). Out of S6-06's named scope
+  (full query scoping and ownership checks, not rate-limit keying) —
+  worth a small follow-up ticket. `/login`/`/register` (S6-04) should
+  very likely stay IP-keyed regardless — user identity is exactly what
+  those endpoints don't have yet when a brute-force attempt hits them.
+  In-memory storage — fine
   while `backend` is one uvicorn process; move to Redis (already in this
   stack) if it ever runs with more than one worker. `POST /api/chat`: 20
   requests/minute. `POST /api/transactions/sync`, `POST

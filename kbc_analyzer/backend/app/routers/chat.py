@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 from .. import chat_service
 from ..agents.providers.base import LLMProvider
 from ..agents.registry import ProviderNotConfiguredError
+from ..auth.dependency import get_current_user
 from ..db import get_db
+from ..models import User
 from ..rate_limit import CHAT_RATE_LIMIT, limiter
 from ..schemas import ChatRequest
 
@@ -52,7 +54,12 @@ async def _event_stream(stream, provider: LLMProvider):
 
 @router.post("")
 @limiter.limit(CHAT_RATE_LIMIT)
-async def chat(request: Request, body: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
+async def chat(
+    request: Request,
+    body: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
     """Streams the assistant's reply as Server-Sent Events: one
     {"token": "...", "done": false} frame per chunk of text, then a final
     {"token": "", "done": true, "usage": {"input": N, "output": M}} frame.
@@ -70,7 +77,7 @@ async def chat(request: Request, body: ChatRequest, db: Session = Depends(get_db
 
     try:
         stream, provider = chat_service.start_chat_stream(
-            db, body.message, [m.model_dump() for m in body.history]
+            db, current_user.id, body.message, [m.model_dump() for m in body.history]
         )
     except ProviderNotConfiguredError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

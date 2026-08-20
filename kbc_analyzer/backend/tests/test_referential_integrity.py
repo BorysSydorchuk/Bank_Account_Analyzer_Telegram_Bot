@@ -23,7 +23,7 @@ def test_fk_rejects_an_unknown_category_at_the_db_level(db_session, transaction_
 
 @pytest.mark.asyncio
 async def test_categorization_pre_write_filter_excludes_unknown_categories_before_any_write(
-    db_session, seeded_categories, transaction_factory, monkeypatch
+    db_session, test_user, transaction_factory, monkeypatch
 ):
     """The agent can only hallucinate a category name because nothing forces
     its LLM output to match the fixed CATEGORIES list — this is exactly that
@@ -36,12 +36,12 @@ async def test_categorization_pre_write_filter_excludes_unknown_categories_befor
     db_session.flush()
 
     hallucinated_category = "Miscellaneous Nonsense"
-    assert hallucinated_category not in {c.name for c in seeded_categories}
+    assert hallucinated_category not in {c.name for c in crud.list_categories(db_session, test_user.id)}
 
     provider = FakeLLMProvider(json_response=[{"id": str(row.id), "category": hallucinated_category, "subcategory": None}])
-    monkeypatch.setattr("app.analysis_service.get_provider", lambda db: provider)
+    monkeypatch.setattr("app.analysis_service.get_provider", lambda db, user_id: provider)
 
-    result = await categorize_transactions(db_session, on_batch_complete=None)
+    result = await categorize_transactions(db_session, test_user.id, on_batch_complete=None)
 
     db_session.refresh(row)
     assert row.category is None

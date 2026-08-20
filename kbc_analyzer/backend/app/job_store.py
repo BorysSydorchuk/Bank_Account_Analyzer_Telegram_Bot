@@ -29,6 +29,14 @@ def set_job(job_id: str, status: dict) -> None:
     separate heartbeat mechanism would have had to invent. GET
     /api/jobs/{job_id} uses this to detect a worker that died mid-job: no
     write means no progress, however long it's actually been running.
+
+    S6-06: every caller's status dict now includes "user_id" (the string
+    form of the authenticated user who started the job — S5-01's IDOR
+    finding: job keys were fully unscoped, guessable-UUID-away from any
+    caller reading any job's status). This module stays a generic
+    dict-in/dict-out store on purpose — the ownership check itself lives
+    in routers/jobs.py, comparing job["user_id"] against the requester,
+    not here, so this module doesn't need to know what "ownership" means.
     """
     payload = {**status, "heartbeat_at": datetime.now(timezone.utc).isoformat()}
     _client.set(_job_key(job_id), json.dumps(payload), ex=JOB_TTL_SECONDS)

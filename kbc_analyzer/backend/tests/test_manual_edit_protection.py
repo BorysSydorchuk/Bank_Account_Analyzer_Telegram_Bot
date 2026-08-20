@@ -8,20 +8,20 @@ the two (see the race-condition test below).
 from app import crud
 
 
-def test_manually_edited_row_is_excluded_from_the_categorization_query(db_session, transaction_factory):
+def test_manually_edited_row_is_excluded_from_the_categorization_query(db_session, test_user, transaction_factory):
     edited = transaction_factory(category=None, manually_edited=True)
     untouched = transaction_factory(category=None, manually_edited=False)
     db_session.add_all([edited, untouched])
     db_session.flush()
 
-    uncategorized = crud.get_uncategorized_transactions(db_session)
+    uncategorized = crud.get_uncategorized_transactions(db_session, test_user.id)
 
     ids = {t.id for t in uncategorized}
     assert edited.id not in ids
     assert untouched.id in ids
 
 
-def test_manually_edited_row_excluded_even_when_category_is_null_S3_05(db_session, transaction_factory):
+def test_manually_edited_row_excluded_even_when_category_is_null_S3_05(db_session, test_user, transaction_factory):
     """The subtle case (verified live in S3-05): a user can manually CLEAR a
     category, leaving it NULL — that NULL must still read as "a human already
     decided this," not "nobody has looked at this yet." If the query only
@@ -32,25 +32,27 @@ def test_manually_edited_row_excluded_even_when_category_is_null_S3_05(db_sessio
     db_session.add(cleared_by_hand)
     db_session.flush()
 
-    uncategorized = crud.get_uncategorized_transactions(db_session)
+    uncategorized = crud.get_uncategorized_transactions(db_session, test_user.id)
 
     assert cleared_by_hand.id not in {t.id for t in uncategorized}
 
 
-def test_update_never_overwrites_an_already_categorized_row(db_session, transaction_factory):
+def test_update_never_overwrites_an_already_categorized_row(db_session, test_user, transaction_factory):
     already_categorized = transaction_factory(category="Groceries", manually_edited=False)
     db_session.add(already_categorized)
     db_session.flush()
 
     crud.update_transaction_categories(
-        db_session, [{"id": str(already_categorized.id), "category": "Other", "subcategory": None}]
+        db_session, test_user.id, [{"id": str(already_categorized.id), "category": "Other", "subcategory": None}]
     )
 
     db_session.refresh(already_categorized)
     assert already_categorized.category == "Groceries"
 
 
-def test_race_condition_row_edited_between_select_and_update_stays_protected(db_session, transaction_factory):
+def test_race_condition_row_edited_between_select_and_update_stays_protected(
+    db_session, test_user, transaction_factory
+):
     """The specific protection found during interview-prep study: the SELECT
     (get_uncategorized_transactions) and the UPDATE (update_transaction_categories)
     are two separate statements, with the LLM call in between — long enough
@@ -78,13 +80,13 @@ def test_race_condition_row_edited_between_select_and_update_stays_protected(db_
     db_session.add(row)
     db_session.flush()
 
-    eligible_before_the_race = crud.get_uncategorized_transactions(db_session)
+    eligible_before_the_race = crud.get_uncategorized_transactions(db_session, test_user.id)
     assert row.id in {t.id for t in eligible_before_the_race}
 
-    crud.update_transaction(db_session, row.id, {"category": None})
+    crud.update_transaction(db_session, test_user.id, row.id, {"category": None})
 
     crud.update_transaction_categories(
-        db_session, [{"id": str(row.id), "category": "Other", "subcategory": "Shopping"}]
+        db_session, test_user.id, [{"id": str(row.id), "category": "Other", "subcategory": "Shopping"}]
     )
 
     db_session.refresh(row)

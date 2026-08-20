@@ -7,6 +7,7 @@ from decimal import Decimal
 from freezegun import freeze_time
 
 from app import crud
+from app.models import Category
 
 
 def _spend(db_session, transaction_factory, category: str, amount: str, day: date):
@@ -14,21 +15,33 @@ def _spend(db_session, transaction_factory, category: str, amount: str, day: dat
     db_session.flush()
 
 
+def _ensure_category(db_session, user_id, name: str):
+    """budgets.category is a composite FK -> categories(user_id, name)
+    (S6-02) — test_user needs its own row under this exact name before a
+    budget (or a categorized transaction) can reference it."""
+    if db_session.get(Category, (user_id, name)) is None:
+        db_session.add(Category(user_id=user_id, name=name, color="#64748B"))
+        db_session.flush()
+
+
 @freeze_time("2026-08-18")
-def test_budget_status_boundaries(db_session, seeded_categories, transaction_factory):
+def test_budget_status_boundaries(db_session, test_user, transaction_factory):
+    for name in ("Groceries", "Traveling", "Rent/Housing", "Other"):
+        _ensure_category(db_session, test_user.id, name)
+
     # A 100.00 budget makes the percentage-used numbers land exactly on the
     # ticket's named boundaries: spend X euros -> X% used.
-    crud.create_budget(db_session, None, "Groceries", Decimal("100.00"))
-    crud.create_budget(db_session, None, "Traveling", Decimal("100.00"))
-    crud.create_budget(db_session, None, "Rent/Housing", Decimal("100.00"))
-    crud.create_budget(db_session, None, "Other", Decimal("100.00"))
+    crud.create_budget(db_session, test_user.id, "Groceries", Decimal("100.00"))
+    crud.create_budget(db_session, test_user.id, "Traveling", Decimal("100.00"))
+    crud.create_budget(db_session, test_user.id, "Rent/Housing", Decimal("100.00"))
+    crud.create_budget(db_session, test_user.id, "Other", Decimal("100.00"))
 
     _spend(db_session, transaction_factory, "Groceries", "-79.90", date(2026, 8, 10))
     _spend(db_session, transaction_factory, "Traveling", "-80.00", date(2026, 8, 10))
     _spend(db_session, transaction_factory, "Rent/Housing", "-100.00", date(2026, 8, 10))
     _spend(db_session, transaction_factory, "Other", "-100.10", date(2026, 8, 10))
 
-    statuses = {b["category"]: b["status"] for b in crud.list_budgets_with_status(db_session, None)}
+    statuses = {b["category"]: b["status"] for b in crud.list_budgets_with_status(db_session, test_user.id)}
 
     assert statuses["Groceries"] == "on_track"     # 79.9%
     assert statuses["Traveling"] == "warning"       # 80.0% — the boundary itself is "warning", not "exceeded"
@@ -37,17 +50,18 @@ def test_budget_status_boundaries(db_session, seeded_categories, transaction_fac
 
 
 @freeze_time("2026-08-01")
-def test_spent_this_month_uses_calendar_month_and_resets_on_month_boundary(db_session, transaction_factory):
+def test_spent_this_month_uses_calendar_month_and_resets_on_month_boundary(db_session, test_user, transaction_factory):
     """Regression against a rolling-30-day window: a transaction from the
     tail end of the *previous* calendar month must not count towards this
     month's spend, even though it's well within the last 30 days.
     """
-    crud.create_budget(db_session, None, "Groceries", Decimal("200.00"))
+    _ensure_category(db_session, test_user.id, "Groceries")
+    crud.create_budget(db_session, test_user.id, "Groceries", Decimal("200.00"))
     # July 31 — one day before "today" (Aug 1), well inside a rolling 30-day
     # window, but in the previous calendar month.
     _spend(db_session, transaction_factory, "Groceries", "-150.00", date(2026, 7, 31))
 
-    budgets = crud.list_budgets_with_status(db_session, None)
+    budgets = crud.list_budgets_with_status(db_session, test_user.id)
     groceries = next(b for b in budgets if b["category"] == "Groceries")
 
     assert groceries["spent_this_month"] == 0.0
@@ -55,12 +69,13 @@ def test_spent_this_month_uses_calendar_month_and_resets_on_month_boundary(db_se
 
 
 @freeze_time("2026-09-01")
-def test_spend_from_a_prior_month_does_not_carry_over_after_the_boundary(db_session, transaction_factory):
-    crud.create_budget(db_session, None, "Groceries", Decimal("200.00"))
+def test_spend_from_a_prior_month_does_not_carry_over_after_the_boundary(db_session, test_user, transaction_factory):
+    _ensure_category(db_session, test_user.id, "Groceries")
+    crud.create_budget(db_session, test_user.id, "Groceries", Decimal("200.00"))
     _spend(db_session, transaction_factory, "Groceries", "-190.00", date(2026, 8, 31))  # last day of August
     _spend(db_session, transaction_factory, "Groceries", "-20.00", date(2026, 9, 1))    # first day of September
 
-    budgets = crud.list_budgets_with_status(db_session, None)
+    budgets = crud.list_budgets_with_status(db_session, test_user.id)
     groceries = next(b for b in budgets if b["category"] == "Groceries")
 
     # Only September's 20.00 counts — August's 190.00 reset away at the

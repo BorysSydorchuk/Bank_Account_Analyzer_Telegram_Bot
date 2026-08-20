@@ -7,7 +7,9 @@ from .. import settings_service
 from ..agents.providers.claude import ClaudeProvider
 from ..agents.providers.gemini import GeminiProvider
 from ..agents.registry import invalidate_provider_cache
+from ..auth.dependency import get_current_user
 from ..db import get_db
+from ..models import User
 from ..schemas import (
     PatchSettingsRequest,
     PatchSettingsResponse,
@@ -20,14 +22,16 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
 @router.get("", response_model=SettingsResponse)
-def get_settings(db: Session = Depends(get_db)) -> SettingsResponse:
-    return SettingsResponse(**settings_service.get_settings(db))
+def get_settings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> SettingsResponse:
+    return SettingsResponse(**settings_service.get_settings(db, current_user.id))
 
 
 @router.patch("", response_model=PatchSettingsResponse)
-def patch_settings(body: PatchSettingsRequest, db: Session = Depends(get_db)):
+def patch_settings(
+    body: PatchSettingsRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
     try:
-        result = settings_service.patch_setting(db, body.key, body.value)
+        result = settings_service.patch_setting(db, current_user.id, body.key, body.value)
     except settings_service.InvalidSettingError as exc:
         return JSONResponse(status_code=400, content={"message": str(exc)})
     # S4-09 Item 3: not just an llm_provider switch — a key edit under the
@@ -55,9 +59,14 @@ def _connection_error_message(exc: Exception) -> str:
 
 
 @router.post("/test-connection", response_model=TestConnectionResponse)
-async def test_connection(body: TestConnectionRequest) -> TestConnectionResponse:
+async def test_connection(
+    body: TestConnectionRequest, current_user: User = Depends(get_current_user)
+) -> TestConnectionResponse:
     """Tests the key currently in the form — deliberately independent of
-    Save, so a key can be checked before committing to storing it.
+    Save, so a key can be checked before committing to storing it. Gated
+    behind auth (S6-06's blanket "every endpoint requires authentication"
+    criterion) but not scoped — it takes the key directly in the request
+    body and never touches storage, so there's nothing to scope.
     """
     if not body.api_key.strip():
         return TestConnectionResponse(connected=False, error_message="Enter an API key first.")

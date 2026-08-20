@@ -24,17 +24,15 @@ class ProviderNotConfiguredError(Exception):
 # S4-09 Item 3: one provider instance per (user, provider name), reused
 # across requests instead of re-authenticating a fresh SDK client on every
 # call. Keyed on user_id too as of S6-02 — settings (and so API keys) are
-# per-user from this sprint on, so a cache keyed on provider name alone
-# would let the first user to call a given provider's API key serve every
-# other user's requests. user_id defaults to None (single-user era, same
-# pattern as sync_lock.py's lock key and job_store.py) — every caller
-# passes None today; S6-06 threading a real value through is a one-line
-# change at each call site, not a signature change here.
+# per-user, so a cache keyed on provider name alone would let the first
+# user to call a given provider's API key serve every other user's
+# requests. user_id is required as of S6-06 — every call site now has a
+# real authenticated user to pass.
 # routers/settings.py calls invalidate_provider_cache() after ANY
 # successful PATCH /api/settings, not just an llm_provider switch, because
 # editing a key in place (same provider name, new key) would otherwise
 # keep serving a cached instance built from the old key.
-_provider_cache: dict[tuple[UUID | None, str], LLMProvider] = {}
+_provider_cache: dict[tuple[UUID, str], LLMProvider] = {}
 
 
 def invalidate_provider_cache() -> None:
@@ -43,8 +41,8 @@ def invalidate_provider_cache() -> None:
     _provider_cache.clear()
 
 
-def get_provider(db: Session, user_id: UUID | None = None) -> LLMProvider:
-    settings = settings_service.get_settings(db)
+def get_provider(db: Session, user_id: UUID) -> LLMProvider:
+    settings = settings_service.get_settings(db, user_id)
     provider_name = settings["llm_provider"]
     cache_key = (user_id, provider_name)
 
@@ -53,7 +51,7 @@ def get_provider(db: Session, user_id: UUID | None = None) -> LLMProvider:
         logger.info("Provider cache hit for %r", provider_name)
         return cached
 
-    api_key = settings_service.get_decrypted_api_key(db, provider_name)
+    api_key = settings_service.get_decrypted_api_key(db, user_id, provider_name)
     if not api_key:
         raise ProviderNotConfiguredError(
             f"No API key configured for {provider_name}. Add one in Settings before running analysis."

@@ -1,9 +1,11 @@
 """GET /api/jobs/{job_id} — background sync job status (S3-04)."""
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from .. import job_store
+from ..auth.dependency import get_current_user
+from ..models import User
 from ..schemas import JobStatusResponse
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -29,10 +31,15 @@ _STAGE_LABELS = {
 
 
 @router.get("/{job_id}", response_model=JobStatusResponse)
-def get_job(job_id: str) -> JobStatusResponse:
+def get_job(job_id: str, current_user: User = Depends(get_current_user)) -> JobStatusResponse:
     """Returns whichever of the processing/complete/failed shapes matches the
     job's current state in Redis. A missing job means it never existed or its
-    24h TTL expired — both read the same to the caller.
+    24h TTL expired — both read the same to the caller, and so does a job
+    that exists but belongs to someone else (S6-06 — the IDOR gap S5-01
+    named explicitly: job_id is a random UUID, not practically guessable,
+    but "not practically guessable" isn't "checked," and this is the ticket
+    that adds the check). All three are 404, never 403 — a 403 would confirm
+    to an unauthorized caller that a job with this exact id exists at all.
 
     A "processing" job whose heartbeat has gone stale (STALE_THRESHOLD_SECONDS)
     is reported as failed here rather than left to poll forever — the most
@@ -45,7 +52,7 @@ def get_job(job_id: str) -> JobStatusResponse:
     deliberate, ticket-scoped tradeoff, not an oversight.
     """
     job = job_store.get_job(job_id)
-    if job is None:
+    if job is None or job.get("user_id") != str(current_user.id):
         raise HTTPException(status_code=404, detail="Job not found or expired. Try syncing again.")
 
     if job.get("status") == "processing":

@@ -17,7 +17,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.models import Budget, Insight, Transaction
+from app.models import Budget, Category, Insight, Transaction, User
 
 # A small, varied pool — enough to make list-of-transactions tests look like
 # real data without needing a full merchant database.
@@ -39,10 +39,23 @@ def _next_external_id() -> str:
 
 
 @pytest.fixture
-def transaction_factory():
+def test_user(db_session):
+    """A real, flushed User row (S6-06) — every table's user_id is NOT NULL
+    now, so every factory below needs a real row to point at, not just a
+    UUID. Function-scoped like db_session, so it rolls back with everything
+    else the test wrote."""
+    user = User(email=f"{uuid.uuid4()}@example.com", password_hash="test-fixture-hash")
+    db_session.add(user)
+    db_session.flush()
+    return user
+
+
+@pytest.fixture
+def transaction_factory(db_session, test_user):
     def _make(**overrides) -> Transaction:
         defaults = dict(
             id=uuid.uuid4(),
+            user_id=test_user.id,
             account_id="test-account-uid",
             external_id=_next_external_id(),
             booking_date=date(2026, 8, 5),
@@ -55,32 +68,53 @@ def transaction_factory():
             raw_data={},
         )
         defaults.update(overrides)
+        # transactions.category is a composite FK -> categories(user_id, name)
+        # (S6-02) — a test overriding category to a real name needs test_user
+        # to actually own a row under that name first, same reasoning as
+        # budget_factory's own get_or_create below.
+        if defaults["category"] is not None:
+            key = (defaults["user_id"], defaults["category"])
+            if db_session.get(Category, key) is None:
+                db_session.add(Category(user_id=key[0], name=key[1], color="#64748B"))
+                db_session.flush()
         return Transaction(**defaults)
 
     return _make
 
 
 @pytest.fixture
-def budget_factory():
+def budget_factory(db_session, test_user):
     def _make(**overrides) -> Budget:
         defaults = dict(
             id=uuid.uuid4(),
-            user_id=None,
+            user_id=test_user.id,
             category="Groceries",
             amount=Decimal("250.00"),
             period="monthly",
         )
         defaults.update(overrides)
+        # budgets.category is a composite FK -> categories(user_id, name)
+        # (S6-02) — test_user needs their own row under this exact name
+        # before a budget can reference it. get_or_create rather than
+        # always adding: a test overriding category to the same name twice
+        # (or two budget_factory() calls for the same category) would
+        # otherwise try to insert the same (user_id, name) pair twice in
+        # one flush.
+        existing = db_session.get(Category, (defaults["user_id"], defaults["category"]))
+        if existing is None:
+            db_session.add(Category(user_id=defaults["user_id"], name=defaults["category"], color="#64748B"))
+            db_session.flush()
         return Budget(**defaults)
 
     return _make
 
 
 @pytest.fixture
-def insight_factory():
+def insight_factory(test_user):
     def _make(**overrides) -> Insight:
         defaults = dict(
             id=uuid.uuid4(),
+            user_id=test_user.id,
             date_from=date(2026, 8, 1),
             date_to=date(2026, 8, 31),
             type="summary",

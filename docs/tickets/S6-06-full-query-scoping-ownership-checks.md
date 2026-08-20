@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 Source: docs/tickets/S6-00-sprint-plan.md
 
 ---
@@ -110,3 +110,136 @@ No other occurrences found (`list_categories`'s optional `user_id`,
 default `None`, is deliberate/S6-05-documented, not a landmine — it
 stays unscoped only for `POST /api/categories`'s still-unauthenticated
 duplicate check).
+
+---
+
+## WHEN DONE — answered:
+
+**Full public-route list** (every other route requires `get_current_user`,
+and three of them additionally require `require_enable_banking_owner`):
+
+| Route | Why public |
+|---|---|
+| `GET /health` | Liveness/DB check |
+| `GET /api/auth/google/login` | Starts sign-in — no session yet |
+| `GET /api/auth/google/callback` | Google's mid-flow redirect target |
+| `POST /api/auth/register` | Creates the session the caller doesn't have yet |
+| `POST /api/auth/login` | Same reason |
+| `POST /api/auth/logout` | A no-op on an already-invalid session — nothing to protect |
+
+Now recorded as its own table in `ARCHITECTURE.md`'s Auth section, not
+just this ticket file, per the acceptance criterion's own wording
+("enumerate... in ARCHITECTURE.md so it's an intentional, reviewable
+set").
+
+**Second-test-user isolation — live, for every endpoint category**
+(`tests/test_full_query_scoping.py`, all against real Postgres/Redis,
+plus every pre-existing test in the suite now exercising real per-user
+scoping via a `test_user` fixture — see WATCH OUT FOR):
+
+- `test_second_user_sees_none_of_the_first_users_data_across_endpoints`
+  — one user seeds a category, a transaction, an insight, and a setting;
+  a second, throwaway user hits `GET /api/categories`, `GET
+  /api/transactions`, `GET /api/transactions/search`, `GET /api/insights`,
+  `GET /api/statistics`, and `GET /api/settings` — zero of the first
+  user's data appears in any of them. Settings specifically checked
+  against `DEFAULTS`, not just "a plausible-looking value," so a broken
+  scope that happened to also read `"gemini"` wouldn't false-pass.
+- `test_health_stays_public` and the categories/budgets isolation tests
+  in `test_auth_middleware_rollout.py` (S6-05, still passing, now backed
+  by the full sweep) round out list/create coverage.
+- `test_enable_banking_status_403s_for_a_non_owner_account` — a real,
+  non-owner authenticated user hits `GET /api/auth/enable-banking/status`
+  and gets `403`, not data.
+
+**404, not 403, on cross-user by-ID requests — live:**
+
+- `test_job_status_404s_on_a_job_belonging_to_another_user_never_403` —
+  a job stamped with `owner`'s `user_id`, requested by `other`: `404`.
+  Requested by `owner` afterward: `200`, proving the check is real
+  ownership comparison, not "everything 404s."
+- `test_patch_transaction_404s_on_a_transaction_belonging_to_another_user`
+  — `other` tries to `PATCH` `owner`'s transaction: `404`, and the row is
+  confirmed untouched in the database afterward (not just "the response
+  looked like a no-op").
+
+Full suite: **96 passed, 0 failed** — this ticket is what actually closes
+the 26-test list S6-02 opened and S6-03/S6-04/S6-05 held steady at
+(`test_auth_middleware_rollout.py`'s day-of-write count was 64; every
+one of the previously-tracked 26 either updated to the new signatures
+or, for `test_job_pipeline.py`, split into two more specific tests than
+before — see WATCH OUT FOR). Frontend untouched this ticket (no new
+routes or components needed — S6-05's guard and cookie plumbing already
+cover it); backend confirmed live via `claude-in-chrome` against Borys's
+real, already-authenticated session: dashboard, budgets, and the full
+transactions list all render correctly with his real data after the
+entire scoping sweep, and unauthenticated `curl` checks against every
+route in the public-route table above confirm the `401`/`200` split
+matches exactly.
+
+KEY DECISIONS:
+- **`job_store` keeps `user_id` in the status *value*, not the Redis
+  key shape** (the ticket's other offered option) → no key-format
+  migration needed, and `job_store.py` itself never has to know what
+  "ownership" means — the comparison lives entirely in
+  `routers/jobs.py` → the alternative (`job:{user_id}:{job_id}`) would
+  have meant find-and-replace across every `_job_key` call site for no
+  behavioral difference.
+- **`require_enable_banking_owner` is a composed dependency
+  (`get_current_user` -> email check), not a duplicate auth check** →
+  `Depends(require_enable_banking_owner)` alone gives a route both
+  "must be logged in" and "must be the right account" in one
+  declaration → avoided a route needing both `Depends(get_current_user)`
+  and a second, separate ownership dependency.
+- **`ENABLE_BANKING_OWNER_EMAIL` is an env var, not a hardcoded
+  constant** → matches `FRONTEND_ORIGIN`'s existing dev/prod-config
+  pattern, and doesn't require a code change (or redeploy) if the real
+  account's email ever needs to change → the alternative (a Python
+  constant) would've meant hardcoding Borys's real email a second place
+  in source, beyond the S6-02 migration that already has to.
+- **`list_categories` keeps an optional, defaulted `user_id`** rather
+  than becoming required → `POST /api/categories`'s duplicate-name check
+  is the one remaining unauthenticated caller (that route's own
+  auth/scoping is out of this ticket's named list — see WATCH OUT FOR)
+  → matches the exact reasoning S6-05 already recorded for this same
+  function.
+
+WATCH OUT FOR:
+- **`POST /api/categories` itself is still unauthenticated** — not named
+  in S6-06's Category A/B lists (which cover "categories/budgets
+  endpoints not already covered by S6-05," and S6-05 only covered `GET`)
+  — a real, if narrow, gap: anyone can currently create a category row
+  with no `user_id` scoping check on the request itself (the row still
+  gets a real `user_id` via `crud.create_category`, but nothing gates
+  who's allowed to call this route at all). Flagging rather than
+  silently fixing outside the ticket's named scope — Borys/PM call on
+  whether this needs its own follow-up or folds into a later ticket.
+- **Rate limiting (`chat`/`sync`/`analysis`) is still IP-keyed**, not
+  `user_id`-keyed, even though every one of those routes now resolves a
+  real `current_user` — out of this ticket's named scope (full query
+  scoping and ownership checks, not rate-limit keying). Documented in
+  `ARCHITECTURE.md`'s Invariants as a worthwhile small follow-up.
+- **Every pre-existing test in the suite needed updating**, not just
+  the ones already tracked from S6-02 — this ticket's own crud.py
+  signature changes (adding required `user_id` params) broke every test
+  calling those functions directly, tracked-or-not. All fixed; none
+  skipped or silently loosened. `tests/fixtures/factories.py` gained a
+  `test_user` fixture (a real, flushed `User` row every other factory
+  now points at) and both `transaction_factory`/`budget_factory` gained
+  auto-created `Category` rows for any category name they're given
+  (composite FK, S6-02) — infrastructure changes, not test-expectation
+  changes.
+- **Timing/enumeration-style side channels weren't re-audited** for the
+  by-ID ownership checks specifically (e.g., does a `404` for "doesn't
+  exist" and a `404` for "exists, not yours" take measurably different
+  time). Not addressed here — flagging for S6-07's adversarial pass,
+  which is exactly the kind of thing that ticket exists to probe.
+
+HOW IT CONNECTS: this is the ticket S6-02 through S6-05 were all
+building toward — every deliberately-deferred gap from S6-02's ruling
+(the 26-test list), S6-05's partial rollout, and S5-01's original IDOR
+audit closes here. S6-07 (Security Auditor) is what tries to break this
+work adversarially, not extend its coverage; S6-08 (sprint close) is
+verification and documentation only.
+
+Ready for **S6-07** whenever you confirm this one.

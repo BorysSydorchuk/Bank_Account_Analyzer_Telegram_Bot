@@ -7,6 +7,7 @@ regardless of how long Enable Banking or the LLM calls take.
 import asyncio
 import logging
 from datetime import date
+from uuid import UUID
 
 from .. import analysis_service, crud, job_store, sync_lock
 from ..celery_app import celery_app
@@ -17,21 +18,25 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task
-def run_sync_job(job_id: str, date_from: str, date_to: str) -> None:
+def run_sync_job(job_id: str, date_from: str, date_to: str, user_id: str) -> None:
     """job_id: the key this task reports progress under (job:{job_id} in
     Redis, via job_store). date_from/date_to: ISO date strings — Celery
     serializes task arguments to JSON, so a date object wouldn't survive the
     trip; every caller passes .isoformat() and this converts them back.
+    user_id: same reasoning, string form of the UUID (S6-06) — the
+    authenticated user who requested this sync, threaded through the whole
+    pipeline and stamped into every job_store status update so
+    GET /api/jobs/{job_id} can check ownership.
 
     Celery tasks are plain synchronous functions, but the agents/provider
     code is async (it awaits HTTP calls to the LLM) — asyncio.run() is the
     bridge, same reasoning as the FastAPI routes needing `await` for the same
     calls.
     """
-    asyncio.run(_run(job_id, date.fromisoformat(date_from), date.fromisoformat(date_to)))
+    asyncio.run(_run(job_id, date.fromisoformat(date_from), date.fromisoformat(date_to), UUID(user_id)))
 
 
-async def _run(job_id: str, date_from: date, date_to: date) -> None:
+async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> None:
     db = SessionLocal()
     # Tracked so the catch-all except below can report which stage an
     # unexpected exception actually interrupted, instead of a stage name
@@ -42,7 +47,7 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
             job_id,
             {
                 "job_id": job_id,
-                "status": "processing",
+                "user_id": str(user_id),                "status": "processing",
                 "stage": "fetching",
                 "progress": 0,
                 "message": "Fetching transactions from KBC...",
@@ -67,7 +72,7 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
         except (EnableBankingAuthError, EnableBankingError) as exc:
             job_store.set_job(
                 job_id,
-                {"job_id": job_id, "status": "failed", "stage": "fetching", "error": str(exc)},
+                {"job_id": job_id, "user_id": str(user_id), "status": "failed", "stage": "fetching", "error": str(exc)},
             )
             return
 
@@ -76,7 +81,7 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
             job_id,
             {
                 "job_id": job_id,
-                "status": "processing",
+                "user_id": str(user_id),                "status": "processing",
                 "stage": "storing",
                 "progress": 0,
                 "message": f"Storing {fetched} transactions...",
@@ -85,7 +90,7 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
 
         stored = duplicates_skipped = 0
         for account_uid, txs in fetched_by_account:
-            account_stored, account_duplicates = crud.upsert_transactions(db, account_uid, txs)
+            account_stored, account_duplicates = crud.upsert_transactions(db, user_id, account_uid, txs)
             stored += account_stored
             duplicates_skipped += account_duplicates
         logger.info(
@@ -98,7 +103,7 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
                 job_id,
                 {
                     "job_id": job_id,
-                    "status": "processing",
+                    "user_id": str(user_id),                    "status": "processing",
                     "stage": "categorizing",
                     "progress": progress,
                     "message": f"Categorizing batch {completed_batches} of {total_batches}...",
@@ -112,7 +117,7 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
         # 404. That's immediately overwritten by this function's own first
         # set_job call above; nothing to re-seed here.
         categorization = await analysis_service.categorize_transactions(
-            db, date_from, date_to, on_batch_complete=on_batch_complete
+            db, user_id, date_from, date_to, on_batch_complete=on_batch_complete
         )
 
         # error_message is only set when categorization couldn't run at all
@@ -133,7 +138,7 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
                 job_id,
                 {
                     "job_id": job_id,
-                    "status": "failed",
+                    "user_id": str(user_id),                    "status": "failed",
                     "stage": "categorizing",
                     "error": categorization["error_message"]
                     or "Categorization failed for every transaction — the AI provider may be temporarily "
@@ -147,14 +152,14 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
             job_id,
             {
                 "job_id": job_id,
-                "status": "processing",
+                "user_id": str(user_id),                "status": "processing",
                 "stage": "generating_insights",
                 "progress": 50,
                 "message": "Generating insights...",
             },
         )
 
-        insights = await analysis_service.generate_insights(db, date_from, date_to)
+        insights = await analysis_service.generate_insights(db, user_id, date_from, date_to)
 
         # Only replace the persisted set on an actual successful generation
         # (S3-07 Item 3) — if this run's LLM call failed, the range keeps
@@ -162,14 +167,14 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
         # than being wiped out by this run's failure.
         if insights["error_message"] is None:
             crud.replace_insights(
-                db, date_from, date_to, insights["insights"], insights["provider"], insights["generated_at"]
+                db, user_id, date_from, date_to, insights["insights"], insights["provider"], insights["generated_at"]
             )
 
         job_store.set_job(
             job_id,
             {
                 "job_id": job_id,
-                "status": "complete",
+                "user_id": str(user_id),                "status": "complete",
                 "stage": "done",
                 "progress": 100,
                 "categorized": categorization["categorized"],
@@ -192,7 +197,7 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
             job_id,
             {
                 "job_id": job_id,
-                "status": "failed",
+                "user_id": str(user_id),                "status": "failed",
                 "stage": current_stage,
                 "error": "Something went wrong while processing this sync. Please try again.",
             },
@@ -204,5 +209,5 @@ async def _run(job_id: str, date_from: date, date_to: date) -> None:
         # A worker that crashes hard enough to skip even this (killed, not
         # raising) leaves the lock to expire on its own TTL instead; that's
         # the deliberate backstop, not a gap this line is meant to cover.
-        sync_lock.release(job_id)
+        sync_lock.release(job_id, user_id)
         db.close()

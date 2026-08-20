@@ -3,7 +3,6 @@
 single unit under test for all of these — it's the only place a transaction
 is ever inserted.
 """
-from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -19,9 +18,9 @@ def _raw_tx(external_id: str, description: str = "Delhaize Ixelles", amount: str
     return {"id": external_id, "date": day, "amount": amount, "description": description}
 
 
-def test_same_external_id_is_never_inserted_twice(db_session):
-    stored_1, dupes_1 = crud.upsert_transactions(db_session, "account-a", [_raw_tx("ext-001")])
-    stored_2, dupes_2 = crud.upsert_transactions(db_session, "account-a", [_raw_tx("ext-001")])
+def test_same_external_id_is_never_inserted_twice(db_session, test_user):
+    stored_1, dupes_1 = crud.upsert_transactions(db_session, test_user.id, "account-a", [_raw_tx("ext-001")])
+    stored_2, dupes_2 = crud.upsert_transactions(db_session, test_user.id, "account-a", [_raw_tx("ext-001")])
 
     assert (stored_1, dupes_1) == (1, 0)
     assert (stored_2, dupes_2) == (0, 1)
@@ -30,7 +29,7 @@ def test_same_external_id_is_never_inserted_twice(db_session):
     assert len(rows) == 1
 
 
-def test_dedup_holds_even_when_account_id_differs_S4_01_regression(db_session):
+def test_dedup_holds_even_when_account_id_differs_S4_01_regression(db_session, test_user):
     """The exact S4-01 production incident: Enable Banking issues a new
     internal account_id on every reconnect, but external_id is stable for
     the same real-world transaction. A naive (account_id, external_id)
@@ -39,8 +38,12 @@ def test_dedup_holds_even_when_account_id_differs_S4_01_regression(db_session):
     Regression: the same external_id synced under two different account_ids
     must still collapse to one row.
     """
-    stored_1, _ = crud.upsert_transactions(db_session, "account-before-reconnect", [_raw_tx("ext-stable-ref")])
-    stored_2, dupes_2 = crud.upsert_transactions(db_session, "account-after-reconnect", [_raw_tx("ext-stable-ref")])
+    stored_1, _ = crud.upsert_transactions(
+        db_session, test_user.id, "account-before-reconnect", [_raw_tx("ext-stable-ref")]
+    )
+    stored_2, dupes_2 = crud.upsert_transactions(
+        db_session, test_user.id, "account-after-reconnect", [_raw_tx("ext-stable-ref")]
+    )
 
     assert stored_1 == 1
     assert stored_2 == 0
@@ -52,23 +55,27 @@ def test_dedup_holds_even_when_account_id_differs_S4_01_regression(db_session):
     assert rows[0].account_id == "account-before-reconnect"
 
 
-def test_resync_of_already_synced_range_stores_zero_rows(db_session):
+def test_resync_of_already_synced_range_stores_zero_rows(db_session, test_user):
     batch = [_raw_tx("ext-100"), _raw_tx("ext-101"), _raw_tx("ext-102")]
-    crud.upsert_transactions(db_session, "account-a", batch)
+    crud.upsert_transactions(db_session, test_user.id, "account-a", batch)
 
-    stored, duplicates_skipped = crud.upsert_transactions(db_session, "account-a", batch)
+    stored, duplicates_skipped = crud.upsert_transactions(db_session, test_user.id, "account-a", batch)
 
     assert stored == 0
     assert duplicates_skipped == 3
 
 
-def test_conflicting_update_refreshes_amount_and_description(db_session):
+def test_conflicting_update_refreshes_amount_and_description(db_session, test_user):
     """Not a duplicate-count assertion, but proves the ON CONFLICT DO UPDATE
     path actually updates the mutable fields (amount/description/date can
     legitimately change between the bank's pending and booked views of the
     same transaction) rather than silently ignoring the second sync."""
-    crud.upsert_transactions(db_session, "account-a", [_raw_tx("ext-200", description="Pending", amount="-5.00")])
-    crud.upsert_transactions(db_session, "account-a", [_raw_tx("ext-200", description="Booked - Delhaize", amount="-5.43")])
+    crud.upsert_transactions(
+        db_session, test_user.id, "account-a", [_raw_tx("ext-200", description="Pending", amount="-5.00")]
+    )
+    crud.upsert_transactions(
+        db_session, test_user.id, "account-a", [_raw_tx("ext-200", description="Booked - Delhaize", amount="-5.43")]
+    )
 
     row = db_session.execute(select(Transaction).where(Transaction.external_id == "ext-200")).scalar_one()
     assert row.description == "Booked - Delhaize"

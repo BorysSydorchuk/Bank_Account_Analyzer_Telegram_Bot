@@ -67,7 +67,7 @@ def test_database_unavailable_maps_to_503_through_a_live_route(client, monkeypat
     assert response.json() == {"message": "Database unavailable. Please try again shortly."}
 
 
-def test_both_message_and_detail_error_shapes_are_genuinely_live_S3_06_regression(client):
+def test_both_message_and_detail_error_shapes_are_genuinely_live_S3_06_regression(client, test_user):
     """The custom exception handlers (401/502/503) always emit {"message":
     ...}. But routes that raise a bare FastAPI HTTPException — like PATCH
     /api/transactions/{id} with an unknown category — get FastAPI's own
@@ -79,6 +79,9 @@ def test_both_message_and_detail_error_shapes_are_genuinely_live_S3_06_regressio
     """
     from uuid import uuid4
 
+    from app.auth.session import SESSION_COOKIE_NAME, create_session
+
+    client.cookies.set(SESSION_COOKIE_NAME, create_session(test_user.id))
     response = client.patch(f"/api/transactions/{uuid4()}", json={"category": "Not A Real Category"})
 
     assert response.status_code == 400

@@ -98,15 +98,17 @@ def _stage_sequence(monkeypatch) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_happy_path_transitions_through_every_stage_in_order(raw_db, mock_enable_banking_client, monkeypatch):
+async def test_happy_path_transitions_through_every_stage_in_order(
+    raw_db, raw_db_user, mock_enable_banking_client, monkeypatch
+):
     mock_enable_banking_client.set_transactions([_raw_tx("ext-job-001")])
     job_id = str(uuid.uuid4())
 
     provider = _OrchestrationFakeProvider()
-    monkeypatch.setattr("app.analysis_service.get_provider", lambda db: provider)
+    monkeypatch.setattr("app.analysis_service.get_provider", lambda db, user_id: provider)
     stages = _stage_sequence(monkeypatch)
 
-    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31))
+    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31), raw_db_user.id)
 
     # Not asserting exact call count (categorizing reports once per batch),
     # just that these five stages appear, in this relative order.
@@ -116,19 +118,24 @@ async def test_happy_path_transitions_through_every_stage_in_order(raw_db, mock_
     final = job_store.get_job(job_id)
     assert final["status"] == "complete"
     assert final["stage"] == "done"
+    assert final["user_id"] == str(raw_db_user.id)
 
     stored_row = raw_db.query(Transaction).filter(Transaction.external_id == "ext-job-001").one()
     assert stored_row.category == "Other"
+    assert stored_row.user_id == raw_db_user.id
 
 
 @pytest.mark.asyncio
-async def test_categorization_result_is_actually_written(raw_db, mock_enable_banking_client, monkeypatch):
+async def test_categorization_result_is_actually_written(
+    raw_db, raw_db_user, mock_enable_banking_client, monkeypatch
+):
     """Pre-seeds a transaction directly (equivalent to what a prior sync
     already stored) rather than round-tripping it through this run's own
     fetch/store stages — the fake provider needs the transaction's real id
     to answer with, which only exists once a row has been committed.
     """
     tx = Transaction(
+        user_id=raw_db_user.id,
         account_id="a", external_id="ext-job-002", booking_date=date(2026, 8, 5),
         amount=-12.34, currency="EUR", description="Delhaize Ixelles",
     )
@@ -136,11 +143,11 @@ async def test_categorization_result_is_actually_written(raw_db, mock_enable_ban
     raw_db.commit()
 
     provider = _OrchestrationFakeProvider({str(tx.id): "Groceries"})
-    monkeypatch.setattr("app.analysis_service.get_provider", lambda db: provider)
+    monkeypatch.setattr("app.analysis_service.get_provider", lambda db, user_id: provider)
     mock_enable_banking_client.set_transactions([])  # nothing new to fetch this run
 
     job_id = str(uuid.uuid4())
-    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31))
+    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31), raw_db_user.id)
 
     raw_db.refresh(tx)
     assert tx.category == "Groceries"
@@ -148,11 +155,13 @@ async def test_categorization_result_is_actually_written(raw_db, mock_enable_ban
 
 
 @pytest.mark.asyncio
-async def test_fetching_stage_failure_reports_failed_status_naming_that_stage(raw_db, mock_enable_banking_client):
+async def test_fetching_stage_failure_reports_failed_status_naming_that_stage(
+    raw_db, raw_db_user, mock_enable_banking_client
+):
     mock_enable_banking_client.expire_session()
     job_id = str(uuid.uuid4())
 
-    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31))
+    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31), raw_db_user.id)
 
     job = job_store.get_job(job_id)
     assert job["status"] == "failed"
@@ -161,16 +170,18 @@ async def test_fetching_stage_failure_reports_failed_status_naming_that_stage(ra
 
 
 @pytest.mark.asyncio
-async def test_storing_stage_failure_reports_failed_status_naming_that_stage(raw_db, mock_enable_banking_client, monkeypatch):
+async def test_storing_stage_failure_reports_failed_status_naming_that_stage(
+    raw_db, raw_db_user, mock_enable_banking_client, monkeypatch
+):
     mock_enable_banking_client.set_transactions([_raw_tx("ext-job-003")])
     job_id = str(uuid.uuid4())
 
-    def _broken_upsert(db, account_id, txs):
+    def _broken_upsert(db, user_id, account_id, txs):
         raise RuntimeError("simulated storage failure")
 
     monkeypatch.setattr("app.tasks.analysis.crud.upsert_transactions", _broken_upsert)
 
-    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31))
+    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31), raw_db_user.id)
 
     job = job_store.get_job(job_id)
     assert job["status"] == "failed"
@@ -181,7 +192,7 @@ async def test_storing_stage_failure_reports_failed_status_naming_that_stage(raw
 
 @pytest.mark.asyncio
 async def test_categorizing_stage_failure_when_no_provider_configured_reports_failed_status(
-    raw_db, mock_enable_banking_client
+    raw_db, raw_db_user, mock_enable_banking_client
 ):
     """No monkeypatch of get_provider here — the point is the real,
     unconfigured-by-default state (no API key ever saved in the test
@@ -189,7 +200,7 @@ async def test_categorizing_stage_failure_when_no_provider_configured_reports_fa
     mock_enable_banking_client.set_transactions([_raw_tx("ext-job-004")])
     job_id = str(uuid.uuid4())
 
-    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31))
+    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31), raw_db_user.id)
 
     job = job_store.get_job(job_id)
     assert job["status"] == "failed"
@@ -199,19 +210,19 @@ async def test_categorizing_stage_failure_when_no_provider_configured_reports_fa
 
 @pytest.mark.asyncio
 async def test_generating_insights_stage_failure_reports_failed_status_naming_that_stage(
-    raw_db, mock_enable_banking_client, monkeypatch
+    raw_db, raw_db_user, mock_enable_banking_client, monkeypatch
 ):
     mock_enable_banking_client.set_transactions([])  # nothing to categorize -> categorizing succeeds trivially
     provider = _OrchestrationFakeProvider({})
-    monkeypatch.setattr("app.analysis_service.get_provider", lambda db: provider)
+    monkeypatch.setattr("app.analysis_service.get_provider", lambda db, user_id: provider)
 
-    async def _broken_generate_insights(db, date_from, date_to):
+    async def _broken_generate_insights(db, user_id, date_from, date_to):
         raise RuntimeError("simulated insight generation crash")
 
     monkeypatch.setattr("app.tasks.analysis.analysis_service.generate_insights", _broken_generate_insights)
 
     job_id = str(uuid.uuid4())
-    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31))
+    await _run(job_id, date(2026, 8, 1), date(2026, 8, 31), raw_db_user.id)
 
     job = job_store.get_job(job_id)
     assert job["status"] == "failed"

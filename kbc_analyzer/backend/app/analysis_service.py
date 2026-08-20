@@ -6,6 +6,7 @@ same logic instead of copies that could drift.
 import logging
 from datetime import date, datetime, timezone
 from typing import Callable
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 async def categorize_transactions(
     db: Session,
+    user_id: UUID,
     date_from: date | None = None,
     date_to: date | None = None,
     on_batch_complete: Callable[[int, int], None] | None = None,
@@ -39,14 +41,14 @@ async def categorize_transactions(
     standalone POST /api/analysis/categorize endpoint has no progress UI to
     feed, so it just omits it.
     """
-    provider_name = get_settings(db)["llm_provider"]
-    skipped = crud.count_categorized_transactions(db, date_from, date_to)
-    uncategorized = crud.get_uncategorized_transactions(db, date_from, date_to)
+    provider_name = get_settings(db, user_id)["llm_provider"]
+    skipped = crud.count_categorized_transactions(db, user_id, date_from, date_to)
+    uncategorized = crud.get_uncategorized_transactions(db, user_id, date_from, date_to)
     # Categories still on their S3-01 seed color — checked on every run, not
     # just when there are new transactions to categorize, so a category
     # already in use gets a real AI color even on a sync where nothing new
     # came in to categorize.
-    seeded_category_names = crud.list_seeded_category_names(db)
+    seeded_category_names = crud.list_seeded_category_names(db, user_id)
 
     if not uncategorized and not seeded_category_names:
         return {
@@ -58,7 +60,7 @@ async def categorize_transactions(
         }
 
     try:
-        provider = get_provider(db)
+        provider = get_provider(db, user_id)
     except ProviderNotConfiguredError as exc:
         logger.warning("Categorization skipped: %s", exc)
         return {
@@ -93,7 +95,7 @@ async def categorize_transactions(
             # batch's otherwise-valid results; it's treated the same as any
             # other per-transaction categorization failure (counted in `failed`
             # below), not a reason to fail the run.
-            known_category_names = {c.name for c in crud.list_categories(db)}
+            known_category_names = {c.name for c in crud.list_categories(db, user_id)}
             unknown = [r for r in results if r.get("category") not in known_category_names]
             if unknown:
                 logger.warning(
@@ -105,10 +107,10 @@ async def categorize_transactions(
             results = [r for r in results if r.get("category") in known_category_names]
 
         if results:
-            crud.update_transaction_categories(db, results)
+            crud.update_transaction_categories(db, user_id, results)
 
     if seeded_category_names:
-        await assign_ai_colors(db, provider, seeded_category_names)
+        await assign_ai_colors(db, user_id, provider, seeded_category_names)
 
     return {
         "categorized": len(results),
@@ -119,7 +121,7 @@ async def categorize_transactions(
     }
 
 
-async def assign_ai_colors(db: Session, provider: LLMProvider, category_names: list[str]) -> None:
+async def assign_ai_colors(db: Session, user_id: UUID, provider: LLMProvider, category_names: list[str]) -> None:
     """Runs the S3-02 color-assignment prompt for category_names (all still on
     their S3-01 seed color) and persists the result with source='ai'.
 
@@ -130,7 +132,7 @@ async def assign_ai_colors(db: Session, provider: LLMProvider, category_names: l
     swallowed — like insight generation, this is a nice-to-have on top of a
     successful sync, not something that should fail it.
     """
-    existing_by_name = crud.get_categories_by_name(db, category_names)
+    existing_by_name = crud.get_categories_by_name(db, user_id, category_names)
 
     agent = ColorAssignmentAgent(provider)
     try:
@@ -161,25 +163,25 @@ async def assign_ai_colors(db: Session, provider: LLMProvider, category_names: l
             colors_by_name[name] = BACKUP_PALETTE[next_backup_index % len(BACKUP_PALETTE)]
             next_backup_index += 1
 
-    crud.upsert_category_colors(db, colors_by_name, source="ai")
+    crud.upsert_category_colors(db, user_id, colors_by_name, source="ai")
 
 
-async def generate_insights(db: Session, date_from: date, date_to: date) -> dict:
+async def generate_insights(db: Session, user_id: UUID, date_from: date, date_to: date) -> dict:
     """Returns {insights, provider, generated_at, error_message}. Unlike
     categorization, a single failed LLM call has no partial result to fall
     back on, so `insights` is simply empty and error_message explains why —
     the caller (sync) still succeeds regardless.
     """
-    provider_name = get_settings(db)["llm_provider"]
+    provider_name = get_settings(db, user_id)["llm_provider"]
     generated_at = datetime.now(timezone.utc)
 
     try:
-        provider = get_provider(db)
+        provider = get_provider(db, user_id)
     except ProviderNotConfiguredError as exc:
         logger.warning("Insight generation skipped: %s", exc)
         return {"insights": [], "provider": provider_name, "generated_at": generated_at, "error_message": str(exc)}
 
-    transactions = crud.list_transactions(db, date_from, date_to)
+    transactions = crud.list_transactions(db, user_id, date_from, date_to)
     statistics = compute_statistics(transactions, date_from, date_to)
 
     agent = InsightAgent(provider)

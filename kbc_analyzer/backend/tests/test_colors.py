@@ -58,7 +58,7 @@ async def test_rejected_ai_color_falls_back_to_the_categorys_existing_color(db_s
 
     provider = FakeLLMProvider(json_response=[{"name": "Groceries", "color": FAILS_CONTRAST}])
 
-    await assign_ai_colors(db_session, provider, ["Groceries"])
+    await assign_ai_colors(db_session, existing.user_id, provider, ["Groceries"])
 
     db_session.refresh(existing)
     assert existing.color == existing_color
@@ -66,27 +66,29 @@ async def test_rejected_ai_color_falls_back_to_the_categorys_existing_color(db_s
 
 
 @pytest.mark.asyncio
-async def test_rejected_ai_color_for_a_brand_new_category_falls_back_to_backup_palette_not_a_random_color(db_session):
+async def test_rejected_ai_color_for_a_brand_new_category_falls_back_to_backup_palette_not_a_random_color(
+    db_session, test_user
+):
     """A category with no existing row (never seeded, never AI-colored
     before) has nothing to fall back to — BACKUP_PALETTE is the fallback,
     not some ad-hoc default."""
     provider = FakeLLMProvider(json_response=[{"name": "Brand New Category", "color": FAILS_CONTRAST}])
 
-    await assign_ai_colors(db_session, provider, ["Brand New Category"])
+    await assign_ai_colors(db_session, test_user.id, provider, ["Brand New Category"])
 
-    saved = crud.get_categories_by_name(db_session, ["Brand New Category"])["Brand New Category"]
+    saved = crud.get_categories_by_name(db_session, test_user.id, ["Brand New Category"])["Brand New Category"]
     assert saved.color in BACKUP_PALETTE
 
 
 @pytest.mark.asyncio
 async def test_source_user_colors_are_never_overwritten_by_ai(db_session, seeded_categories):
     category = next(c for c in seeded_categories if c.name == "Groceries")
-    crud.set_category_color(db_session, "Groceries", VALID_COLOR)
+    crud.set_category_color(db_session, category.user_id, "Groceries", VALID_COLOR)
     db_session.refresh(category)
     assert category.source == "user"
 
     provider = FakeLLMProvider(json_response=[{"name": "Groceries", "color": "#416F20"}])
-    await assign_ai_colors(db_session, provider, ["Groceries"])
+    await assign_ai_colors(db_session, category.user_id, provider, ["Groceries"])
 
     db_session.refresh(category)
     assert category.color == VALID_COLOR

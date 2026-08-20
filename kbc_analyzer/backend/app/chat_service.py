@@ -6,6 +6,7 @@ the frontend has to parse mid-flight.
 """
 from datetime import date, timedelta
 from typing import AsyncGenerator
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -19,13 +20,6 @@ RECENT_TRANSACTIONS_LIMIT = 20
 SUMMARY_WINDOW_DAYS = 90
 MAX_HISTORY_MESSAGES = 20
 
-# TODO(Sprint 6): pass the authenticated user's id through —
-# crud.list_budgets_with_status already takes user_id as an explicit
-# parameter (S4-05 pattern), so deferred until Sprint 6 auth exists to
-# actually supply a real value; this sprint only has to change this one
-# constant, not any function signature.
-CURRENT_USER_ID = None
-
 
 def _format_amount(value: float) -> str:
     """Belgian locale (period for thousands, comma for decimals) — matches
@@ -34,9 +28,9 @@ def _format_amount(value: float) -> str:
     return f"€ {value:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
 
 
-def _summary_text(db: Session, today: date) -> str:
+def _summary_text(db: Session, user_id: UUID, today: date) -> str:
     date_from = today - timedelta(days=SUMMARY_WINDOW_DAYS - 1)
-    transactions = crud.list_transactions(db, date_from, today)
+    transactions = crud.list_transactions(db, user_id, date_from, today)
     stats = compute_statistics(transactions, date_from, today)
     summary = stats["summary"]
     if not stats["by_category"]:
@@ -56,8 +50,8 @@ def _summary_text(db: Session, today: date) -> str:
     return "\n".join(lines)
 
 
-def _transactions_text(db: Session) -> str:
-    recent = crud.get_recent_transactions(db, RECENT_TRANSACTIONS_LIMIT)
+def _transactions_text(db: Session, user_id: UUID) -> str:
+    recent = crud.get_recent_transactions(db, user_id, RECENT_TRANSACTIONS_LIMIT)
     if not recent:
         return "No transactions on file yet."
     return "\n".join(
@@ -66,8 +60,8 @@ def _transactions_text(db: Session) -> str:
     )
 
 
-def _budgets_text(db: Session) -> str:
-    budgets = crud.list_budgets_with_status(db, CURRENT_USER_ID)
+def _budgets_text(db: Session, user_id: UUID) -> str:
+    budgets = crud.list_budgets_with_status(db, user_id)
     if not budgets:
         return "No budgets set."
     return "\n".join(
@@ -77,25 +71,25 @@ def _budgets_text(db: Session) -> str:
     )
 
 
-def build_context(db: Session) -> dict:
+def build_context(db: Session, user_id: UUID) -> dict:
     """Fresh financial context for one chat message — never cached, so every
     turn reflects the database as it is right now, not as it was when the
     conversation started."""
     today = date.today()
-    date_range = crud.get_transaction_date_range(db)
+    date_range = crud.get_transaction_date_range(db, user_id)
     earliest, latest = date_range if date_range else (today, today)
     return {
         "today": today.isoformat(),
         "earliest_date": earliest.isoformat(),
         "latest_date": latest.isoformat(),
-        "summary_text": _summary_text(db, today),
-        "transactions_text": _transactions_text(db),
-        "budgets_text": _budgets_text(db),
+        "summary_text": _summary_text(db, user_id, today),
+        "transactions_text": _transactions_text(db, user_id),
+        "budgets_text": _budgets_text(db, user_id),
     }
 
 
 def start_chat_stream(
-    db: Session, message: str, history: list[dict]
+    db: Session, user_id: UUID, message: str, history: list[dict]
 ) -> tuple[AsyncGenerator[str, None], LLMProvider]:
     """Resolves the configured provider and builds the financial context —
     both synchronous — then returns the agent's (not-yet-started) token
@@ -105,8 +99,8 @@ def start_chat_stream(
     Raises ProviderNotConfiguredError (from agents.registry) if no API key
     is set. Nothing here has started streaming yet when that happens.
     """
-    provider = get_provider(db)
-    context = build_context(db)
+    provider = get_provider(db, user_id)
+    context = build_context(db, user_id)
     truncated_history = history[-MAX_HISTORY_MESSAGES:]
     agent = ChatAgent(provider)
     return agent.stream(message, truncated_history, context), provider

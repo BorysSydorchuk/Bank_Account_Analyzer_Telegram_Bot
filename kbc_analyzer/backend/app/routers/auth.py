@@ -5,11 +5,17 @@ renewal (Enable Banking sessions run ~90 days) — no application, including thi
 can silently refresh that consent on the user's behalf. These endpoints replace the
 terminal-only flow (`python -m kbc_analyzer.main`) with one the dashboard can drive,
 still ending in the user manually completing KBC's own login/consent screen.
+
+S6-06: all three endpoints require require_enable_banking_owner — the single
+eb_session.json connection belongs to exactly one real account
+(ENABLE_BANKING_OWNER_EMAIL) until Sprint 7's per-user bank session storage.
 """
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from ..auth.dependency import require_enable_banking_owner
 from ..eb_service import EnableBankingError, EnableBankingService
+from ..models import User
 from ..schemas import CallbackRequest, EnableBankingStatus, ReauthorizeResponse
 from ..tasks.auth import catch_enable_banking_callback
 
@@ -21,12 +27,18 @@ def get_eb_service() -> EnableBankingService:
 
 
 @router.get("/status", response_model=EnableBankingStatus)
-def get_status(eb: EnableBankingService = Depends(get_eb_service)) -> EnableBankingStatus:
+def get_status(
+    eb: EnableBankingService = Depends(get_eb_service),
+    current_user: User = Depends(require_enable_banking_owner),
+) -> EnableBankingStatus:
     return EnableBankingStatus(**eb.get_session_status())
 
 
 @router.post("/reauthorize", response_model=ReauthorizeResponse)
-def reauthorize(eb: EnableBankingService = Depends(get_eb_service)) -> ReauthorizeResponse:
+def reauthorize(
+    eb: EnableBankingService = Depends(get_eb_service),
+    current_user: User = Depends(require_enable_banking_owner),
+) -> ReauthorizeResponse:
     # S3-07 Item 2: a background task now catches the redirect automatically
     # (app/eb_callback_server.py) instead of the user copy-pasting it back —
     # the frontend's only remaining job is to open auth_url and poll /status.
@@ -39,6 +51,7 @@ def reauthorize(eb: EnableBankingService = Depends(get_eb_service)) -> Reauthori
 def callback(
     body: CallbackRequest,
     eb: EnableBankingService = Depends(get_eb_service),
+    current_user: User = Depends(require_enable_banking_owner),
 ):
     """Manual fallback (S2-02) — no longer called by the frontend now that
     reconnecting catches the redirect automatically (S3-07 Item 2), but kept

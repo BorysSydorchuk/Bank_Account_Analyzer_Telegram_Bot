@@ -73,16 +73,18 @@ def set_password(db: Session, user: User, password_hash: str) -> User:
     return user
 
 
-def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[int, int]:
-    """Upsert normalized transactions for one account.
+def upsert_transactions(db: Session, user_id: UUID, account_id: str, txs: list[dict]) -> tuple[int, int]:
+    """Upsert normalized transactions for one account, scoped to user_id
+    (S6-06 — the ON CONFLICT clause was already shaped for this at S6-02;
+    this is the ticket that actually threads a real value through it).
 
     Returns (stored, duplicates_skipped). Enable Banking's own transaction reference
     (entry_reference, exposed as `id` on the normalized dict) is the natural key —
-    checked globally by external_id alone (S4-01), not scoped to account_id, since
-    Enable Banking issues a new account_id on every reconnect but external_id stays
-    the same for the same real transaction. account_id is still stored (first-seen
-    value, never overwritten on conflict) but no longer part of how a duplicate is
-    recognized.
+    checked per-user by (user_id, external_id) (S6-02 Step 0: not globally unique),
+    not scoped to account_id, since Enable Banking issues a new account_id on every
+    reconnect but external_id stays the same for the same real transaction.
+    account_id is still stored (first-seen value, never overwritten on conflict)
+    but no longer part of how a duplicate is recognized.
     """
     if not txs:
         return 0, 0
@@ -90,12 +92,15 @@ def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[
     external_ids = [t["id"] for t in txs]
     existing = set(
         db.execute(
-            select(Transaction.external_id).where(Transaction.external_id.in_(external_ids))
+            select(Transaction.external_id).where(
+                Transaction.user_id == user_id, Transaction.external_id.in_(external_ids)
+            )
         ).scalars()
     )
 
     for t in txs:
         stmt = pg_insert(Transaction).values(
+            user_id=user_id,
             account_id=account_id,
             external_id=t["id"],
             booking_date=date.fromisoformat(t["date"]) if t.get("date") else None,
@@ -104,19 +109,6 @@ def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[
             raw_data=t,
         )
         stmt = stmt.on_conflict_do_update(
-            # S6-02: transactions' unique constraint is now (user_id,
-            # external_id), not external_id alone — index_elements must
-            # match it exactly or Postgres rejects the ON CONFLICT clause
-            # outright ("no unique or exclusion constraint matching the
-            # specification"). This is a mechanical fix to keep the SQL
-            # valid, not user_id business-logic threading — this function
-            # still writes no user_id (S6-06's job), so it now fails on a
-            # NOT NULL violation instead, a deliberate, tracked gap. Full
-            # failing-test list and ruling:
-            # docs/tickets/S6-02-schema-migration-user-id-everywhere.md
-            # (not docs/verification_debt.md — this isn't deferred
-            # verification, it's a known, already-explained breakage with
-            # a fixed closure condition, S6-06).
             index_elements=[Transaction.user_id, Transaction.external_id],
             set_={
                 "booking_date": stmt.excluded.booking_date,
@@ -134,39 +126,53 @@ def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[
     return stored, duplicates_skipped
 
 
-def list_transactions(db: Session, date_from: date, date_to: date) -> list[Transaction]:
+def list_transactions(db: Session, user_id: UUID, date_from: date, date_to: date) -> list[Transaction]:
     return list(
         db.execute(
             select(Transaction)
-            .where(Transaction.booking_date >= date_from, Transaction.booking_date <= date_to)
+            .where(
+                Transaction.user_id == user_id,
+                Transaction.booking_date >= date_from,
+                Transaction.booking_date <= date_to,
+            )
             .order_by(Transaction.booking_date)
         ).scalars()
     )
 
 
-def get_recent_transactions(db: Session, limit: int) -> list[Transaction]:
+def get_recent_transactions(db: Session, user_id: UUID, limit: int) -> list[Transaction]:
     """Newest-first transactions, unbounded by any date range (S4-06) — used
     to ground the AI chat assistant's context in specific recent activity."""
-    stmt = select(Transaction).order_by(Transaction.booking_date.desc(), Transaction.id.desc()).limit(limit)
+    stmt = (
+        select(Transaction)
+        .where(Transaction.user_id == user_id)
+        .order_by(Transaction.booking_date.desc(), Transaction.id.desc())
+        .limit(limit)
+    )
     return list(db.execute(stmt).scalars())
 
 
-def get_transaction_date_range(db: Session) -> tuple[date, date] | None:
-    """Earliest and latest booking_date across every stored transaction, or
-    None if nothing has been synced yet (S4-06 chat context)."""
-    earliest, latest = db.execute(select(func.min(Transaction.booking_date), func.max(Transaction.booking_date))).one()
+def get_transaction_date_range(db: Session, user_id: UUID) -> tuple[date, date] | None:
+    """Earliest and latest booking_date across this user's stored
+    transactions, or None if nothing has been synced yet (S4-06 chat
+    context)."""
+    earliest, latest = db.execute(
+        select(func.min(Transaction.booking_date), func.max(Transaction.booking_date)).where(
+            Transaction.user_id == user_id
+        )
+    ).one()
     if earliest is None:
         return None
     return earliest, latest
 
 
-def search_transactions(db: Session, query: str, limit: int) -> list[Transaction]:
-    """Global search (S3-07 Item 4) — across every transaction ever synced,
-    not scoped to any date range or the current page. Distinct from the
-    Transactions page's own date-scoped, paginated list above."""
+def search_transactions(db: Session, user_id: UUID, query: str, limit: int) -> list[Transaction]:
+    """Global search (S3-07 Item 4) — across every transaction this user has
+    ever synced, not scoped to any date range or the current page. Distinct
+    from the Transactions page's own date-scoped, paginated list above."""
     stmt = (
         select(Transaction)
-        .where(Transaction.description.ilike(f"%{query}%"))
+        .where(Transaction.user_id == user_id, Transaction.description.ilike(f"%{query}%"))
         .order_by(Transaction.booking_date.desc(), Transaction.id.desc())
         .limit(limit)
     )
@@ -175,6 +181,7 @@ def search_transactions(db: Session, query: str, limit: int) -> list[Transaction
 
 def list_transactions_paginated(
     db: Session,
+    user_id: UUID,
     date_from: date,
     date_to: date,
     page: int,
@@ -191,7 +198,11 @@ def list_transactions_paginated(
     page of Groceries rows, not the second page of everything with any
     non-Groceries rows stripped out afterwards.
     """
-    stmt = select(Transaction).where(Transaction.booking_date >= date_from, Transaction.booking_date <= date_to)
+    stmt = select(Transaction).where(
+        Transaction.user_id == user_id,
+        Transaction.booking_date >= date_from,
+        Transaction.booking_date <= date_to,
+    )
     if categories:
         stmt = stmt.where(Transaction.category.in_(categories))
     if amount_type == "spent":
@@ -212,12 +223,16 @@ def list_transactions_paginated(
 
 
 def get_uncategorized_transactions(
-    db: Session, date_from: date | None = None, date_to: date | None = None
+    db: Session, user_id: UUID, date_from: date | None = None, date_to: date | None = None
 ) -> list[Transaction]:
     # manually_edited excludes a row even if its category is null — a user
     # clearing a category by hand (S3-05) is still a decision, not something
     # for the next categorize run to silently fill back in.
-    stmt = select(Transaction).where(Transaction.category.is_(None), Transaction.manually_edited.is_(False))
+    stmt = select(Transaction).where(
+        Transaction.user_id == user_id,
+        Transaction.category.is_(None),
+        Transaction.manually_edited.is_(False),
+    )
     if date_from is not None:
         stmt = stmt.where(Transaction.booking_date >= date_from)
     if date_to is not None:
@@ -226,9 +241,13 @@ def get_uncategorized_transactions(
 
 
 def count_categorized_transactions(
-    db: Session, date_from: date | None = None, date_to: date | None = None
+    db: Session, user_id: UUID, date_from: date | None = None, date_to: date | None = None
 ) -> int:
-    stmt = select(func.count()).select_from(Transaction).where(Transaction.category.is_not(None))
+    stmt = (
+        select(func.count())
+        .select_from(Transaction)
+        .where(Transaction.user_id == user_id, Transaction.category.is_not(None))
+    )
     if date_from is not None:
         stmt = stmt.where(Transaction.booking_date >= date_from)
     if date_to is not None:
@@ -236,19 +255,25 @@ def count_categorized_transactions(
     return db.execute(stmt).scalar_one()
 
 
-def update_transaction_categories(db: Session, updates: list[dict]) -> None:
+def update_transaction_categories(db: Session, user_id: UUID, updates: list[dict]) -> None:
     """updates: [{"id": "<uuid str>", "category": "...", "subcategory": "..."|None}].
 
     The WHERE clause re-checks category IS NULL AND manually_edited IS FALSE
     rather than trusting that the rows passed in are still eligible — never
     overwrites a category a manual edit (S3-05) or a concurrent categorize
-    run already set.
+    run already set. user_id is a defense-in-depth check, not the only
+    guard — the ids passed in already came from get_uncategorized_transactions
+    (S6-06), itself scoped to this same user_id, so this can't reach another
+    user's row in practice; scoped again here anyway, since a WHERE clause
+    that doesn't have to trust its caller's own scoping is worth the one
+    extra condition.
     """
     for u in updates:
         db.execute(
             update(Transaction)
             .where(
                 Transaction.id == u["id"],
+                Transaction.user_id == user_id,
                 Transaction.category.is_(None),
                 Transaction.manually_edited.is_(False),
             )
@@ -257,14 +282,24 @@ def update_transaction_categories(db: Session, updates: list[dict]) -> None:
     db.commit()
 
 
-def update_transaction(db: Session, transaction_id: UUID, updates: dict) -> Transaction | None:
+def update_transaction(db: Session, user_id: UUID, transaction_id: UUID, updates: dict) -> Transaction | None:
     """updates: a dict of already-validated column/value pairs (category,
     subcategory, description — whichever were actually present in the PATCH
     body). Always stamps manually_edited = True, even if none of the
     provided values differ from what's already stored — the point is
     recording that a human looked at this row, not just changing its data.
+
+    S6-06 — the IDOR-shaped gap S5-01 named explicitly: a plain
+    `db.get(Transaction, transaction_id)` would find (and let the caller
+    edit) any user's transaction, since a surrogate UUID alone doesn't
+    exclude anyone. Scoped by user_id here instead of a separate ownership
+    check, so a transaction that exists but belongs to someone else reads
+    identically to one that doesn't exist at all — routers/transactions.py
+    turns None into 404, never 403, either way.
     """
-    transaction = db.get(Transaction, transaction_id)
+    transaction = db.execute(
+        select(Transaction).where(Transaction.id == transaction_id, Transaction.user_id == user_id)
+    ).scalar_one_or_none()
     if transaction is None:
         return None
     for field, value in updates.items():
@@ -277,47 +312,45 @@ def update_transaction(db: Session, transaction_id: UUID, updates: dict) -> Tran
 
 def list_categories(db: Session, user_id: UUID | None = None) -> list[Category]:
     """All categories, ordered by name — scoped to user_id when given.
-    Optional (default None = unscoped, every user's rows) rather than
-    required: S6-05 only protects/scopes GET /api/categories; POST
-    /api/categories' own duplicate-name check still calls this unscoped,
-    since that route isn't authenticated yet (S6-06's job) — this matches
-    the same optional-user_id pattern already used by
-    agents/registry.get_provider and sync_lock's key derivation.
-    """
+    Optional (default None = unscoped) only for the rare internal caller
+    that genuinely needs every user's rows; every router-level call as of
+    S6-06 passes a real user_id."""
     query = select(Category).order_by(Category.name)
     if user_id is not None:
         query = query.where(Category.user_id == user_id)
     return list(db.execute(query).scalars())
 
 
-def list_seeded_category_names(db: Session) -> list[str]:
+def list_seeded_category_names(db: Session, user_id: UUID) -> list[str]:
     """Category names still on their S3-01 seed color — the set eligible for
     S3-02's AI color assignment. 'ai' and 'user' rows are excluded."""
-    return list(db.execute(select(Category.name).where(Category.source == "seed")).scalars())
+    return list(
+        db.execute(
+            select(Category.name).where(Category.user_id == user_id, Category.source == "seed")
+        ).scalars()
+    )
 
 
-def get_categories_by_name(db: Session, names: list[str]) -> dict[str, Category]:
-    """Existing rows for the given names, keyed by name. Used by the AI color
-    step to read a category's own seed color as its fallback if the LLM's
-    color fails validation."""
+def get_categories_by_name(db: Session, user_id: UUID, names: list[str]) -> dict[str, Category]:
+    """Existing rows for the given names (this user's only), keyed by name.
+    Used by the AI color step to read a category's own seed color as its
+    fallback if the LLM's color fails validation."""
     if not names:
         return {}
-    rows = db.execute(select(Category).where(Category.name.in_(names))).scalars()
+    rows = db.execute(
+        select(Category).where(Category.user_id == user_id, Category.name.in_(names))
+    ).scalars()
     return {row.name: row for row in rows}
 
 
-def upsert_category_colors(db: Session, colors_by_name: dict[str, str], source: str) -> None:
+def upsert_category_colors(db: Session, user_id: UUID, colors_by_name: dict[str, str], source: str) -> None:
     """The AI color-assignment path (S3-02) — always called with source='ai'.
     Never overwrites a row whose existing source is 'user' — user color
     choices are final. Also mirrors the color into ai_color, so a later user
     override (S3-06) has something concrete to "Reset to AI" back to."""
     for name, color in colors_by_name.items():
-        stmt = pg_insert(Category).values(name=name, color=color, source=source, ai_color=color)
+        stmt = pg_insert(Category).values(user_id=user_id, name=name, color=color, source=source, ai_color=color)
         stmt = stmt.on_conflict_do_update(
-            # S6-02: categories' primary key is now (user_id, name) — see
-            # the note on the transactions ON CONFLICT clause above, same
-            # reasoning. This function still writes no user_id, so it now
-            # fails on a NOT NULL violation (S6-06's job to fix).
             index_elements=[Category.user_id, Category.name],
             set_={"color": stmt.excluded.color, "source": stmt.excluded.source, "ai_color": stmt.excluded.ai_color},
             where=Category.source != "user",
@@ -326,13 +359,21 @@ def upsert_category_colors(db: Session, colors_by_name: dict[str, str], source: 
     db.commit()
 
 
-def set_category_color(db: Session, name: str, color: str) -> Category | None:
+def set_category_color(db: Session, user_id: UUID, name: str, color: str) -> Category | None:
     """A user-initiated color change (PATCH /api/categories/{name}, S3-06).
     Unlike upsert_category_colors' AI path, this always applies — a user
     editing their own category again is not the same case as the AI trying
     to silently overwrite a user's existing choice. Leaves ai_color alone,
-    so "Reset to AI" still has the original AI answer to go back to."""
-    category = db.get(Category, name)
+    so "Reset to AI" still has the original AI answer to go back to.
+
+    S6-06: db.get() against a composite primary key takes the full key
+    tuple — a bare `name` is what caused this to raise InvalidRequestError
+    outright since S6-02's categories PK became (user_id, name) (tracked
+    in that ticket's failing-test list). Fixed here, and doubles as the
+    scoping fix: a name that exists but belongs to another user now reads
+    identically to a name that doesn't exist, same 404 either way.
+    """
+    category = db.get(Category, (user_id, name))
     if category is None:
         return None
     category.color = color
@@ -342,12 +383,13 @@ def set_category_color(db: Session, name: str, color: str) -> Category | None:
     return category
 
 
-def reset_category_to_ai(db: Session, name: str) -> Category | None:
+def reset_category_to_ai(db: Session, user_id: UUID, name: str) -> Category | None:
     """Restores a category's AI-assigned color after a user override.
-    Returns None if the category doesn't exist, or if it has no ai_color to
-    reset to (never AI-colored in the first place) — both cases the router
-    treats as "nothing to reset"."""
-    category = db.get(Category, name)
+    Returns None if the category doesn't exist for this user, or if it has
+    no ai_color to reset to (never AI-colored in the first place) — both
+    cases the router treats as "nothing to reset." Same composite-key fix
+    as set_category_color."""
+    category = db.get(Category, (user_id, name))
     if category is None or category.ai_color is None:
         return None
     category.color = category.ai_color
@@ -357,10 +399,10 @@ def reset_category_to_ai(db: Session, name: str) -> Category | None:
     return category
 
 
-def create_category(db: Session, name: str, color: str) -> Category:
+def create_category(db: Session, user_id: UUID, name: str, color: str) -> Category:
     """A brand-new, user-defined category (S3-06) — always is_custom=True,
     source='user'. No ai_color, since the AI never assigned one."""
-    category = Category(name=name, color=color, is_custom=True, source="user")
+    category = Category(user_id=user_id, name=name, color=color, is_custom=True, source="user")
     db.add(category)
     db.commit()
     db.refresh(category)
@@ -369,6 +411,7 @@ def create_category(db: Session, name: str, color: str) -> Category:
 
 def replace_insights(
     db: Session,
+    user_id: UUID,
     date_from: date,
     date_to: date,
     insights: list[dict],
@@ -393,10 +436,15 @@ def replace_insights(
     a new column (`generation_number`) and a "latest per range" query, not
     a change to this function's contract.
     """
-    db.execute(delete(Insight).where(Insight.date_from == date_from, Insight.date_to == date_to))
+    db.execute(
+        delete(Insight).where(
+            Insight.user_id == user_id, Insight.date_from == date_from, Insight.date_to == date_to
+        )
+    )
     for item in insights:
         db.add(
             Insight(
+                user_id=user_id,
                 date_from=date_from,
                 date_to=date_to,
                 type=item["type"],
@@ -410,23 +458,23 @@ def replace_insights(
     db.commit()
 
 
-def list_insights(db: Session, date_from: date, date_to: date) -> list[Insight]:
+def list_insights(db: Session, user_id: UUID, date_from: date, date_to: date) -> list[Insight]:
     return list(
         db.execute(
             select(Insight)
-            .where(Insight.date_from == date_from, Insight.date_to == date_to)
+            .where(Insight.user_id == user_id, Insight.date_from == date_from, Insight.date_to == date_to)
             .order_by(Insight.generated_at)
         ).scalars()
     )
 
 
-def get_budget(db: Session, user_id: UUID | None, category: str, period: str = "monthly") -> Budget | None:
+def get_budget(db: Session, user_id: UUID, category: str, period: str = "monthly") -> Budget | None:
     return db.execute(
         select(Budget).where(Budget.user_id == user_id, Budget.category == category, Budget.period == period)
     ).scalar_one_or_none()
 
 
-def create_budget(db: Session, user_id: UUID | None, category: str, amount: Decimal, period: str = "monthly") -> Budget:
+def create_budget(db: Session, user_id: UUID, category: str, amount: Decimal, period: str = "monthly") -> Budget:
     """A new monthly spending limit for one category (S4-05). Caller checks
     for an existing budget first — this always inserts."""
     budget = Budget(user_id=user_id, category=category, amount=amount, period=period)
@@ -437,7 +485,7 @@ def create_budget(db: Session, user_id: UUID | None, category: str, amount: Deci
 
 
 def update_budget_amount(
-    db: Session, user_id: UUID | None, category: str, amount: Decimal, period: str = "monthly"
+    db: Session, user_id: UUID, category: str, amount: Decimal, period: str = "monthly"
 ) -> Budget | None:
     budget = get_budget(db, user_id, category, period)
     if budget is None:
@@ -448,7 +496,7 @@ def update_budget_amount(
     return budget
 
 
-def delete_budget(db: Session, user_id: UUID | None, category: str, period: str = "monthly") -> bool:
+def delete_budget(db: Session, user_id: UUID, category: str, period: str = "monthly") -> bool:
     budget = get_budget(db, user_id, category, period)
     if budget is None:
         return False
@@ -457,10 +505,12 @@ def delete_budget(db: Session, user_id: UUID | None, category: str, period: str 
     return True
 
 
-def _spent_this_month_by_category(db: Session, categories: list[str]) -> dict[str, Decimal]:
-    """Total spend (positive magnitude) per category, calendar-month-to-date.
-    Same amount<0 / -amount sign convention as statistics.py, so a budget's
-    "spent" figure always agrees with the rest of the dashboard."""
+def _spent_this_month_by_category(db: Session, user_id: UUID, categories: list[str]) -> dict[str, Decimal]:
+    """Total spend (positive magnitude) per category, calendar-month-to-date,
+    for this user only — unscoped here would silently blend every user's
+    spending under a shared category name into everyone's budget "spent"
+    figure. Same amount<0 / -amount sign convention as statistics.py, so a
+    budget's "spent" figure always agrees with the rest of the dashboard."""
     if not categories:
         return {}
     today = date.today()
@@ -468,6 +518,7 @@ def _spent_this_month_by_category(db: Session, categories: list[str]) -> dict[st
     rows = db.execute(
         select(Transaction.category, func.sum(Transaction.amount))
         .where(
+            Transaction.user_id == user_id,
             Transaction.category.in_(categories),
             Transaction.amount < 0,
             Transaction.booking_date >= month_start,
@@ -481,7 +532,7 @@ def _spent_this_month_by_category(db: Session, categories: list[str]) -> dict[st
 BUDGET_WARNING_THRESHOLD = 80.0
 
 
-def list_budgets_with_status(db: Session, user_id: UUID | None) -> list[dict]:
+def list_budgets_with_status(db: Session, user_id: UUID) -> list[dict]:
     """Every budget for this user, joined against this-calendar-month spending.
     spent_this_month is always the calendar month of today (day 1 through
     today) regardless of a budget's own `period` value — 'monthly' is the
@@ -497,7 +548,7 @@ def list_budgets_with_status(db: Session, user_id: UUID | None) -> list[dict]:
     if not budgets:
         return []
 
-    spent_by_category = _spent_this_month_by_category(db, [b.category for b in budgets])
+    spent_by_category = _spent_this_month_by_category(db, user_id, [b.category for b in budgets])
 
     result = []
     for budget in budgets:
@@ -522,18 +573,14 @@ def list_budgets_with_status(db: Session, user_id: UUID | None) -> list[dict]:
     return result
 
 
-def get_all_settings(db: Session) -> dict[str, str]:
-    rows = db.execute(select(Setting)).scalars()
+def get_all_settings(db: Session, user_id: UUID) -> dict[str, str]:
+    rows = db.execute(select(Setting).where(Setting.user_id == user_id)).scalars()
     return {row.key: row.value for row in rows}
 
 
-def upsert_setting(db: Session, key: str, value: str) -> None:
-    stmt = pg_insert(Setting).values(key=key, value=value)
+def upsert_setting(db: Session, user_id: UUID, key: str, value: str) -> None:
+    stmt = pg_insert(Setting).values(user_id=user_id, key=key, value=value)
     stmt = stmt.on_conflict_do_update(
-        # S6-02: settings' primary key is now (user_id, key) — same
-        # reasoning as the transactions/categories ON CONFLICT clauses
-        # above. This function still writes no user_id, so it now fails on
-        # a NOT NULL violation (S6-06's job to fix).
         index_elements=[Setting.user_id, Setting.key],
         set_={"value": stmt.excluded.value},
     )
