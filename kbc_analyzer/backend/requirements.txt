@@ -4,6 +4,9 @@ requests>=2.31.0
 rich>=13.0.0
 python-dotenv>=1.0.0
 pydantic>=2.0.0
+# S6-04: pydantic's EmailStr type needs this at runtime (import-time succeeds
+# without it — pydantic only raises when EmailStr is actually used in a model).
+email-validator>=2.0.0
 PyJWT>=2.0.0
 cryptography>=41.0.0
 fastapi>=0.115.0

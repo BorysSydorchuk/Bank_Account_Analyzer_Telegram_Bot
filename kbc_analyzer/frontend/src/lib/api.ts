@@ -17,6 +17,7 @@ import type {
   TestConnectionResponse,
   TransactionItem,
   TransactionsListResponse,
+  UserOut,
 } from "./types"
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000"
@@ -91,6 +92,27 @@ export async function syncTransactions(dateFrom: string, dateTo: string) {
 
 export function logout() {
   return request<void>("/api/auth/logout", { method: "POST" })
+}
+
+export function register(email: string, password: string) {
+  return request<UserOut>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  })
+}
+
+export function login(email: string, password: string) {
+  return request<UserOut>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  })
+}
+
+export function setPassword(password: string) {
+  return request<void>("/api/auth/set-password", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  })
 }
 
 export function getStatistics(dateFrom: string, dateTo: string) {

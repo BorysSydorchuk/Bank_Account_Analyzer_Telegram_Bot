@@ -50,6 +50,29 @@ def link_google_id(db: Session, user: User, google_id: str) -> User:
     return user
 
 
+def create_user_from_password(db: Session, email: str, password_hash: str) -> User:
+    """A brand-new account created by /api/auth/register (S6-04) — no
+    google_id, password_hash-only (satisfies users_has_auth_method)."""
+    user = User(email=email, password_hash=password_hash)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def set_password(db: Session, user: User, password_hash: str) -> User:
+    """Sets (or replaces) a user's password — /api/auth/set-password
+    (S6-04), the authenticated path that gives a Google-only account a
+    real, usable password for the first time. Not exposed to an
+    unauthenticated caller by any route: routers/user_auth.py's
+    set_password endpoint requires get_current_user first, so this always
+    runs against the caller's own account, never an arbitrary one."""
+    user.password_hash = password_hash
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[int, int]:
     """Upsert normalized transactions for one account.
 

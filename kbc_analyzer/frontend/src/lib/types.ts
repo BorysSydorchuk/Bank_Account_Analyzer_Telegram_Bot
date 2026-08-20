@@ -4,6 +4,12 @@
 export type InsightType = "pattern" | "anomaly" | "saving" | "rhythm" | "category"
 export type InsightSeverity = "info" | "warning" | "positive"
 
+// S6-04
+export interface UserOut {
+  id: string
+  email: string
+}
+
 export interface InsightItem {
   type: InsightType
   title: string

@@ -1,20 +1,26 @@
-"""GET/POST /api/auth/{google/login,google/callback,logout} — real user
-sign-in (S6-03: Google only; email/password is S6-04). Distinct from
-routers/auth.py, which is Enable Banking's bank-session flow
+"""GET/POST /api/auth/{google/login,google/callback,logout,register,login,
+set-password} — real user sign-in. Google (S6-03) and email/password
+(S6-04), both in this one file since they're the same user-facing surface.
+Distinct from routers/auth.py, which is Enable Banking's bank-session flow
 (/api/auth/enable-banking/*) — same /api/auth prefix, disjoint sub-paths,
 no route collision.
 """
 import os
 import secrets
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.status import HTTP_303_SEE_OTHER, HTTP_307_TEMPORARY_REDIRECT
 
 from .. import crud
+from ..auth.dependency import get_current_user
+from ..auth.password import PasswordTooWeakError, hash_password, validate_password_strength, verify_password
 from ..db import get_db
 from ..google_oauth import GoogleOAuthError, build_authorize_url, exchange_code_for_tokens, fetch_userinfo
+from ..models import User
+from ..rate_limit import LOGIN_RATE_LIMIT, REGISTER_RATE_LIMIT, limiter
+from ..schemas import LoginRequest, RegisterRequest, SetPasswordRequest, UserOut
 from ..auth.session import (
     COOKIE_SECURE,
     SESSION_COOKIE_NAME,
@@ -25,6 +31,25 @@ from ..auth.session import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["user-auth"])
+
+# S6-04: a fixed, generic message on every login failure — wrong password
+# AND nonexistent email get the exact same text, so the response alone
+# never tells a caller which case they hit. Revealing that difference is
+# a user-enumeration leak: an attacker could otherwise probe arbitrary
+# emails and learn which ones have accounts here.
+_INVALID_LOGIN_MESSAGE = "Invalid email or password."
+
+# Hashed once at import time, never displayed or logged — exists only so
+# a login attempt against a nonexistent email still runs a real bcrypt
+# verify (against this, instead of a real user's hash) rather than
+# short-circuiting immediately. Without this, "email doesn't exist" would
+# consistently return faster than "email exists, wrong password" (no
+# bcrypt call at all vs. one), which is exactly the timing signal a
+# user-enumeration attack measures for. Not a complete fix — network
+# jitter and the surrounding DB query still leave some signal — but it
+# closes the single largest, cheapest-to-exploit gap (a bcrypt call is
+# tens of milliseconds; that's the dominant cost being equalized here).
+_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
 
 _STATE_COOKIE_NAME = "oauth_state"
 _STATE_COOKIE_TTL_SECONDS = 10 * 60  # generous for a human to actually complete Google's consent screen
@@ -131,3 +156,70 @@ def logout(request: Request, response: Response) -> None:
     if session_id:
         destroy_session(session_id)
     clear_session_cookie(response)
+
+
+@router.post("/register", status_code=201, response_model=UserOut)
+@limiter.limit(REGISTER_RATE_LIMIT)
+def register(request: Request, body: RegisterRequest, response: Response, db: Session = Depends(get_db)) -> User:
+    if crud.get_user_by_email(db, body.email) is not None:
+        # Deliberately specific here, unlike login's generic message —
+        # register's own existence already confirms "an account can be
+        # created," so refusing a duplicate reveals nothing login doesn't
+        # already imply; the enumeration concern is specific to *login*
+        # silently confirming which emails exist, not to register
+        # (a standard, expected behavior every sign-up form has).
+        raise HTTPException(status_code=400, detail="An account with that email already exists.")
+
+    try:
+        validate_password_strength(body.password)
+    except PasswordTooWeakError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    user = crud.create_user_from_password(db, body.email, hash_password(body.password))
+    session_id = create_session(user.id)
+    set_session_cookie(response, session_id)
+    return user
+
+
+@router.post("/login", response_model=UserOut)
+@limiter.limit(LOGIN_RATE_LIMIT)
+def login(request: Request, body: LoginRequest, response: Response, db: Session = Depends(get_db)) -> User:
+    user = crud.get_user_by_email(db, body.email)
+
+    # Always runs a real bcrypt verify, whether or not user exists — see
+    # _DUMMY_PASSWORD_HASH's docstring above for why. A Google-only
+    # account (password_hash is NULL) is treated the same as "wrong
+    # password," not "this account can't log in this way" — that
+    # distinction is exactly the kind of thing a user-enumeration attempt
+    # would want to learn.
+    password_hash = user.password_hash if user and user.password_hash else _DUMMY_PASSWORD_HASH
+    password_correct = verify_password(body.password, password_hash)
+
+    if user is None or user.password_hash is None or not password_correct:
+        raise HTTPException(status_code=401, detail=_INVALID_LOGIN_MESSAGE)
+
+    session_id = create_session(user.id)
+    set_session_cookie(response, session_id)
+    return user
+
+
+@router.post("/set-password", status_code=204)
+def set_password(
+    body: SetPasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Sets a real password on the caller's own account — the path a
+    Google-only account (password_hash is a locked, never-revealed
+    placeholder for the S6-02 bootstrap row, or NULL for any other
+    Google-only signup) uses to add password sign-in as a second method.
+    Requires an existing session (get_current_user), so this always acts
+    on the authenticated caller's own account — there's no email/user_id
+    in the request body for it to act on anyone else's.
+    """
+    try:
+        validate_password_strength(body.password)
+    except PasswordTooWeakError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    crud.set_password(db, current_user, hash_password(body.password))

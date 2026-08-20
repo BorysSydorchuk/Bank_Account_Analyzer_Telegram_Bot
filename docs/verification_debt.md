@@ -46,6 +46,29 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Borys's real-account set-password + /login /register real-browser render (S6-04)
+
+- **What was deferred:** Two small items sharing one closure action.
+  (1) `POST /api/auth/set-password` gives Borys's real seeded account
+  (S6-02's bootstrap row, `password_hash` a locked placeholder) a real,
+  usable password — the endpoint is verified live (throwaway account,
+  full register/login/logout round-trip) but not yet run against his
+  actual account, since that needs his real, already-live Google session
+  cookie, not something this session has access to. (2) `/login`'s new
+  email/password form and `/register` weren't visually confirmed in a
+  real browser (Chrome extension unavailable this session) — confirmed
+  only via a clean `tsc -b`, clean `oxlint`, and the compiled routes
+  serving `200` with no Vite transform error.
+- **Why:** Same posture as S6-03's real Google sign-in and Enable
+  Banking's real KBC login — an action tied to Borys's own real session/
+  account, not something to fake or perform on his behalf.
+- **What would close it:** Borys runs the `fetch(...)` snippet in
+  `docs/tickets/S6-04-email-password-sign-in.md`'s WHEN DONE from a
+  browser tab where he's signed in, confirms `204`, then logs in at
+  `/login` with his real email and the password he chose — this closes
+  both items at once (it necessarily renders `/login` for real too).
+- **Status (2026-08-20):** OPEN — closes once Borys confirms back.
+
 ### Date-range validation regression tests — not built (S5-07)
 
 - **What was deferred:** Automated tests for the S5-07 date-range fix

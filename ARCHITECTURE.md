@@ -222,9 +222,11 @@ oversight — see Invariants below.
 
 ## Auth
 
-**S6-01 built the session/cookie infrastructure; S6-03 is the first login
-flow to actually use it (Google OAuth). Email/password (S6-04) and
-protecting real routes with it (S6-05, S6-06) are still ahead.**
+**S6-01 built the session/cookie infrastructure; S6-03 (Google) and S6-04
+(email/password) are both live login methods now. Protecting real
+application routes with `get_current_user` (S6-05, S6-06) is still
+ahead — every route below is auth-related infrastructure itself, not yet
+a route it guards.**
 
 Sessions are server-side state in Redis, referenced by an opaque cookie
 value — not a JWT. The cookie carries no claims of its own; every request
@@ -280,11 +282,15 @@ chosen over relying on an implicit browser quirk for a security-relevant
 attribute. **Sprint 7's real production HTTPS is expected to set
 `COOKIE_SECURE=true`.**
 
-`app/auth/dependency.py`'s `get_current_user` (FastAPI dependency, not
-wired to any route until S6-05/S6-06): reads the `session_id` cookie,
-resolves it via `get_session`, loads the `User` row, raises `401` if the
-cookie is missing, the session is expired/invalid, or the session's
-`user_id` no longer has a matching row.
+`app/auth/dependency.py`'s `get_current_user` (FastAPI dependency): reads
+the `session_id` cookie, resolves it via `get_session`, loads the `User`
+row, raises `401` if the cookie is missing, the session is expired/
+invalid, or the session's `user_id` no longer has a matching row. Not
+wired to any *application* route until S6-05/S6-06 — its first real use
+is S6-04's `POST /api/auth/set-password` below, an auth-settings action
+on the caller's own account, not one of the app's actual feature routes
+(categories, budgets, transactions, ...), which is what S6-05/S6-06 are
+specifically about.
 
 **Google OAuth sign-in (S6-03).** `app/google_oauth.py` — plain `requests`
 calls against Google's documented endpoints (authorize URL, token
@@ -323,12 +329,59 @@ both the server (`allow_credentials`) and the client
 explicit origin (never `"*"`, per CLAUDE.md) — browsers refuse to honor
 `allow_credentials` with a wildcard origin anyway.
 
+**Email/password sign-in (S6-04).** Same `routers/user_auth.py` file as
+Google's flow:
+
+- `POST /api/auth/register` — `{email, password}`. Rejects an
+  already-registered email with a specific `400` (unlike login below —
+  register's own existence already implies "an account can be created,"
+  so refusing a duplicate here reveals nothing an enumeration attempt
+  couldn't already infer). Password validated by
+  `app/auth/password.validate_password_strength`: **8–128 characters,
+  no complexity rules** — matches NIST 800-63B's modern guidance that
+  mandatory uppercase/digit/symbol rules push people toward predictable
+  substitutions without meaningfully raising the real search space, and
+  closes a gap S6-01 flagged: bcrypt silently truncates at 72 bytes, so
+  the 128 ceiling means an implausibly long input is rejected outright
+  instead of silently hashed down to its first 72 bytes. Creates the
+  user, a session, sets the cookie.
+- `POST /api/auth/login` — `{email, password}`. **Always returns the
+  identical `401 "Invalid email or password."`** for a wrong password, a
+  nonexistent email, and a Google-only account with no password set —
+  the response never tells a caller which case they hit (a
+  user-enumeration leak otherwise). Also runs a real `bcrypt` verify
+  against a fixed dummy hash (generated once at import time, never
+  logged) when no matching user exists, rather than short-circuiting —
+  otherwise "email doesn't exist" would consistently return faster than
+  "email exists, wrong password," which is exactly the timing signal an
+  enumeration attempt measures for. Not a complete timing defense (DB
+  query time and network jitter still leak some signal) — closes the
+  single largest, cheapest-to-exploit gap, not every gap.
+- `POST /api/auth/set-password` — `{password}`, requires
+  `get_current_user`. The path a Google-only account (including the
+  S6-02 bootstrap row, whose `password_hash` is a locked, never-revealed
+  placeholder) uses to add password sign-in as a second method, while
+  already authenticated via Google — no reset-token flow was built for
+  this (S6-01 didn't scope one), so this reuses the session the account
+  already has instead.
+- Rate limiting (`rate_limit.py`): `LOGIN_RATE_LIMIT`/`REGISTER_RATE_LIMIT`,
+  `5/minute` each — deliberately IP-keyed, not user-keyed, unlike the
+  future direction planned for chat/sync/analysis: the caller has no
+  session at the exact moment they're hitting either endpoint.
+- **Out of scope, by design, per DECISIONS ALREADY MADE:** email
+  verification and email-based password reset — no transactional email
+  infrastructure exists yet. `/login`'s "Forgot password?" is a plain
+  inline note ("not available yet — contact support"), not a route to a
+  dead end.
+
 `/login` (`frontend/src/pages/LoginPage.tsx`) — a layout route outside
 `AppShell` (`App.tsx`), since it's the one route reachable before a
 session exists. The Google button is a plain `<a href>` to
 `GET /api/auth/google/login`, not a `fetch` — signing in is a real
 top-level browser navigation through Google's own consent screen, which a
-CORS-bound `fetch` can't follow the way a real navigation does.
+CORS-bound `fetch` can't follow the way a real navigation does. Also has
+an email/password form (S6-04) below a divider. `/register`
+(`RegisterPage.tsx`) is the same shape without the Google button.
 
 ## External Dependencies & Their Guarantees
 

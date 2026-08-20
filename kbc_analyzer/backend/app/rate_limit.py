@@ -24,3 +24,13 @@ limiter = Limiter(key_func=get_remote_address)
 CHAT_RATE_LIMIT = "20/minute"
 SYNC_RATE_LIMIT = "10/minute"
 ANALYSIS_RATE_LIMIT = "10/minute"
+
+# S6-04: deliberately tighter and IP-keyed on purpose, not user-keyed —
+# these are the two endpoints most exposed to brute-force/enumeration, and
+# the caller has no session yet at the moment they hit either one (that's
+# the whole point of hitting them), so there's no user_id to key on even
+# if this module already supported it. 5/minute is generous for a real
+# person mistyping a password a couple of times, a real ceiling against a
+# scripted guessing loop.
+LOGIN_RATE_LIMIT = "5/minute"
+REGISTER_RATE_LIMIT = "5/minute"

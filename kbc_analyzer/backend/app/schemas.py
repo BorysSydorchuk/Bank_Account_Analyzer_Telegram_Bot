@@ -3,7 +3,7 @@ from datetime import date, datetime
 from typing import Annotated, Literal, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class CategoryOut(BaseModel):
@@ -340,3 +340,29 @@ class ChatRequest(BaseModel):
     # every subsequent call's token cost.
     message: str = Field(max_length=4000)
     history: list[ChatMessage] = Field(default_factory=list, max_length=50)
+
+
+class RegisterRequest(BaseModel):
+    # EmailStr rejects the common typo/garbage case (no "@", no domain)
+    # before it ever reaches crud — password strength is validated
+    # separately in the router (app/auth/password.validate_password_strength),
+    # not here, so a weak password gets that function's specific message
+    # rather than a generic Pydantic 422.
+    email: EmailStr
+    password: str = Field(max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(max_length=128)
+
+
+class SetPasswordRequest(BaseModel):
+    password: str = Field(max_length=128)
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: str
