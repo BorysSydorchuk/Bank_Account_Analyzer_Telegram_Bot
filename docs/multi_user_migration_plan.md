@@ -116,6 +116,27 @@ an unverified vendor guarantee a second time.
 plus the migration files under `app/migrations/versions/` for the ones
 declared there rather than in the ORM layer.*
 
+**[S6-02] Step 0 resolved (2026-08-20) — `UNIQUE (user_id, external_id)`,
+confirmed necessary, not just the safe default.** Enable Banking's own FAQ
+docs: *"Please note that the `entry_reference` value is not globally
+unique, and the same entry references may occur for transactions
+belonging to completely different accounts. However, for accounts with
+the same identification hashes, the value is immutable."*
+(`enablebanking.com/docs/faq/`). `entry_reference` is `external_id` in
+this app's schema.
+
+**Sprint 7 watch-item, not a Sprint 6 blocker:** the vendor's actual
+uniqueness scope is **per-account** (per "identification hash"), not
+per-bank and not per-user. `UNIQUE (user_id, external_id)` is correct for
+Sprint 6 because today one user has exactly one connected account — but
+once Sprint 7's multi-bank work (KBC+ING+BNP Fortis) lets a single user
+connect more than one account, two different accounts under the *same*
+user could in principle still produce overlapping `external_id` values,
+and `UNIQUE (user_id, external_id)` alone would not catch that collision.
+Sprint 7 should re-examine whether the constraint needs to widen to
+`(user_id, account_id, external_id)` once multi-account-per-user is real,
+rather than assuming Sprint 6's constraint shape still fully covers it.
+
 ---
 
 ## Endpoints

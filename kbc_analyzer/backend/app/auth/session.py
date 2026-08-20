@@ -63,6 +63,7 @@ _client = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), d
 
 
 def _session_key(session_id: str) -> str:
+    """The Redis key a session's record is stored under."""
     return f"session:{session_id}"
 
 
