@@ -50,9 +50,12 @@ def upsert_transactions(db: Session, account_id: str, txs: list[dict]) -> tuple[
             # specification"). This is a mechanical fix to keep the SQL
             # valid, not user_id business-logic threading — this function
             # still writes no user_id (S6-06's job), so it now fails on a
-            # NOT NULL violation instead, a deliberate, tracked gap (see
-            # docs/tickets/S6-02-schema-migration-user-id-everywhere.md's
-            # ruling and docs/verification_debt.md).
+            # NOT NULL violation instead, a deliberate, tracked gap. Full
+            # failing-test list and ruling:
+            # docs/tickets/S6-02-schema-migration-user-id-everywhere.md
+            # (not docs/verification_debt.md — this isn't deferred
+            # verification, it's a known, already-explained breakage with
+            # a fixed closure condition, S6-06).
             index_elements=[Transaction.user_id, Transaction.external_id],
             set_={
                 "booking_date": stmt.excluded.booking_date,

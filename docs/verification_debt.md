@@ -44,27 +44,6 @@ create it early rather than tracking by memory").
 
 ---
 
-## SPRINT 5 AUDIT SCOPE
-
-Architectural findings flagged for the Sprint 5 schema/global-singleton
-audit (CLAUDE.md's MULTI-USER READINESS rule) — not verification debt in
-the sense of "unverified," but real debt this project has knowingly taken
-on that the audit needs to resolve before Sprint 6 multi-user auth lands.
-
-- `agents/registry.py`'s `_provider_cache` (added S4-09 Item 3) is a
-  module-level global keyed on provider name, not on user — exactly the
-  "no new global singletons keyed on 'the user'" pattern CLAUDE.md already
-  warns against for the `settings` table. Fine in the single-user era (one
-  provider selection total), but at Sprint 6 it must become user-scoped
-  (keyed on `(user_id, provider_name)` or moved into a per-request/
-  per-session scope) or one user's cached provider instance — and API
-  key — could leak across users. Flagged in S4-09 review.
-- **Status (re-confirmed 2026-08-19, S5-08 sprint close):** OPEN — architectural debt,
-  not verification debt in the "unverified" sense; closes naturally as
-  part of Sprint 6's multi-user migration (`docs/multi_user_migration_plan.md`
-  covers the exact sequencing). No test can meaningfully close this in the
-  single-user era — there's only ever one provider selection to observe.
-
 ## OPEN
 
 ### Date-range validation regression tests — not built (S5-07)
@@ -182,6 +161,28 @@ on that the audit needs to resolve before Sprint 6 multi-user auth lands.
 ---
 
 ## CLOSED (recent)
+
+### `agents/registry.py`'s `_provider_cache` — user-scoped (S4-09/S5-08 finding, closed S6-02, 2026-08-20)
+
+Flagged S4-09, tracked as OPEN architectural debt through the S5-08
+Sprint 5 close (previously this file's own "SPRINT 5 AUDIT SCOPE"
+section, now removed — its one entry is this one, closed, not left as an
+empty stub). `_provider_cache` was keyed on provider name alone; once
+Sprint 6 gave every user their own API key, the first user to call a
+given provider would have their cached client instance (and the API key
+it holds) served to every other user's requests.
+
+**Closed by S6-02** (commit `e29224c`, "feat: S6-02 schema migration —
+user_id everywhere"): `_provider_cache` is now keyed on `(user_id,
+provider_name)`; `get_provider(db, user_id: UUID | None = None)` defaults
+to `None` so the three existing call sites (`analysis_service.py` ×2,
+`chat_service.py` ×1) needed no changes — S6-06 passing a real `user_id`
+there is a one-line change per call site, the same pattern
+`sync_lock.py`'s key derivation already established. Verified structurally
+(the cache key shape, not a live two-user test — no second real user
+exists yet to actually observe cross-user isolation with; that live
+observation becomes possible once S6-06 threads a real `user_id` through
+and S6-07's Security Auditor pass can attempt it adversarially).
 
 ### Claude provider — full live verification (S2-04/S2-05/S2-06/S4-06, closed 2026-08-18)
 
