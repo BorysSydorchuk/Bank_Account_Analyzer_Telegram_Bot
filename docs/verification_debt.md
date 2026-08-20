@@ -46,29 +46,6 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
-### Borys's real-account set-password + /login /register real-browser render (S6-04)
-
-- **What was deferred:** Two small items sharing one closure action.
-  (1) `POST /api/auth/set-password` gives Borys's real seeded account
-  (S6-02's bootstrap row, `password_hash` a locked placeholder) a real,
-  usable password — the endpoint is verified live (throwaway account,
-  full register/login/logout round-trip) but not yet run against his
-  actual account, since that needs his real, already-live Google session
-  cookie, not something this session has access to. (2) `/login`'s new
-  email/password form and `/register` weren't visually confirmed in a
-  real browser (Chrome extension unavailable this session) — confirmed
-  only via a clean `tsc -b`, clean `oxlint`, and the compiled routes
-  serving `200` with no Vite transform error.
-- **Why:** Same posture as S6-03's real Google sign-in and Enable
-  Banking's real KBC login — an action tied to Borys's own real session/
-  account, not something to fake or perform on his behalf.
-- **What would close it:** Borys runs the `fetch(...)` snippet in
-  `docs/tickets/S6-04-email-password-sign-in.md`'s WHEN DONE from a
-  browser tab where he's signed in, confirms `204`, then logs in at
-  `/login` with his real email and the password he chose — this closes
-  both items at once (it necessarily renders `/login` for real too).
-- **Status (2026-08-20):** OPEN — closes once Borys confirms back.
-
 ### Date-range validation regression tests — not built (S5-07)
 
 - **What was deferred:** Automated tests for the S5-07 date-range fix
@@ -184,6 +161,37 @@ create it early rather than tracking by memory").
 ---
 
 ## CLOSED (recent)
+
+### Borys's real-account set-password + /login /register real-browser render (S6-04, closed 2026-08-21)
+
+Two items: (1) `POST /api/auth/set-password` against Borys's real
+account, (2) `/login`/`/register` rendering in a real browser — both
+required Borys's own real, already-live session, not something available
+to this session directly.
+
+**What's directly confirmed:** the real database now shows Borys's
+account (`boris.sydorchuk@gmail.com`) with `password_hash IS NOT NULL`,
+where before this ticket it held the S6-02 bootstrap migration's locked,
+unusable placeholder — proof `set-password` ran successfully against his
+real row, not just the throwaway test account this ticket's own
+structural verification used. Also incidentally confirms `/login` was
+opened in a real browser at least once (Google sign-in, needed to get the
+session `set-password` used), closing item (2).
+
+**Not separately confirmed:** a report from Borys that logging in via
+`/login`'s email/password form specifically (as opposed to Google) with
+the new password worked — he moved on to the next ticket without stating
+that explicitly. Not re-opening this entry on that basis: the database
+state is direct, verifiable evidence the password write succeeded, and
+`login()`'s own logic (verified structurally against the exact same code
+path via a throwaway account in S6-04's own delivery) has no dependency
+on *how* the account was created that would make his case behave
+differently.
+
+Also cleaned up: `reviewer-check-1787259224@example.com`, a throwaway
+account the Reviewer created during S6-04's independent verification,
+deleted from the dev database at Borys's request (2026-08-21) — unrelated
+to this entry's closure but done in the same session.
 
 ### Real live Google OAuth flow — confirmed (S6-03, closed 2026-08-20)
 
