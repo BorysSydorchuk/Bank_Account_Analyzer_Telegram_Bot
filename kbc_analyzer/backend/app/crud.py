@@ -13,10 +13,17 @@ from .models import Budget, Category, Insight, Setting, Transaction, User
 
 
 def get_user_by_google_id(db: Session, google_id: str) -> User | None:
+    """The user a Google sign-in resolves to on a returning visit, or None
+    on a Google identity never seen before (routers/user_auth.py then
+    falls back to get_user_by_email for the account-linking case)."""
     return db.execute(select(User).where(User.google_id == google_id)).scalar_one_or_none()
 
 
 def get_user_by_email(db: Session, email: str) -> User | None:
+    """Looks up a user by email — used by the Google sign-in flow to
+    detect the account-linking case (a password-registered account
+    signing in via Google for the first time), and by S6-04's
+    register/login endpoints to check whether an email is already taken."""
     return db.execute(select(User).where(User.email == email)).scalar_one_or_none()
 
 

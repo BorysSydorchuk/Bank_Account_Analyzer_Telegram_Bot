@@ -1,4 +1,4 @@
-Status: delivered
+Status: confirmed
 Source: docs/tickets/S6-00-sprint-plan.md
 
 ---
@@ -151,6 +151,10 @@ are what actually put `get_current_user` in front of real routes — this
 ticket only proves the login *side* works, not that anything is
 protected yet.
 
-Ready for **S6-04** once you confirm this one AND complete the real
-Google sign-in test yourself (this ticket's own acceptance criteria isn't
-fully met without that).
+**Update (2026-08-20):** real credentials added to `.env`; a
+`redirect_uri_mismatch` surfaced and was fixed (the callback URL wasn't
+yet registered on the Google Cloud OAuth client); Borys then completed a
+real sign-in and confirmed it worked. All of S6-03's acceptance criteria
+are now met. Closed in `docs/verification_debt.md`.
+
+Ready for S6-04.

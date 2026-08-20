@@ -46,51 +46,6 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
-### Real live Google OAuth flow — not run (S6-03)
-
-- **What was deferred:** S6-03's own acceptance criteria requires "a real
-  live Google OAuth flow works end-to-end." No `GOOGLE_CLIENT_ID`/
-  `GOOGLE_CLIENT_SECRET` existed anywhere in this project before this
-  ticket; Borys is setting up a real Google Cloud OAuth client in
-  parallel. The full flow (`GET /api/auth/google/login` -> real Google
-  consent screen -> `GET /api/auth/google/callback` -> real session) was
-  verified structurally instead: `tests/test_google_oauth.py` (6 tests)
-  drives the exact same code path with `exchange_code_for_tokens`/
-  `fetch_userinfo` monkeypatched at the same seam `routers/user_auth.py`
-  imports them through — real Redis sessions, real Postgres user rows,
-  only the two outbound calls to Google itself are faked. Also could not
-  visually verify `/login` renders/behaves correctly in a real browser —
-  the Chrome extension wasn't connected in this session; verified instead
-  via a clean `tsc -b`, a clean `oxlint`, and Vite serving the compiled
-  module with no transform error.
-- **Why:** No real Google OAuth credentials exist yet, and completing a
-  real Google consent screen requires a human clicking through it in a
-  real browser — same posture as Enable Banking's real KBC login
-  (ARCHITECTURE.md: "Codee never handles bank credentials"), extended to
-  Google credentials for the same reason.
-- **What would close it:** A real sign-in click-through (new account, then
-  the account-linking case against an existing password-registered email)
-  with the resulting session/cookie inspected in DevTools — this also
-  closes the `/login` browser-rendering gap, since it requires actually
-  loading the page.
-- **Update (2026-08-20, same day):** Borys added real `GOOGLE_CLIENT_ID`/
-  `GOOGLE_CLIENT_SECRET` to `.env` (gitignored, never committed);
-  `GOOGLE_REDIRECT_URI` defaults to `http://localhost:8000/api/auth/google/callback`
-  (matches `routers/user_auth.py`). Backend restarted, confirmed live:
-  `GET /api/auth/google/login` now redirects to a real
-  `accounts.google.com` URL carrying the real client id (Google
-  recognizes the client — not `invalid_client`). A safe, read-only check
-  (fetching that authorize URL, no login attempted) surfaced a real,
-  fixable blocker: Google returns **`redirect_uri_mismatch`** —
-  `http://localhost:8000/api/auth/google/callback` isn't yet registered
-  as an Authorized redirect URI on this OAuth client in Google Cloud
-  Console. **Action needed from Borys:** add that exact URI there before
-  the real click-through can succeed.
-- **Status (2026-08-20):** OPEN — blocked on the redirect URI
-  registration above (a Google Cloud Console change only Borys can make),
-  then closes once he completes the real sign-in himself and confirms
-  back, per S6-03's own WHEN DONE.
-
 ### Date-range validation regression tests — not built (S5-07)
 
 - **What was deferred:** Automated tests for the S5-07 date-range fix
@@ -206,6 +161,26 @@ create it early rather than tracking by memory").
 ---
 
 ## CLOSED (recent)
+
+### Real live Google OAuth flow — confirmed (S6-03, closed 2026-08-20)
+
+S6-03's own acceptance criteria required "a real live Google OAuth flow
+works end-to-end." Structural verification (`tests/test_google_oauth.py`,
+6 tests against real Postgres/Redis with only Google's two HTTP calls
+faked) landed with the ticket; the real click-through was blocked first
+on no credentials existing at all, then on a `redirect_uri_mismatch`
+(the callback URL wasn't yet registered as an Authorized redirect URI on
+the Google Cloud OAuth client).
+
+Both closed same-day: Borys added real `GOOGLE_CLIENT_ID`/
+`GOOGLE_CLIENT_SECRET` to `.env` (gitignored, never committed) and
+registered the redirect URI in Google Cloud Console. **Borys confirmed a
+real sign-in worked** — no personal Google account details recorded here
+per this file's shape-only evidence convention. This also closes the
+`/login` frontend page's browser-rendering verification, which had the
+same gap (no Chrome extension connection available during the build
+session) and the same closure condition (a real page load, which a real
+sign-in necessarily requires).
 
 ### `agents/registry.py`'s `_provider_cache` — user-scoped (S4-09/S5-08 finding, closed S6-02, 2026-08-20)
 
