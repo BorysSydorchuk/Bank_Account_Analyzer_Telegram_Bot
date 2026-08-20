@@ -68,14 +68,28 @@ create it early rather than tracking by memory").
   real browser — same posture as Enable Banking's real KBC login
   (ARCHITECTURE.md: "Codee never handles bank credentials"), extended to
   Google credentials for the same reason.
-- **What would close it:** Once Borys adds real `GOOGLE_CLIENT_ID`/
-  `GOOGLE_CLIENT_SECRET`/`GOOGLE_REDIRECT_URI` to `.env`, a real sign-in
-  click-through (new account, then the account-linking case against an
-  existing password-registered email) with the resulting session/cookie
-  inspected in DevTools — this also closes the `/login` browser-rendering
-  gap, since it requires actually loading the page.
-- **Status (2026-08-20):** OPEN — closes once Borys completes the real
-  sign-in himself and confirms back, per S6-03's own WHEN DONE.
+- **What would close it:** A real sign-in click-through (new account, then
+  the account-linking case against an existing password-registered email)
+  with the resulting session/cookie inspected in DevTools — this also
+  closes the `/login` browser-rendering gap, since it requires actually
+  loading the page.
+- **Update (2026-08-20, same day):** Borys added real `GOOGLE_CLIENT_ID`/
+  `GOOGLE_CLIENT_SECRET` to `.env` (gitignored, never committed);
+  `GOOGLE_REDIRECT_URI` defaults to `http://localhost:8000/api/auth/google/callback`
+  (matches `routers/user_auth.py`). Backend restarted, confirmed live:
+  `GET /api/auth/google/login` now redirects to a real
+  `accounts.google.com` URL carrying the real client id (Google
+  recognizes the client — not `invalid_client`). A safe, read-only check
+  (fetching that authorize URL, no login attempted) surfaced a real,
+  fixable blocker: Google returns **`redirect_uri_mismatch`** —
+  `http://localhost:8000/api/auth/google/callback` isn't yet registered
+  as an Authorized redirect URI on this OAuth client in Google Cloud
+  Console. **Action needed from Borys:** add that exact URI there before
+  the real click-through can succeed.
+- **Status (2026-08-20):** OPEN — blocked on the redirect URI
+  registration above (a Google Cloud Console change only Borys can make),
+  then closes once he completes the real sign-in himself and confirms
+  back, per S6-03's own WHEN DONE.
 
 ### Date-range validation regression tests — not built (S5-07)
 
