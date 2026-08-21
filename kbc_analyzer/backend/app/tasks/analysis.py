@@ -47,7 +47,8 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
             job_id,
             {
                 "job_id": job_id,
-                "user_id": str(user_id),                "status": "processing",
+                "user_id": str(user_id),
+                "status": "processing",
                 "stage": "fetching",
                 "progress": 0,
                 "message": "Fetching transactions from KBC...",
@@ -81,7 +82,8 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
             job_id,
             {
                 "job_id": job_id,
-                "user_id": str(user_id),                "status": "processing",
+                "user_id": str(user_id),
+                "status": "processing",
                 "stage": "storing",
                 "progress": 0,
                 "message": f"Storing {fetched} transactions...",
@@ -103,7 +105,8 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
                 job_id,
                 {
                     "job_id": job_id,
-                    "user_id": str(user_id),                    "status": "processing",
+                    "user_id": str(user_id),
+                    "status": "processing",
                     "stage": "categorizing",
                     "progress": progress,
                     "message": f"Categorizing batch {completed_batches} of {total_batches}...",
@@ -138,7 +141,8 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
                 job_id,
                 {
                     "job_id": job_id,
-                    "user_id": str(user_id),                    "status": "failed",
+                    "user_id": str(user_id),
+                    "status": "failed",
                     "stage": "categorizing",
                     "error": categorization["error_message"]
                     or "Categorization failed for every transaction — the AI provider may be temporarily "
@@ -152,7 +156,8 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
             job_id,
             {
                 "job_id": job_id,
-                "user_id": str(user_id),                "status": "processing",
+                "user_id": str(user_id),
+                "status": "processing",
                 "stage": "generating_insights",
                 "progress": 50,
                 "message": "Generating insights...",
@@ -174,7 +179,8 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
             job_id,
             {
                 "job_id": job_id,
-                "user_id": str(user_id),                "status": "complete",
+                "user_id": str(user_id),
+                "status": "complete",
                 "stage": "done",
                 "progress": 100,
                 "categorized": categorization["categorized"],
@@ -197,7 +203,8 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
             job_id,
             {
                 "job_id": job_id,
-                "user_id": str(user_id),                "status": "failed",
+                "user_id": str(user_id),
+                "status": "failed",
                 "stage": current_stage,
                 "error": "Something went wrong while processing this sync. Please try again.",
             },

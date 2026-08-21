@@ -1,4 +1,4 @@
-Status: delivered
+Status: confirmed
 Source: docs/tickets/S6-00-sprint-plan.md
 
 ---
@@ -199,21 +199,16 @@ KEY DECISIONS:
   in source, beyond the S6-02 migration that already has to.
 - **`list_categories` keeps an optional, defaulted `user_id`** rather
   than becoming required → `POST /api/categories`'s duplicate-name check
-  is the one remaining unauthenticated caller (that route's own
-  auth/scoping is out of this ticket's named list — see WATCH OUT FOR)
-  → matches the exact reasoning S6-05 already recorded for this same
-  function.
+  is the last caller that can legitimately want the unscoped shape (a
+  brand-new category's name has to be checked against nobody's rows but
+  the creator's, but the function itself stays general rather than
+  special-cased to always require a value) → matches the exact reasoning
+  S6-05 already recorded for this same function. (`POST /api/categories`
+  itself *is* authenticated — see `routers/categories.py`'s
+  `create_category`, gated by `get_current_user` in this same commit;
+  an earlier draft of this file claimed otherwise, corrected below.)
 
 WATCH OUT FOR:
-- **`POST /api/categories` itself is still unauthenticated** — not named
-  in S6-06's Category A/B lists (which cover "categories/budgets
-  endpoints not already covered by S6-05," and S6-05 only covered `GET`)
-  — a real, if narrow, gap: anyone can currently create a category row
-  with no `user_id` scoping check on the request itself (the row still
-  gets a real `user_id` via `crud.create_category`, but nothing gates
-  who's allowed to call this route at all). Flagging rather than
-  silently fixing outside the ticket's named scope — Borys/PM call on
-  whether this needs its own follow-up or folds into a later ticket.
 - **Rate limiting (`chat`/`sync`/`analysis`) is still IP-keyed**, not
   `user_id`-keyed, even though every one of those routes now resolves a
   real `current_user` — out of this ticket's named scope (full query
