@@ -23,6 +23,13 @@ const GOOGLE_LOGIN_URL = `${API_URL}/api/auth/google/login`
 // whoever's looking at the URL bar.
 const ERROR_MESSAGES: Record<string, string> = {
   google_sign_in_failed: "Google sign-in didn't go through. Please try again.",
+  // S6-07 finding 1: an account with this email already exists via
+  // password sign-up. Google sign-in no longer auto-links to it (that
+  // was the account-takeover path) — the rightful owner has to log in
+  // with their password first, then connect Google from an authenticated
+  // session.
+  google_email_already_registered:
+    "An account with this email already exists. Log in with your password, then connect Google from Settings.",
 }
 
 const INPUT_CLASSES =

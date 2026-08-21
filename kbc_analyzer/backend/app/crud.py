@@ -39,11 +39,14 @@ def create_user_from_google(db: Session, google_id: str, email: str, display_nam
 
 def link_google_id(db: Session, user: User, google_id: str) -> User:
     """Attaches a Google identity to an existing (password-registered)
-    account — the account-linking case (S6-03): same email, first time
-    signing in via Google. Never overwrites an existing google_id (a user
-    already linked to a different Google account never gets silently
-    re-pointed by this call — routers/user_auth.py only calls this when
-    user.google_id is None)."""
+    account. As of S6-07 finding 1, the only caller is the explicit,
+    authenticated GET /api/auth/google/link flow — never a bare Google
+    sign-in callback matching on email alone, which was the account-
+    takeover path that finding closed. Callers are still responsible for
+    checking user.google_id is None themselves first; this function
+    itself will happily overwrite an existing google_id if asked, so
+    routers/user_auth.py's google_callback rejects that case before ever
+    calling this."""
     user.google_id = google_id
     db.commit()
     db.refresh(user)
@@ -310,15 +313,26 @@ def update_transaction(db: Session, user_id: UUID, transaction_id: UUID, updates
     return transaction
 
 
-def list_categories(db: Session, user_id: UUID | None = None) -> list[Category]:
-    """All categories, ordered by name — scoped to user_id when given.
-    Optional (default None = unscoped) only for the rare internal caller
-    that genuinely needs every user's rows; every router-level call as of
-    S6-06 passes a real user_id."""
-    query = select(Category).order_by(Category.name)
-    if user_id is not None:
-        query = query.where(Category.user_id == user_id)
-    return list(db.execute(query).scalars())
+def list_categories(db: Session, user_id: UUID) -> list[Category]:
+    """This user's categories, ordered by name. S6-07 finding 2 (S6-06
+    review): user_id used to be optional (default None = unscoped) "for
+    the rare internal caller that genuinely needs every user's rows" —
+    an unscoped-by-default footgun sitting in a function every real route
+    calls scoped. Required now; list_all_categories() below is the
+    explicit, differently-named escape hatch for the one caller
+    (scripts/smoke_test_color_validation.py) that actually needs every
+    user's rows, so reaching for the unscoped behavior is a deliberate,
+    visible choice at the call site, not a default anyone could reach by
+    forgetting an argument.
+    """
+    return list(db.execute(select(Category).where(Category.user_id == user_id).order_by(Category.name)).scalars())
+
+
+def list_all_categories(db: Session) -> list[Category]:
+    """Every category, every user, unscoped — for internal/dev tooling
+    only (scripts/smoke_test_color_validation.py), never a router. Not a
+    default any live endpoint could accidentally fall back to."""
+    return list(db.execute(select(Category).order_by(Category.name)).scalars())
 
 
 def list_seeded_category_names(db: Session, user_id: UUID) -> list[str]:

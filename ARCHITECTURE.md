@@ -306,14 +306,26 @@ SDK; this app only ever needs those three calls. `routers/user_auth.py`
   `state` or a Google-side failure (redirects to `/login?error=
   google_sign_in_failed`, no session created — never a raw 500, including
   when `GOOGLE_CLIENT_ID` itself isn't configured yet). On success:
-  resolves the user by `google_id` first; if none, by `email` (**account
-  linking** — attaches this Google identity to an existing
-  password-registered account with the same, Google-verified email rather
-  than creating a duplicate row; `fetch_userinfo` rejects an unverified
-  email outright, since trusting an unverified address for linking would
-  let anyone claim an existing account just by typing its email into a
-  Google signup); if neither, creates a new `google_id`-only row. Then
-  `create_session` + `set_session_cookie`, redirect to `FRONTEND_ORIGIN`.
+  resolves the user by `google_id`. If none, and an account with that
+  email already exists (no `google_id` linked yet), this is a **conflict**,
+  not a silent link (`/login?error=google_email_already_registered`) —
+  see the Invariants entry below for why. If no account exists by
+  `google_id` or `email` at all, creates a new `google_id`-only row.
+  Then `create_session` + `set_session_cookie`, redirect to
+  `FRONTEND_ORIGIN`.
+- `GET /api/auth/google/link` (S6-07 finding 1) — the *only* route that
+  may ever attach a `google_id` to an existing account. Requires
+  `get_current_user` (must already be authenticated, via password —
+  the one method that doesn't already involve Google) and sets an
+  additional `oauth_link_user_id` cookie alongside `oauth_state`, naming
+  which account is linking. `google_callback` only takes the linking
+  branch when this cookie is present; it rejects (redirects to
+  `/settings?error=google_link_failed`, nothing changed) if the Google
+  identity already belongs to a different account, or if the linking
+  account already has a different `google_id` attached. Frontend trigger:
+  `SettingsPage`'s `AccountSection`, a plain `<a>` to this route (real
+  navigation through Google's consent screen, same reasoning as
+  `LoginPage`'s Google button).
 - `POST /api/auth/logout` — destroys the session, clears the cookie. Not
   gated behind `get_current_user` (a no-op on an already-invalid session
   is fine — nothing to protect by requiring one first).
@@ -507,6 +519,28 @@ with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
 
 ## Invariants
 
+- **A Google sign-in must never implicitly attach to an existing
+  account just because the emails match (S6-07 finding 1, real
+  account-takeover path, closed 2026-08-21).** Before this fix,
+  `google_callback` treated "an account with this email exists, no
+  `google_id` linked yet" as an unconditional linking case. Since this
+  app has no email verification (a standing, deliberate Sprint 6 gap —
+  see DECISIONS ALREADY MADE), an attacker could register a password
+  account under a victim's real email first; the victim's own,
+  legitimate Google sign-in would then silently attach to the
+  attacker-controlled row, leaving the attacker with standing password
+  access to whatever the victim did under that account afterward. Fixed:
+  that case is now a conflict (`google_email_already_registered`), never
+  a link. **The only route allowed to attach a `google_id` to an
+  existing account is `GET /api/auth/google/link`, and only while the
+  caller is already authenticated as that account** (see Auth section
+  above) — never as a side effect of any sign-in attempt, regardless of
+  email match. `tests/test_google_oauth.py`'s
+  `test_google_sign_in_on_an_email_with_an_existing_password_account_is_a_conflict_not_a_silent_link`
+  is the regression test for the actual adversarial case (attacker
+  registers first); do not weaken or remove the email-conflict check in
+  `google_callback` to "fix" a UX complaint without re-reading this
+  entry first.
 - **Manual edits outrank AI categorization.** Enforced server-side (see
   Database Tables above) — not just a frontend convention.
 - **Colors come only from the `categories` table.** No component stores

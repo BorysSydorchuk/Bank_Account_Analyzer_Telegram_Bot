@@ -60,24 +60,134 @@ def test_new_google_sign_in_creates_a_user_and_session(client, db_session, monke
     assert session_user_id == user.id
 
 
-def test_google_sign_in_links_to_an_existing_password_account(client, db_session, monkeypatch):
-    existing = User(email="already-registered@example.com", password_hash="not-a-real-hash")
-    db_session.add(existing)
+def test_google_sign_in_on_an_email_with_an_existing_password_account_is_a_conflict_not_a_silent_link(
+    client, db_session, monkeypatch
+):
+    """S6-07 finding 1 — the actual adversarial case, not the benign
+    same-person one: an attacker registers a password account under a
+    victim's real (unverified) email *first*. When "the real owner"
+    later signs in with Google using that same email, this must NOT
+    silently attach to the attacker's row — that would hand the attacker
+    standing password access to whatever the real owner does under this
+    account from then on. Before this fix, google_callback treated
+    "email matches, no google_id set yet" as an unconditional linking
+    case; this test is what would have caught that.
+    """
+    attacker_row = User(email="victim@example.com", password_hash="attacker-controlled-hash")
+    db_session.add(attacker_row)
     db_session.flush()
-    existing_id = existing.id
+    attacker_row_id = attacker_row.id
 
     response = _complete_google_sign_in(
-        client, monkeypatch, google_id="google-sub-linking", email="already-registered@example.com"
+        client, monkeypatch, google_id="victims-real-google-sub", email="victim@example.com"
     )
 
+    # A conflict redirect, not a sign-in success — no session was created
+    # for whoever completed this Google flow.
     assert response.status_code == 303
-    # Still exactly one user row for this email — linked, not duplicated.
-    matches = db_session.query(User).filter(User.email == "already-registered@example.com").all()
+    assert response.headers["location"] == "http://localhost:5173/login?error=google_email_already_registered"
+    assert SESSION_COOKIE_NAME not in response.cookies
+
+    # The attacker's row is completely untouched — still exactly one row
+    # for this email, still the attacker's password hash, still no
+    # google_id attached to it. The real owner's Google identity was
+    # never attached to an account they don't control.
+    matches = db_session.query(User).filter(User.email == "victim@example.com").all()
     assert len(matches) == 1
-    linked = matches[0]
-    assert linked.id == existing_id
-    assert linked.google_id == "google-sub-linking"
-    assert linked.password_hash == "not-a-real-hash"  # untouched by linking
+    assert matches[0].id == attacker_row_id
+    assert matches[0].password_hash == "attacker-controlled-hash"
+    assert matches[0].google_id is None
+    assert db_session.query(User).filter(User.google_id == "victims-real-google-sub").count() == 0
+
+
+def test_google_link_requires_authentication(client):
+    response = client.get("/api/auth/google/link", follow_redirects=False)
+    assert response.status_code == 401
+
+
+def test_google_link_attaches_google_id_to_the_authenticated_users_own_account(client, db_session, monkeypatch):
+    """The only legitimate path to linking (S6-07 finding 1): the real
+    account owner is already authenticated (via password), then
+    explicitly initiates linking — never as a side effect of a Google
+    sign-in attempt."""
+    owner = User(email="real-owner@example.com", password_hash="a-real-hash")
+    db_session.add(owner)
+    db_session.flush()
+    owner_id = owner.id
+
+    from app.auth.session import SESSION_COOKIE_NAME as _SESSION_COOKIE, create_session
+
+    client.cookies.set(_SESSION_COOKIE, create_session(owner_id))
+    _fake_google_profile(monkeypatch, google_id="owners-real-google-sub", email="real-owner@example.com")
+
+    link_response = client.get("/api/auth/google/link", follow_redirects=False)
+    state = link_response.cookies["oauth_state"]
+    assert "oauth_link_user_id" in link_response.cookies
+
+    callback_response = client.get(
+        f"/api/auth/google/callback?code=fake-auth-code&state={state}", follow_redirects=False
+    )
+
+    assert callback_response.status_code == 303
+    assert callback_response.headers["location"] == "http://localhost:5173/settings?linked=google"
+
+    db_session.refresh(owner)
+    assert owner.google_id == "owners-real-google-sub"
+    assert owner.password_hash == "a-real-hash"  # untouched
+    # Still exactly one row — linking never created a second account.
+    assert db_session.query(User).filter(User.email == "real-owner@example.com").count() == 1
+
+
+def test_google_link_rejects_a_google_identity_already_linked_to_someone_else(client, db_session, monkeypatch):
+    already_linked_elsewhere = User(email="other-user@example.com", google_id="claimed-google-sub")
+    db_session.add(already_linked_elsewhere)
+    linking_user = User(email="wants-to-link@example.com", password_hash="a-real-hash")
+    db_session.add(linking_user)
+    db_session.flush()
+    linking_user_id = linking_user.id
+
+    from app.auth.session import SESSION_COOKIE_NAME as _SESSION_COOKIE, create_session
+
+    client.cookies.set(_SESSION_COOKIE, create_session(linking_user_id))
+    _fake_google_profile(monkeypatch, google_id="claimed-google-sub", email="wants-to-link@example.com")
+
+    link_response = client.get("/api/auth/google/link", follow_redirects=False)
+    state = link_response.cookies["oauth_state"]
+
+    callback_response = client.get(
+        f"/api/auth/google/callback?code=fake-auth-code&state={state}", follow_redirects=False
+    )
+
+    assert callback_response.status_code == 303
+    assert callback_response.headers["location"] == "http://localhost:5173/settings?error=google_link_failed"
+
+    db_session.refresh(linking_user)
+    assert linking_user.google_id is None  # never attached
+
+
+def test_google_link_rejects_when_the_account_already_has_a_different_google_id(client, db_session, monkeypatch):
+    user = User(email="already-linked@example.com", google_id="original-google-sub", password_hash="a-real-hash")
+    db_session.add(user)
+    db_session.flush()
+    user_id = user.id
+
+    from app.auth.session import SESSION_COOKIE_NAME as _SESSION_COOKIE, create_session
+
+    client.cookies.set(_SESSION_COOKIE, create_session(user_id))
+    _fake_google_profile(monkeypatch, google_id="a-different-google-sub", email="already-linked@example.com")
+
+    link_response = client.get("/api/auth/google/link", follow_redirects=False)
+    state = link_response.cookies["oauth_state"]
+
+    callback_response = client.get(
+        f"/api/auth/google/callback?code=fake-auth-code&state={state}", follow_redirects=False
+    )
+
+    assert callback_response.status_code == 303
+    assert callback_response.headers["location"] == "http://localhost:5173/settings?error=google_link_failed"
+
+    db_session.refresh(user)
+    assert user.google_id == "original-google-sub"  # unchanged
 
 
 def test_returning_google_user_reuses_their_existing_row(client, db_session, monkeypatch):

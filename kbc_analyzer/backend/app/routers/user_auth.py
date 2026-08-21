@@ -1,12 +1,17 @@
-"""GET/POST /api/auth/{google/login,google/callback,logout,register,login,
-set-password} — real user sign-in. Google (S6-03) and email/password
-(S6-04), both in this one file since they're the same user-facing surface.
-Distinct from routers/auth.py, which is Enable Banking's bank-session flow
-(/api/auth/enable-banking/*) — same /api/auth prefix, disjoint sub-paths,
-no route collision.
+"""GET/POST /api/auth/{google/login,google/link,google/callback,logout,
+register,login,set-password} — real user sign-in. Google (S6-03) and
+email/password (S6-04), both in this one file since they're the same
+user-facing surface. Distinct from routers/auth.py, which is Enable
+Banking's bank-session flow (/api/auth/enable-banking/*) — same
+/api/auth prefix, disjoint sub-paths, no route collision.
+
+google/link (S6-07 finding 1) is the only route that may ever attach a
+google_id to an existing account — see _LINK_INTENT_COOKIE_NAME's
+docstring below for the account-takeover path this closes.
 """
 import os
 import secrets
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -54,18 +59,34 @@ _DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
 _STATE_COOKIE_NAME = "oauth_state"
 _STATE_COOKIE_TTL_SECONDS = 10 * 60  # generous for a human to actually complete Google's consent screen
 
+# S6-07 finding 1 (priority-zero, real account-takeover path): the linking
+# flow is now split into two, and this cookie is what tells the shared
+# callback which one it's answering. Set only by the authenticated
+# /google/link route below, never by the plain, unauthenticated
+# /google/login — so its mere presence, combined with the state check
+# already in place, is what makes linking an explicit, authenticated act
+# instead of something a sign-in can trigger as a side effect.
+#
+# INVARIANT (do not remove): a Google sign-in must never implicitly attach
+# to an existing password-registered account just because the emails
+# match. Before this fix, google_callback treated "email matches, no
+# google_id set yet" as an unconditional linking case — an attacker could
+# register a password account under a victim's real email (no email
+# verification exists in this app), and the *victim's own, legitimate*
+# Google sign-in would then silently attach to that attacker-controlled
+# row, leaving the attacker with standing password access to the victim's
+# account and data. Linking must only ever happen while the linking
+# user is already authenticated as themselves (this cookie's whole
+# purpose) — see docs/verification_debt.md and ARCHITECTURE.md's Auth
+# section for the full incident writeup.
+_LINK_INTENT_COOKIE_NAME = "oauth_link_user_id"
+
 
 def _frontend_origin() -> str:
     return os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
 
 
-@router.get("/google/login")
-def google_login() -> RedirectResponse:
-    # A fresh, unguessable value per attempt — compared against what the
-    # callback receives to prove this callback is answering *this*
-    # browser's own request, not a forged/replayed one (see
-    # google_oauth.build_authorize_url's docstring).
-    state = secrets.token_urlsafe(24)
+def _google_redirect(state: str) -> RedirectResponse:
     try:
         authorize_url = build_authorize_url(state)
     except GoogleOAuthError:
@@ -78,11 +99,52 @@ def google_login() -> RedirectResponse:
         return RedirectResponse(
             f"{_frontend_origin()}/login?error=google_sign_in_failed", status_code=HTTP_303_SEE_OTHER
         )
+    return RedirectResponse(authorize_url, status_code=HTTP_307_TEMPORARY_REDIRECT)
 
-    redirect = RedirectResponse(authorize_url, status_code=HTTP_307_TEMPORARY_REDIRECT)
+
+@router.get("/google/login")
+def google_login() -> RedirectResponse:
+    # A fresh, unguessable value per attempt — compared against what the
+    # callback receives to prove this callback is answering *this*
+    # browser's own request, not a forged/replayed one (see
+    # google_oauth.build_authorize_url's docstring).
+    state = secrets.token_urlsafe(24)
+    redirect = _google_redirect(state)
     redirect.set_cookie(
         key=_STATE_COOKIE_NAME,
         value=state,
+        max_age=_STATE_COOKIE_TTL_SECONDS,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+    )
+    return redirect
+
+
+@router.get("/google/link")
+def google_link(current_user: User = Depends(get_current_user)) -> RedirectResponse:
+    """S6-07 finding 1 — the *only* legitimate way an existing account ever
+    gains a `google_id`, other than signing up fresh with Google in the
+    first place. Requires an active session (get_current_user): the
+    caller must already be authenticated as themselves — via password,
+    since that's the only sign-in method that doesn't already involve
+    Google — before this can attach a Google identity to their account.
+    google_callback below only treats a callback as a linking action when
+    it carries this route's own cookie, never on email-matching alone.
+    """
+    state = secrets.token_urlsafe(24)
+    redirect = _google_redirect(state)
+    redirect.set_cookie(
+        key=_STATE_COOKIE_NAME,
+        value=state,
+        max_age=_STATE_COOKIE_TTL_SECONDS,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+    )
+    redirect.set_cookie(
+        key=_LINK_INTENT_COOKIE_NAME,
+        value=str(current_user.id),
         max_age=_STATE_COOKIE_TTL_SECONDS,
         httponly=True,
         secure=COOKIE_SECURE,
@@ -102,52 +164,97 @@ def google_callback(
         f"{_frontend_origin()}/login?error=google_sign_in_failed", status_code=HTTP_303_SEE_OTHER
     )
 
+    def _clear_oauth_cookies(response: RedirectResponse) -> RedirectResponse:
+        response.delete_cookie(_STATE_COOKIE_NAME)
+        response.delete_cookie(_LINK_INTENT_COOKIE_NAME)
+        return response
+
     expected_state = request.cookies.get(_STATE_COOKIE_NAME)
     if not code or not state or not expected_state or state != expected_state:
         # Missing code (user denied consent), or a state mismatch (CSRF
         # attempt, expired attempt, or a stale tab replaying an old
         # callback URL) — all treated the same way: back to /login, no
         # session created.
-        error_redirect.delete_cookie(_STATE_COOKIE_NAME)
-        return error_redirect
+        return _clear_oauth_cookies(error_redirect)
+
+    link_user_id_raw = request.cookies.get(_LINK_INTENT_COOKIE_NAME)
 
     try:
         tokens = exchange_code_for_tokens(code)
         profile = fetch_userinfo(tokens["access_token"])
     except GoogleOAuthError:
-        error_redirect.delete_cookie(_STATE_COOKIE_NAME)
-        return error_redirect
+        return _clear_oauth_cookies(error_redirect)
 
     google_id = profile["sub"]
     email = profile["email"]
     display_name = profile.get("name")
 
+    # ── Explicit linking (S6-07 finding 1) — only when google_link above
+    # is what actually started this flow. Never triggered by email
+    # matching alone. ─────────────────────────────────────────────────
+    if link_user_id_raw is not None:
+        link_error_redirect = RedirectResponse(
+            f"{_frontend_origin()}/settings?error=google_link_failed", status_code=HTTP_303_SEE_OTHER
+        )
+
+        try:
+            link_user_id = UUID(link_user_id_raw)
+        except ValueError:
+            return _clear_oauth_cookies(link_error_redirect)
+
+        linking_user = db.get(User, link_user_id)
+        if linking_user is None:
+            return _clear_oauth_cookies(link_error_redirect)
+
+        already_linked_elsewhere = crud.get_user_by_google_id(db, google_id)
+        if already_linked_elsewhere is not None and already_linked_elsewhere.id != linking_user.id:
+            # This Google identity already belongs to a different account
+            # — never repoint it, that would be the same takeover shape
+            # in reverse (stealing a Google identity away from its real
+            # owner into whatever account initiated this link request).
+            return _clear_oauth_cookies(link_error_redirect)
+        if linking_user.google_id is not None and linking_user.google_id != google_id:
+            # The account initiating the link already has a different
+            # Google identity attached — crud.link_google_id refuses to
+            # overwrite it (by design), so surface that as a clean
+            # failure here rather than a silent no-op.
+            return _clear_oauth_cookies(link_error_redirect)
+
+        crud.link_google_id(db, linking_user, google_id)
+
+        success_redirect = RedirectResponse(
+            f"{_frontend_origin()}/settings?linked=google", status_code=HTTP_303_SEE_OTHER
+        )
+        return _clear_oauth_cookies(success_redirect)
+
+    # ── Plain sign-in ────────────────────────────────────────────────
     user = crud.get_user_by_google_id(db, google_id)
     if user is None:
         existing = crud.get_user_by_email(db, email)
         if existing is None:
             user = crud.create_user_from_google(db, google_id, email, display_name)
-        elif existing.google_id is None:
-            # Account-linking case: a password-registered account with
-            # this exact (Google-verified) email, never linked to Google
-            # before — attach this Google identity to it rather than
-            # creating a second row for the same person.
-            user = crud.link_google_id(db, existing, google_id)
         else:
-            # existing.google_id is set to some *other* value — this
-            # email is already linked to a different Google account than
-            # the one completing this flow. Shouldn't happen under normal
-            # use (get_user_by_google_id above would have found it first
-            # if it were the same account); treated as a failed sign-in
-            # rather than silently repointing an existing link.
-            error_redirect.delete_cookie(_STATE_COOKIE_NAME)
-            return error_redirect
+            # An account with this email already exists and has no
+            # google_id linked yet. Before S6-07 finding 1, this branch
+            # auto-linked — the real account-takeover path: an attacker
+            # registers a password account under a victim's real,
+            # unverified email, and the victim's own later Google
+            # sign-in would silently attach to the attacker's row,
+            # handing the attacker standing access to the victim's data.
+            # Now: a conflict, not a silent link. The rightful owner logs
+            # in with their password (S6-04) and connects Google
+            # explicitly via /google/link above, from an authenticated
+            # session — the only place linking is now allowed to happen.
+            error_redirect = RedirectResponse(
+                f"{_frontend_origin()}/login?error=google_email_already_registered",
+                status_code=HTTP_303_SEE_OTHER,
+            )
+            return _clear_oauth_cookies(error_redirect)
 
     session_id = create_session(user.id)
     redirect = RedirectResponse(_frontend_origin(), status_code=HTTP_303_SEE_OTHER)
-    redirect.delete_cookie(_STATE_COOKIE_NAME)
     set_session_cookie(redirect, session_id)
-    return redirect
+    return _clear_oauth_cookies(redirect)
 
 
 @router.post("/logout", status_code=204)

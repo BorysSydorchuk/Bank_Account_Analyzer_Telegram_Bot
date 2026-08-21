@@ -51,18 +51,26 @@ async def test_assign_ai_colors_fallback() -> None:
     print("\n--- analysis_service.assign_ai_colors() fallback path ---")
     db = SessionLocal()
     try:
-        before = {c.name: c.color for c in crud.list_categories(db)}
-        if "Other" not in before:
+        # S6-06 made every categories.* crud call user-scoped; this script
+        # is dev tooling with no authenticated caller of its own, so it
+        # uses list_all_categories() (S6-07 finding 2's explicit, unscoped
+        # escape hatch) to find *a* real "Other" row, then runs every
+        # subsequent call scoped to that exact row's own user_id — not a
+        # different or invented one.
+        all_categories = {c.name: c for c in crud.list_all_categories(db)}
+        if "Other" not in all_categories:
             print("  SKIPPED — no 'Other' category row to test against (run S3-01's migration first)")
             return
-        seed_color_before = before["Other"]
+        other = all_categories["Other"]
+        user_id = other.user_id
+        seed_color_before = other.color
 
-        crud.upsert_category_colors(db, {"Other": seed_color_before}, source="seed")
+        crud.upsert_category_colors(db, user_id, {"Other": seed_color_before}, source="seed")
 
         stub = _StubProvider([{"name": "Other", "color": "#FFFF00"}])  # deliberately invalid
-        await analysis_service.assign_ai_colors(db, stub, ["Other"])
+        await analysis_service.assign_ai_colors(db, user_id, stub, ["Other"])
 
-        after = crud.get_categories_by_name(db, ["Other"])["Other"]
+        after = crud.get_categories_by_name(db, user_id, ["Other"])["Other"]
         fell_back_correctly = after.color == seed_color_before and after.source == "ai"
         status = "OK" if fell_back_correctly else "MISMATCH"
         print(f"  [{status}] LLM returned invalid #FFFF00 for 'Other' -> stored color={after.color!r}, "

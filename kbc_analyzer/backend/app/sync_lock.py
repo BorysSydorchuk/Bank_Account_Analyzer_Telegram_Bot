@@ -1,10 +1,11 @@
 """Redis-based lock preventing two sync jobs from running concurrently (S5-05).
 
-Single-user today — every call site passes user_id=None — but the key
-derivation already takes user_id so Sprint 6's multi-user migration only
-needs to start passing a real value, not touch this module's logic (same
-pattern as job_store.py's _job_key and the S5-01 migration plan's guidance
-for Redis-key scoping).
+Real per-user locking as of S6-06: routers/transactions.py's
+sync_transactions passes the authenticated user's real id, so two
+different users can each have their own sync in flight at once, each
+locked independently. user_id stays optional (default None) only because
+nothing outside that one call site has a reason to pass anything else —
+the key derivation itself has taken user_id since S5-05.
 """
 import os
 from uuid import UUID
