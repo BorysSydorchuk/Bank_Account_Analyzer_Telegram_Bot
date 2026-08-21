@@ -46,6 +46,52 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Email verification — not built (S6-04, out of scope by design)
+
+- **What was deferred:** No email address is ever verified as belonging
+  to the person registering it. `POST /api/auth/register` creates a real,
+  usable account immediately on any syntactically-valid email.
+- **Why:** No transactional email infrastructure exists in this stack
+  yet (no SMTP/provider integration, no email-sending code anywhere) —
+  building it was explicitly out of S6-04's scope, a decision made before
+  that ticket was built, not discovered as a gap afterward. This is also
+  why S6-07 finding 1's account-linking takeover was possible in the
+  first place (see ARCHITECTURE.md's Invariants entry) — the fix there
+  closes the *linking* abuse path without needing verification, but
+  unverified email ownership remains true generally.
+- **What would close it:** Real transactional email sending (a provider
+  like SES/Postmark/Resend), a verification-token model, a
+  `POST /api/auth/register` flow that creates the account in an
+  unverified state and gates some set of actions on verification (exact
+  gating rules are a product decision, not made yet).
+- **Status (2026-08-21, S6-08 sprint close):** OPEN — closes at Sprint 7
+  or later, whichever sprint stands up real transactional email
+  infrastructure (Sprint 7's handoff explicitly names this as a
+  prerequisite).
+
+### Email-based password reset — not built (S6-04, out of scope by design)
+
+- **What was deferred:** `/login`'s "Forgot password?" is a static,
+  honest "not available yet — contact support" note (S6-04's own
+  acceptance criteria), not a working reset flow. A user who forgets
+  their password with no linked Google account has no self-service way
+  back in.
+- **Why:** Same root blocker as email verification above — no
+  transactional email infrastructure exists to deliver a reset link/token
+  safely. Deferring both together, rather than building a partial reset
+  flow now, avoids shipping a reset mechanism that can't verify the
+  request actually reached the account owner's inbox.
+- **What would close it:** Once transactional email exists (see the
+  entry above), a standard token-based reset flow: `POST
+  /api/auth/request-password-reset` (rate-limited, always returns the
+  same generic response regardless of whether the email exists — same
+  enumeration-avoidance shape as `POST /api/auth/login`), a
+  short-lived signed/random reset token emailed to the address, `POST
+  /api/auth/reset-password` consuming it once.
+- **Status (2026-08-21, S6-08 sprint close):** OPEN — closes at Sprint 7
+  or later, same closure condition as the email verification entry above
+  (both need the same underlying infrastructure, likely built together).
+
 ### Date-range validation regression tests — not built (S5-07)
 
 - **What was deferred:** Automated tests for the S5-07 date-range fix
@@ -62,7 +108,7 @@ create it early rather than tracking by memory").
   most naturally alongside `test_error_contracts.py` or a new
   `test_date_range.py` — each just needs a live TestClient call with a
   backwards or >365-day range and an assertion on the 400 body.
-- **Status (re-confirmed 2026-08-19, S5-08 sprint close):** OPEN — no
+- **Status (re-confirmed 2026-08-21, S6-08 sprint close):** OPEN — no
   target session assigned yet; belongs to the Tester's S5-04 follow-on
   work, same as the sync-lock entry below.
 
@@ -101,7 +147,7 @@ create it early rather than tracking by memory").
   also assert `sync_lock.get_holder()` is `None` after the run, not just
   that `job_store` reports `status: "failed"`. This is Tester-agent scope
   (S5-04's follow-on suite), not something to build here.
-- **Status (re-confirmed 2026-08-19, S5-08 sprint close):** OPEN — no
+- **Status (re-confirmed 2026-08-21, S6-08 sprint close):** OPEN — no
   target session assigned yet; belongs to the Tester's S5-04 follow-on
   work.
 
@@ -129,7 +175,7 @@ create it early rather than tracking by memory").
   banner, one asserting a stalled poll still times out on identical
   payloads, one asserting the api client surfaces an error message from
   either JSON shape.
-- **Status (re-confirmed 2026-08-19, S5-08 sprint close):** OPEN —
+- **Status (re-confirmed 2026-08-21, S6-08 sprint close):** OPEN —
   `kbc_analyzer/frontend/package.json` still has no `test` script and no
   vitest/jest dependency; nothing has changed since S5-04. Flagged to PM
   for a frontend-test-infrastructure ticket; no target sprint assigned yet.
@@ -153,10 +199,13 @@ create it early rather than tracking by memory").
   host (real bind-mount ownership, not synthesized 777) — create a file as
   root inside a container, confirm `appuser` genuinely cannot write it,
   confirm the app still runs correctly end-to-end as non-root.
-- **Status (re-confirmed 2026-08-19, S5-08 sprint close):** OPEN — closes
-  naturally at Sprint 6, when production deployment moves off Windows
-  Docker Desktop onto a real (Linux) host. Closure condition unchanged
-  from S4-09/S4-10; nothing about this host changed.
+- **Status (re-confirmed 2026-08-21, S6-08 sprint close):** OPEN — closure
+  condition corrected this pass: the earlier "closes at Sprint 6" text was
+  stale, written before the roadmap split Sprint 5 into two and pushed
+  public/production deployment to Sprint 7 ("Deployment & Public
+  Onboarding"). Closes naturally at Sprint 7, when deployment moves off
+  Windows Docker Desktop onto a real (Linux) host. Nothing about this
+  host itself changed.
 
 ---
 

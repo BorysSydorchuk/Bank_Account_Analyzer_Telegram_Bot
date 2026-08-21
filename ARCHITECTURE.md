@@ -23,6 +23,26 @@ replaced with stable section/symbol names throughout this file — line
 numbers had already gone stale twice during Sprint 4 and are no longer
 used as anchors here.
 
+**Sprint 6 close re-verification (2026-08-21, S6-08):** every claim
+re-checked against the running system, live, not recalled — non-root UIDs
+re-confirmed (`docker compose exec backend`/`celery_worker whoami` →
+`appuser`), the full public/protected route split live-curled end to end
+(`/health` 200, `google/login` 307, `logout` 204 with no cookie required;
+`categories`/`budgets`/`transactions`/`statistics`/`insights`/`jobs/{id}`/
+`settings` all 401 with no session cookie), bcrypt pin (`<4.1`) and all
+five rate-limit constants (`CHAT`/`SYNC`/`ANALYSIS` 20-or-10/minute,
+`LOGIN`/`REGISTER` 5/minute) confirmed against `rate_limit.py` and
+`requirements.txt` directly. A full browser regression pass ran as the
+real authenticated user against the real dataset (49 transactions):
+Dashboard, Transactions (list/search/filter), Chat (real streamed,
+correctly-scoped reply), and Settings (including the new S6-07
+`AccountSection` linking control) all rendered cleanly with zero console
+errors. Logout was deliberately not clicked live this pass — the only
+active session on this machine, with no way to re-authenticate from it
+in the moment — covered instead by the existing automated
+session-destruction tests. No drift found beyond what this file's own
+S6-07 entries already captured.
+
 ## Services & Ports
 
 | Service | Image/build | Port | Serves |

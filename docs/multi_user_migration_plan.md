@@ -9,6 +9,51 @@ is stated at the end of each section.
 No code changes were made producing this document — S5-01 is audit only,
 per its own acceptance criteria.
 
+**EXECUTED (2026-08-21, S6-08 sprint close).** All ten Ordering steps below
+ran, in the exact sequence specified, confirmed directly against the real
+migration files in `app/migrations/versions/` (not recalled from memory):
+step 0 (`docs/security`/S6-02 Step 0's vendor-doc check) → step 1
+(`1f7634448483_add_users_table`) → step 2
+(`7b2e4c9a1d05_seed_bootstrap_user`) → step 3
+(`c1a7f083e26b_add_nullable_user_id_columns`) → step 4
+(`4d6f8b217a93_backfill_user_id_from_bootstrap_user`) → step 5
+(`9e3c5a1f7d42_set_user_id_not_null`) → step 6
+(`5c9a2e6b8f14_scope_external_id_uniqueness_to_user` +
+`2a8d914f6c37_categories_composite_primary_key`, which also redefines both
+`transactions.category` and `budgets.category` as composite FKs, exactly as
+this plan's step 6 required) → step 7/8 (every `crud.py` function threading
+`user_id`, every router wired to `get_current_user`, S6-06) → step 9
+(`_provider_cache` keyed on `(user_id, provider_name)`, S6-02). The
+authorization-gap workstream (`GET /api/jobs/{job_id}`, `PATCH
+/api/transactions/{id}`, `job_store`'s unscoped keys) also closed, via
+S6-06, exactly as this plan's own "Separate workstream" section anticipated.
+
+**Two things changed from what this plan describes, real implementation
+detail this document didn't have:**
+1. **Step 10 (per-user bank session storage, OAuth-callback catcher
+   redesign) was deliberately NOT executed this sprint** — despite this
+   plan listing it under Sprint 6's Ordering section. S6-06's actual
+   acceptance criteria (agreed after this plan was written) accepted a
+   narrower interim fix instead: the single `eb_session.json` connection
+   stays tied to one named account (`ENABLE_BANKING_OWNER_EMAIL`),
+   enforced by `require_enable_banking_owner`, `403` for every other
+   authenticated user. True per-user bank session storage is now Sprint
+   7 scope (see ARCHITECTURE.md's "Enable Banking connection restricted
+   to one account" note). Not a gap in this plan's execution — a
+   deliberate scope call made after this plan shipped.
+2. **A new item this plan never anticipated:** S6-07's Security Auditor
+   pass found that Google OAuth account-linking (a mechanism this plan
+   doesn't mention at all — Google sign-in didn't exist yet at S5-01)
+   could be abused for account takeover via email-matching auto-link.
+   Closed same sprint (see ARCHITECTURE.md's Invariants entry) — outside
+   this document's original scope, which was schema/scoping only, not
+   OAuth-flow security.
+
+Everything else in this document — Tables, Constraints, Endpoints,
+Singletons, Files on disk — re-checked against current `app/models.py`,
+`app/routers/*.py`, and `app/crud.py`: unchanged and accurate, no further
+drift beyond what S5-08 had already found and closed.
+
 **Re-verified 2026-08-19 (S5-08 sprint close)** against everything S5-02,
 S5-05, and S5-07 changed after this plan was originally written. Three
 real gaps found and closed below (marked **[S5-08]**): S5-02's new
