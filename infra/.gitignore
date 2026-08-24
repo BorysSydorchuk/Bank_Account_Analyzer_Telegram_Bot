@@ -1,0 +1,12 @@
+# Secrets
+.env
+
+# Terraform local state and working files
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+crash.log
+crash.*.log

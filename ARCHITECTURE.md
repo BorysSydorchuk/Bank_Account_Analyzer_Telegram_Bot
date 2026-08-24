@@ -85,6 +85,91 @@ was silently dropped for it (Python's root-logger fallback only emits
 WARNING+). `celery_worker` never had this problem — its `--loglevel=info`
 CLI flag already configures its own root logger.
 
+## AWS Deployment Infrastructure
+
+**Foundation only — no application runs here yet.** The app itself still
+only runs via local Docker Compose (see Services & Ports above). This
+section describes the AWS account structure provisioned in S7-01, which
+later S7 tickets deploy the actual application onto.
+
+**IaC:** Terraform, root at `infra/` in the monorepo. State is remote (not
+local): an S3 backend bucket `kbc-analyzer-terraform-state-<account-id>`
+(versioned, AES256-encrypted, all public access blocked) with DynamoDB
+table `kbc-analyzer-terraform-lock` for state locking. The bucket and lock
+table themselves are created by a separate small config, `infra/bootstrap/`,
+which necessarily uses local state (it creates the backend the main config
+depends on — a chicken-and-egg the bootstrap config exists to solve).
+Credentials for `terraform`/`aws` commands are never committed — they live
+in `infra/.env` (gitignored) for local dev use only.
+
+**Region:** `eu-central-1` (Frankfurt) — chosen over `eu-west-1` for
+proximity to the target Belgian bank APIs and because GDPR data-residency
+is already on the Sprint 9 roadmap; keeping data in an EU region other
+than the account default was a deliberate choice, not AWS's default.
+
+**Compute model (final, after three rounds of revision — see
+`docs/tickets/S7-01-aws-foundation.md`):** unified ECS Fargate, one
+cluster, two services — a web service (FastAPI + frontend, behind an ALB,
+not yet created) and a worker service (Celery, no ALB — it has no HTTP
+listener to route to). App Runner was evaluated and rejected because its
+single-container HTTP-serving model doesn't cleanly host a non-HTTP
+background worker like Celery. Redis will be a self-hosted container in
+the same cluster, not ElastiCache — a deliberate cost saving at this
+traffic scale, not yet provisioned as of S7-01.
+
+**Network (provisioned, S7-01):**
+
+| Resource | Value |
+|---|---|
+| VPC CIDR | `10.0.0.0/16` |
+| Public subnets | 2, one per AZ (`10.0.0.0/24`, `10.0.1.0/24`) — host the ALB and the NAT Gateway |
+| Private subnets | 2, one per AZ (`10.0.10.0/24`, `10.0.11.0/24`) — will host both Fargate services, RDS, and the self-hosted Redis container |
+| NAT Gateway | **Single** (not one per AZ) — both private subnets route through it |
+| Internet Gateway | 1, attached to the VPC |
+
+The single NAT Gateway is a deliberate cost/availability tradeoff for a
+portfolio-scale solo project: if the AZ holding the NAT Gateway has an
+outage, the *other* AZ's private subnet loses outbound internet access
+too, even though that subnet itself stays healthy. This is intentional,
+not an oversight — see the NAT Instance follow-up entry in
+`docs/verification_debt.md` for the (deferred) cheaper alternative and its
+own tradeoffs.
+
+**IAM (provisioned, S7-01):** a dedicated deployment identity,
+`kbc-analyzer-deploy` (IAM user, path `/deploy/`), scoped today to ECR
+push/pull only against the two repos below — not broader, since nothing
+else exists yet for it to need access to. Permissions grow ticket-by-
+ticket as ECS/RDS/Secrets Manager resources are created, not granted
+upfront. **Note:** this account also has a pre-existing IAM user,
+`KBC_analyser_deploy` (different casing, created outside this project's
+Terraform), holding `AdministratorAccess`. That user was used to bootstrap
+S7-01 (create the budget, state backend, and the new scoped deploy user)
+but is not managed by this project's Terraform and is not the identity
+CI/deploy processes should use going forward — flagged for Borys to
+decide whether to retire it.
+
+**Container registry (provisioned, S7-01):** two ECR repositories,
+`kbc-analyzer-web` and `kbc-analyzer-worker`, both with
+`image_tag_mutability = IMMUTABLE` (a tag, once pushed, can't be
+overwritten — enforces the "tag sensibly, not just `latest`" discipline
+S7-02 asks for at the infrastructure level) and scan-on-push enabled.
+
+**Cost guardrail:** an AWS Budget (`kbc-analyzer-monthly-budget`), COST
+type, $50/month limit, notifying `boris.sydorchuk@gmail.com` at 50/80/100%
+of actual spend. Created via the AWS CLI directly (not Terraform) as the
+literal first resource in the account, per S7-01's Step 0, then imported
+into Terraform state so it's IaC-managed going forward. **Denominated in
+USD, not EUR** — AWS Budgets' `LimitUnit` was set to `USD` as the most
+broadly-supported unit; if this account's billing currency turns out to be
+EUR, the effective threshold could drift from a true €50 by the prevailing
+exchange rate. Unconfirmed — flagged for Borys to verify against the
+account's actual billing currency.
+
+**S3 Gateway VPC Endpoint:** not created. The ticket's condition for
+adding one ("if the app uses S3 for anything") checked negative — no
+`boto3`/S3 references exist anywhere in `kbc_analyzer/` as of S7-01.
+Revisit if S3 usage is introduced later.
+
 ## URLs & Redirects
 
 | URL | Value | Served by |

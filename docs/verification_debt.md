@@ -209,6 +209,34 @@ create it early rather than tracking by memory").
 
 ---
 
+### Single NAT Gateway — NAT Instance swap deferred (S7-01)
+
+- **What was deferred:** S7-01's final architecture uses a managed AWS NAT
+  Gateway (~$38/mo in eu-central-1: $0.052/hr + $0.052/GB processed) rather
+  than a self-managed NAT Instance (~$3-8/mo on a t4g.nano/micro), even
+  though the NAT Instance is cheaper and was seriously considered.
+- **Why:** A NAT Instance has no AWS-provided failover — a single EC2
+  instance is a manual-recovery single point of failure for all outbound
+  traffic from the private subnets (RDS updates, ECR pulls, external API
+  calls). For an app about to hold real bank data, on a deployment that
+  hasn't run in production at all yet, that risk isn't worth the ~$30-35/mo
+  saving until the deployment has proven itself stable. This was an
+  explicit ticket instruction (S7-01), not an oversight — see
+  `docs/tickets/S7-01-aws-foundation.md`.
+- **What would close it:** Once the production deployment (S7-04 onward)
+  has run stable for a sustained period (proposed: 4 consecutive weeks with
+  no NAT-related incident), swap `aws_nat_gateway.single` in
+  `infra/vpc.tf` for a self-managed NAT instance (EC2 t4g.nano/micro with
+  IP forwarding + a route table update), and document the swap's own
+  downtime/rollback plan before doing it on a live system.
+- **Status (opened 2026-08-24, S7-01):** OPEN — closure condition is time-
+  and stability-based, not a fixed sprint. Earliest realistic trigger is
+  Sprint 8 or later, once S7's deployment has been live for a month.
+  Revisit at the next sprint close even if the 4-week bar isn't met yet, to
+  confirm the condition still makes sense.
+
+---
+
 ## CLOSED (recent)
 
 ### Borys's real-account set-password + /login /register real-browser render (S6-04, closed 2026-08-21)
