@@ -165,6 +165,39 @@ decide whether to retire it.
 overwritten — enforces the "tag sensibly, not just `latest`" discipline
 S7-02 asks for at the infrastructure level) and scan-on-push enabled.
 
+**Image build (S7-02):** one Dockerfile, `kbc_analyzer/Dockerfile.prod`
+(build context `kbc_analyzer/`, not `backend/` alone — the web target
+needs `frontend/` too), multi-stage with two build targets:
+
+- `worker` — Celery only. `docker build -f Dockerfile.prod --target worker`.
+- `web` — FastAPI + the compiled frontend (Vite production build,
+  `npm run build`), served by FastAPI itself via a `StaticFiles` mount
+  and an SPA-fallback catch-all route in `app/main.py` (only active when
+  a `static/` directory exists — absent in local dev, where the frontend
+  still runs via its own Vite dev server, so dev behavior is unchanged).
+  `docker build -f Dockerfile.prod --target web`.
+
+Both targets share a `python-deps` stage (dependencies installed once
+into a venv, so both images are guaranteed to run identical dependency
+versions) and a `runtime-base` stage (non-root `appuser`, S4-09's
+convention carried into both — verified live via `docker run ... whoami`
+on both images, not just asserted from the Dockerfile). `runtime-base`
+copies only `app/`, `kbc_analyzer/`, and `alembic.ini` from `backend/` —
+an explicit allowlist, not `COPY backend/ .` — because `backend/` also
+holds `eb_session.json`, `private.pem` (Enable Banking's real private
+key), and `certs/` (a TLS key), none of which should ever be able to
+land in an image pushed to a registry. `kbc_analyzer/.dockerignore`
+excludes them too, but the allowlist doesn't depend on that staying
+correct. Verified empirically: neither built image contains any of
+those files.
+
+Images are tagged `<git-short-sha>` (immutable repos reject a repeat
+tag outright, which is the point — see S7-02's ticket file for the real
+`docker build`/`push` output and `aws ecr describe-images` evidence).
+No CI pipeline yet — build/push is a documented manual sequence; S7-02's
+ticket file flags GitHub Actions as a worthwhile follow-up, not built
+now.
+
 **Cost guardrail:** an AWS Budget (`kbc-analyzer-monthly-budget`), COST
 type, **$150/month limit** (raised from the initial $50 once the full
 target architecture's real projected cost — see S7-01's ticket file

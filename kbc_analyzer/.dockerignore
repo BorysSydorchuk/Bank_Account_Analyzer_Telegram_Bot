@@ -1,0 +1,28 @@
+# Build context for infra/Dockerfile.prod (context root: kbc_analyzer/)
+
+# Secrets & credentials — never let these near a build context that
+# produces a registry-pushed image, regardless of what the Dockerfile
+# explicitly COPYs.
+backend/.env
+backend/eb_session.json
+backend/private.pem
+backend/certs/
+frontend/.env
+
+# Dev-only artifacts
+backend/kbc_transactions.db
+backend/.coverage
+backend/.pytest_cache/
+backend/tests/
+backend/scripts/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.egg-info
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# VCS / IDE
+.git
+.idea

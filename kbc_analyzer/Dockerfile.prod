@@ -1,0 +1,69 @@
+# S7-02: production images for both Fargate services (S7-01's unified
+# compute decision). Build context is kbc_analyzer/ (this file's own
+# directory), not backend/ or frontend/ alone — the `web` target needs
+# both. Build with:
+#   docker build -f Dockerfile.prod --target web    -t kbc-analyzer-web    .
+#   docker build -f Dockerfile.prod --target worker -t kbc-analyzer-worker .
+#
+# One Dockerfile, one shared python-deps/runtime-base per S7-02's
+# shared-base decision (see docs/tickets/S7-02-...): web and worker run
+# identical dependency versions, verified against the same install, not
+# two Dockerfiles that can silently drift apart. They diverge only in
+# the `web`/`worker` final stages below, where `web` alone needs the
+# compiled frontend baked in.
+
+# ---- Stage: frontend production build (only feeds the `web` target) ----
+FROM node:22-alpine AS frontend-build
+WORKDIR /fe
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json ./
+COPY frontend/vite.config.ts frontend/index.html frontend/components.json ./
+COPY frontend/public ./public
+COPY frontend/src ./src
+RUN npm run build
+
+# ---- Stage: Python dependencies, built once in a venv so build tools
+# (build-essential, libpq-dev — needed to compile cryptography/psycopg
+# wheels) never end up in the final image ----
+FROM python:3.12-slim AS python-deps
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY backend/requirements.txt .
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ---- Stage: shared runtime base for both web and worker ----
+FROM python:3.12-slim AS runtime-base
+WORKDIR /app
+COPY --from=python-deps /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Explicit allowlist, not `COPY backend/ .` — backend/ also holds
+# eb_session.json, private.pem, and certs/ (real Enable Banking secret
+# material and a TLS key), which must never be able to land in an image
+# that gets pushed to a registry. .dockerignore already excludes them,
+# but this doesn't rely on that being kept correct forever.
+COPY backend/app ./app
+COPY backend/kbc_analyzer ./kbc_analyzer
+COPY backend/alembic.ini .
+
+# S4-09 Item 1's non-root user, carried into both production targets —
+# same reasoning as the dev Dockerfile: neither service should run as
+# root in a container that reaches real bank data.
+RUN addgroup --system appgroup && \
+    adduser --system --ingroup appgroup appuser
+USER appuser
+
+# ---- Target: worker (Celery — no HTTP, no frontend) ----
+FROM runtime-base AS worker
+CMD ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
+
+# ---- Target: web (FastAPI + compiled frontend, served by the backend) ----
+FROM runtime-base AS web
+COPY --from=frontend-build --chown=appuser:appgroup /fe/dist ./static
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

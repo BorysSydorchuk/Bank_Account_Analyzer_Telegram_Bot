@@ -6,9 +6,12 @@ S1-03 adds /api/statistics.
 import logging
 import os
 
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -131,3 +134,22 @@ def health() -> dict:
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
     return {"status": "ok"}
+
+
+# S7-02: serves the compiled frontend from the `web` production image.
+# `static/` only exists there — Dockerfile.prod's `web` target copies the
+# Vite build output in; local dev runs the frontend via its own Vite dev
+# server (docker-compose.yml's `frontend` service) instead, so this
+# directory is absent and the whole block below is skipped, unchanged
+# from before S7-02.
+_static_dir = Path(__file__).resolve().parent.parent / "static"
+if _static_dir.is_dir():
+    app.mount("/assets", StaticFiles(directory=_static_dir / "assets"), name="frontend-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str) -> FileResponse:
+        """Serve the SPA's static files, falling back to index.html for client-side routes."""
+        candidate = _static_dir / full_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_static_dir / "index.html")
