@@ -57,3 +57,12 @@ output "migration_runner_task_definition_arn" {
 output "app_security_group_id" {
   value = aws_security_group.app.id
 }
+
+output "mymble_be_nameservers" {
+  description = "Give these to Borys to configure as mymble.be's NS records at the external registrar"
+  value       = aws_route53_zone.mymble.name_servers
+}
+
+output "alb_dns_name" {
+  value = aws_lb.main.dns_name
+}

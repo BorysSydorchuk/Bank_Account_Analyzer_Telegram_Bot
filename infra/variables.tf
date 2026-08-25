@@ -32,3 +32,18 @@ variable "migration_runner_image_tag" {
   type        = string
   default     = "c9e7152"
 }
+
+variable "google_client_id" {
+  description = "Google OAuth client ID (public identifier, not a secret)"
+  type        = string
+}
+
+variable "enablebanking_app_id" {
+  description = "Enable Banking application ID (public identifier, not a secret)"
+  type        = string
+}
+
+variable "enable_banking_owner_email" {
+  description = "The single real account the app's Enable Banking connection belongs to (S6-06)"
+  type        = string
+}

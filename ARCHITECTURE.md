@@ -252,6 +252,79 @@ estimate, which didn't assume Free Tier eligibility. Not re-priced here —
 flagged for whoever next reviews the cost picture (S7-10 sprint close is
 the natural point).
 
+**Web/worker ECS services & ALB (provisioned, S7-04 — product renamed
+"Mymble," domain `mymble.be`):** the app's actual compute finally exists.
+`kbc-analyzer-web` and `kbc-analyzer-worker` ECS services (Fargate, one
+task each, private subnets, the `app` security group), running the
+S7-02 images. Both confirmed live: `GET /health` through the real ALB
+returns `{"status":"ok"}` (a genuine RDS connection via Secrets
+Manager, not a stub), target group health `healthy`, worker service
+`running`.
+
+| Resource | Identifier |
+|---|---|
+| ALB | `kbc-analyzer-alb`, DNS `kbc-analyzer-alb-537799089.eu-central-1.elb.amazonaws.com` |
+| ALB security group | `sg-0bd8965cccddf22bc` — the **one** legitimate `0.0.0.0/0` rule in this architecture (80/443 inbound); everything else stays locked to the `app` SG |
+| Web target group | `kbc-analyzer-web`, health check `GET /health`, matcher `200` only (a 503 correctly marks the target unhealthy, same as any other outage) |
+| Route 53 zone | `mymble.be` (`Z083187235H4ID5UIOWLI`) — **not yet delegated**; registered externally, needs NS delegation at the registrar (Borys's action, see below) |
+
+**Secrets (Secrets Manager, created directly via CLI — values never
+touch Terraform state):** `kbc-analyzer/settings-secret`,
+`kbc-analyzer/google-client-secret`, `kbc-analyzer/eb-private-key`,
+`kbc-analyzer/database-url` (assembled from the RDS-managed secret).
+Injected into both task definitions via the container `secrets` field,
+resolved by the execution role before the container starts. The Enable
+Banking private key (`private.pem`, deliberately excluded from the
+S7-02 image) is written to `/tmp/private.pem` by a command-override
+script at container start, matching `ENABLEBANKING_PRIVATE_KEY_PATH` —
+no image rebuild needed to supply it.
+
+**New production Enable Banking callback route
+(`GET /api/auth/enable-banking/callback`, `app/routers/auth.py`):**
+replaces the mkcert-based local catcher server's role for production.
+That server (`app/eb_callback_server.py`) only ever existed because
+local dev has no publicly-reachable HTTPS endpoint for Enable Banking's
+redirect to land on — it ran its own temporary HTTPS listener on a
+separate port. A real domain behind an ALB doesn't need that: this new
+route *is* the reachable endpoint. **Not yet retired** —
+`eb_callback_server.py`/`app/tasks/auth.py` are untouched, still used by
+local dev, per this project's standing practice of not deleting the old
+path until the new one is proven working end-to-end (blocked on the
+domain delegation below).
+
+**Blocked on Borys — three things only he can do:**
+1. **DNS delegation:** `mymble.be` is registered externally. Configure
+   these as its NS records at that registrar:
+   `ns-1030.awsdns-00.org`, `ns-1821.awsdns-35.co.uk`,
+   `ns-409.awsdns-51.com`, `ns-935.awsdns-52.net`. Nothing past this
+   point (ACM cert, real HTTPS, mkcert retirement) can proceed until
+   delegation is live.
+2. **Google Cloud Console:** add `https://mymble.be/api/auth/google/callback`
+   as an authorized redirect URI on the OAuth client.
+3. **Enable Banking developer portal:** register
+   `https://mymble.be/api/auth/enable-banking/callback` as a redirect
+   URI (the code's own comment confirms the existing
+   `https://localhost:3001/callback` was pre-registered there — this is
+   the same kind of portal action, not an API call).
+
+Real live Enable Banking and Google OAuth round-trips both also need
+Borys personally to complete an interactive login (bank credentials/2FA,
+Google account picker) — not something automatable regardless of
+infrastructure state.
+
+**Branding survey (KBC Personal Finance Analyzer → Mymble), enumerated
+per the ticket's ask, not all fixed:** `frontend/index.html`'s
+`<title>` fixed directly (trivial, clearly user-facing) — not yet live
+in the running image, needs a rebuild/redeploy. Still referencing the
+old name: `ARCHITECTURE.md` (this file's own title/header),
+`CLAUDE.md`, `REVIEWER.md`, `TESTER.md`,
+`docs/multi_user_migration_plan.md`, and several `docs/tickets/*.md`
+files (S4-03, S4-09, S4-10, S5-00, S6-00, S6-01, S7-00). Ticket files
+are historical record, not live-fixed. `ARCHITECTURE.md`/`CLAUDE.md`/
+`REVIEWER.md`/`TESTER.md` are a real, larger rename worth a deliberate
+pass, not scattered edits mid-ticket — flagged for Borys to decide
+scope/timing.
+
 **Cost guardrail:** an AWS Budget (`kbc-analyzer-monthly-budget`), COST
 type, **$150/month limit** (raised from the initial $50 once the full
 target architecture's real projected cost — see S7-01's ticket file

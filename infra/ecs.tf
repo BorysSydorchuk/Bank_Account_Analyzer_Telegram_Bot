@@ -52,6 +52,50 @@ resource "aws_iam_role_policy" "ecs_task_execution_read_db_secret" {
   })
 }
 
+# S7-04: the web/worker task definitions inject SETTINGS_SECRET,
+# GOOGLE_CLIENT_SECRET, the Enable Banking private key content, and a
+# pre-assembled DATABASE_URL via the container `secrets` field — same
+# execution-role mechanism as the RDS secret above, since ECS resolves
+# `secrets` before the container starts, under the execution role, not
+# the task role. These four were created directly via `aws
+# secretsmanager create-secret` (see docs/tickets/S7-04-...), not
+# Terraform — their values never touch Terraform state.
+data "aws_secretsmanager_secret" "settings_secret" {
+  name = "kbc-analyzer/settings-secret"
+}
+
+data "aws_secretsmanager_secret" "google_client_secret" {
+  name = "kbc-analyzer/google-client-secret"
+}
+
+data "aws_secretsmanager_secret" "eb_private_key" {
+  name = "kbc-analyzer/eb-private-key"
+}
+
+data "aws_secretsmanager_secret" "database_url" {
+  name = "kbc-analyzer/database-url"
+}
+
+resource "aws_iam_role_policy" "ecs_task_execution_read_app_secrets" {
+  name = "${var.project_name}-execution-read-app-secrets"
+  role = aws_iam_role.ecs_task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "ReadAppSecrets"
+      Effect = "Allow"
+      Action = "secretsmanager:GetSecretValue"
+      Resource = [
+        data.aws_secretsmanager_secret.settings_secret.arn,
+        data.aws_secretsmanager_secret.google_client_secret.arn,
+        data.aws_secretsmanager_secret.eb_private_key.arn,
+        data.aws_secretsmanager_secret.database_url.arn,
+      ]
+    }]
+  })
+}
+
 # Assumed by application code running *inside* a task — scoped to what
 # S7-03's migration-runner task actually needs: ECS Exec's SSM data
 # channel (so `aws ecs execute-command` can open a shell), and read-only
