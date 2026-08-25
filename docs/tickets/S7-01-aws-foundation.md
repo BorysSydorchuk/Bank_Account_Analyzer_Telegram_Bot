@@ -198,3 +198,131 @@ at any time and isn't itself a project artifact worth versioning.
 
 This replaces the bare "$122/month" total that previously existed only
 as prose in chat, per Reviewer's finding.
+
+## AMENDMENT (2026-08-25) — Second Reviewer follow-up: raw command output, missing WHEN DONE answer
+
+Second Reviewer pass found the prior amendment's evidence was still
+curated/summarized (a markdown table I wrote, not the actual command
+output), and that WHEN DONE question 4 (worker/ALB) had never been
+answered in this file at all — only narrated in chat. Fixing all four
+WHEN DONE items with real, raw evidence below.
+
+### 1. `terraform output` (raw, run 2026-08-25 against the real applied `infra/` state)
+
+```
+$ terraform output
+budget_arn = "arn:aws:budgets::904854373619:budget/kbc-analyzer-monthly-budget"
+deploy_iam_user_arn = "arn:aws:iam::904854373619:user/deploy/kbc-analyzer-deploy"
+ecr_web_repository_url = "904854373619.dkr.ecr.eu-central-1.amazonaws.com/kbc-analyzer-web"
+ecr_worker_repository_url = "904854373619.dkr.ecr.eu-central-1.amazonaws.com/kbc-analyzer-worker"
+nat_gateway_id = "nat-09837d89472437832"
+private_subnet_ids = [
+  "subnet-0f95c89b63cf3becd",
+  "subnet-03bff6a6b9d70b530",
+]
+public_subnet_ids = [
+  "subnet-0e75497bcd1a73a6f",
+  "subnet-00a04d56c7b5ef82e",
+]
+vpc_id = "vpc-0ff5461f79e531821"
+```
+
+`terraform show` (excerpted to the `id`/`arn` fields per resource, full
+output is >600 lines) confirms the same IDs are actually attached to
+real managed resources in state, not just declared as outputs:
+
+```
+resource "aws_budgets_budget" "monthly_cost" {
+    arn = "arn:aws:budgets::904854373619:budget/kbc-analyzer-monthly-budget"
+    id  = "904854373619:kbc-analyzer-monthly-budget"
+resource "aws_ecr_repository" "web" {
+    arn = "arn:aws:ecr:eu-central-1:904854373619:repository/kbc-analyzer-web"
+    id  = "kbc-analyzer-web"
+resource "aws_ecr_repository" "worker" {
+    arn = "arn:aws:ecr:eu-central-1:904854373619:repository/kbc-analyzer-worker"
+    id  = "kbc-analyzer-worker"
+resource "aws_iam_user" "deploy" {
+    arn = "arn:aws:iam::904854373619:user/deploy/kbc-analyzer-deploy"
+    id  = "kbc-analyzer-deploy"
+resource "aws_internet_gateway" "main" {
+    arn = "arn:aws:ec2:eu-central-1:904854373619:internet-gateway/igw-0942286b4d3257983"
+    id  = "igw-0942286b4d3257983"
+    vpc_id = "vpc-0ff5461f79e531821"
+resource "aws_nat_gateway" "single" {
+    id        = "nat-09837d89472437832"
+    subnet_id = "subnet-0e75497bcd1a73a6f"
+resource "aws_route_table" "private" {
+    id = "rtb-03bb1bab783a3d17e"
+    route { cidr_block = "0.0.0.0/0", nat_gateway_id = "nat-09837d89472437832" }
+resource "aws_route_table" "public" {
+    id = "rtb-0bc37987b57e60606"
+    route { cidr_block = "0.0.0.0/0", gateway_id = "igw-0942286b4d3257983" }
+```
+
+The route table detail matters: `private` routes `0.0.0.0/0` through the
+NAT Gateway, `public` routes it through the Internet Gateway — the
+architecture is wired the way it's documented to be, not just present.
+
+### 2. `aws budgets describe-budget` and `describe-notifications-for-budget` (raw, run 2026-08-25)
+
+```
+$ aws budgets describe-budget --account-id 904854373619 \
+    --budget-name kbc-analyzer-monthly-budget --region us-east-1
+{
+    "Budget": {
+        "BudgetName": "kbc-analyzer-monthly-budget",
+        "BudgetLimit": { "Amount": "150.0", "Unit": "USD" },
+        "TimeUnit": "MONTHLY",
+        "CalculatedSpend": { "ActualSpend": { "Amount": "0.0", "Unit": "USD" } },
+        "BudgetType": "COST",
+        "LastUpdatedTime": 1787668957.846,
+        "HealthStatus": { "Status": "HEALTHY", "LastUpdatedTime": 1787668957.528 }
+    }
+}
+
+$ aws budgets describe-notifications-for-budget --account-id 904854373619 \
+    --budget-name kbc-analyzer-monthly-budget --region us-east-1
+{
+    "Notifications": [
+        { "NotificationType": "ACTUAL", "ComparisonOperator": "GREATER_THAN", "Threshold": 100.0, "NotificationState": "OK" },
+        { "NotificationType": "ACTUAL", "ComparisonOperator": "GREATER_THAN", "Threshold": 50.0,  "NotificationState": "OK" },
+        { "NotificationType": "ACTUAL", "ComparisonOperator": "GREATER_THAN", "Threshold": 80.0,  "NotificationState": "OK" }
+    ]
+}
+```
+
+$150/mo, HEALTHY, all three thresholds (50/80/100%) present with
+`NotificationState: OK` (none tripped — actual spend is $0.00, expected
+since no Fargate/RDS/ALB is deployed yet).
+
+### 3. Itemized cost table
+
+Already committed for real in this file's first Reviewer-follow-up
+amendment above (2026-08-25) — see "Itemized monthly cost estimate (real
+line items, not a bare total)". Independently recomputed and confirmed
+correct by the first Reviewer pass (VERDICT: PASS on this specific
+criterion, second Reviewer pass raised no new objection to the table
+itself — only to items 1, 2, and 4 below). Not duplicated here to avoid
+two competing copies of the same table drifting out of sync; that
+section is the single source of truth for the cost breakdown.
+
+### 4. Why the worker service doesn't need an ALB, and what breaks if one's attached anyway
+
+An ALB is a Layer 7 HTTP router: it needs a listener (port + protocol)
+and a target group it health-checks over HTTP(S). Celery has no HTTP
+server inside it — it's a process that polls Redis for jobs and executes
+them. There is no request to route *to* and no `/health` endpoint to
+poll *for*.
+
+If an ALB were attached to the worker service anyway: its health checks
+would get connection-refused or timeouts against the worker's container
+port (nothing is listening there), the target would sit permanently
+"unhealthy," and the ALB would correctly — but uselessly — stop routing
+to it, while still accruing its own ~$20-25/month (base hourly rate plus
+LCU usage, see the cost table) for a listener that never receives real
+traffic to route in the first place, since nothing external is meant to
+reach Celery directly.
+
+This is why S7-01's architecture has the worker service with no ALB at
+all, not an ALB with a permanently-failing health check — the omission
+is deliberate, not an oversight.

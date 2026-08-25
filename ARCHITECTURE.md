@@ -117,9 +117,13 @@ background worker like Celery. Redis will be a self-hosted container in
 the same cluster, not ElastiCache — a deliberate cost saving at this
 traffic scale, not yet provisioned as of S7-01.
 
-**Network (provisioned, S7-01 — resource IDs live-verified 2026-08-25,
-full detail and independent live-AWS cross-check in
-`docs/tickets/S7-01-aws-foundation.md`'s Reviewer-follow-up amendment):**
+**Network (provisioned, S7-01 — resource IDs live-verified 2026-08-25.
+Raw `terraform output`/`terraform show` and raw `aws budgets
+describe-budget`/`describe-notifications-for-budget` output, plus
+independent live-AWS cross-check, are in
+`docs/tickets/S7-01-aws-foundation.md`'s second Reviewer-follow-up
+amendment — not duplicated here to avoid two copies of the same
+evidence drifting apart):**
 
 | Resource | ID | Value |
 |---|---|---|
