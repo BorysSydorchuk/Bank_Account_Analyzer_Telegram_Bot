@@ -11,7 +11,7 @@ eb_session.json connection belongs to exactly one real account
 (ENABLE_BANKING_OWNER_EMAIL) until Sprint 7's per-user bank session storage.
 """
 from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..auth.dependency import require_enable_banking_owner
 from ..eb_service import EnableBankingError, EnableBankingService
@@ -73,3 +73,122 @@ def callback(
                 )
             },
         )
+
+
+_CONFIRMATION_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mymble</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #F8FAFC;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #1E293B;
+  }}
+  .card {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 16px;
+    padding: 48px 40px;
+  }}
+  .wordmark {{
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #2563EB;
+    margin-bottom: 8px;
+  }}
+  .icon {{
+    width: 64px;
+    height: 64px;
+    border-radius: 999px;
+    background: {icon_bg};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }}
+  h1 {{ font-size: 22px; font-weight: 600; color: #0F172A; }}
+  p {{ font-size: 15px; color: #64748B; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="wordmark">Mymble</div>
+    <div class="icon">{icon_svg}</div>
+    <h1>{heading}</h1>
+    <p>{message}</p>
+  </div>
+</body>
+</html>"""
+
+_SUCCESS_ICON = (
+    '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#16A34A" '
+    'stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M20 6L9 17l-5-5"/></svg>'
+)
+_ERROR_ICON = (
+    '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#DC2626" '
+    'stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
+    '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+)
+
+
+@router.get("/callback", response_class=HTMLResponse)
+def callback_redirect(
+    code: str | None = None,
+    state: str | None = None,
+    eb: EnableBankingService = Depends(get_eb_service),
+    current_user: User = Depends(require_enable_banking_owner),
+) -> HTMLResponse:
+    """S7-04: the real production redirect target — Enable Banking's own
+    browser-redirect GET request lands here directly, over the app's real
+    domain. Replaces the mkcert-based local catcher server
+    (`app/eb_callback_server.py`), which only ever worked because local dev
+    could run its own temporary HTTPS listener on a port the bank's
+    redirect could reach; a real domain behind an ALB doesn't need that —
+    this route IS the reachable HTTPS endpoint, no separate server/process
+    required. `code`/`state` arrive as query params on the redirect, not a
+    JSON body (contrast the POST /callback fallback above, which the
+    frontend calls with a manually-pasted code).
+    """
+    if not code:
+        return HTMLResponse(
+            _CONFIRMATION_PAGE.format(
+                icon_bg="#FEE2E2",
+                icon_svg=_ERROR_ICON,
+                heading="Bank connection failed",
+                message="No authorization code was received. Close this tab and click Reconnect to try again.",
+            ),
+            status_code=400,
+        )
+    try:
+        eb.complete_reauthorization(code)
+    except EnableBankingError:
+        return HTMLResponse(
+            _CONFIRMATION_PAGE.format(
+                icon_bg="#FEE2E2",
+                icon_svg=_ERROR_ICON,
+                heading="Bank connection failed",
+                message="That authorization code wasn't accepted — it may have expired or already been used.",
+            ),
+            status_code=400,
+        )
+    return HTMLResponse(
+        _CONFIRMATION_PAGE.format(
+            icon_bg="#DCFCE7",
+            icon_svg=_SUCCESS_ICON,
+            heading="Bank connected successfully",
+            message="You can close this tab and return to the app.",
+        )
+    )
