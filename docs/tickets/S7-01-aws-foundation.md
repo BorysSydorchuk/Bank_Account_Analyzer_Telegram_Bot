@@ -1,4 +1,4 @@
-Status: delivered
+Status: confirmed
 
 ================================================================
 TICKET S7-01 — AWS Foundation, Budget Guardrails & Architecture
@@ -91,3 +91,36 @@ WHEN DONE:
 - Explain: why does the worker service not need an ALB, and
   what would go wrong if one were attached to it anyway?
 - Do not start S7-02 until confirmed
+
+## AMENDMENT (2026-08-25)
+
+Borys confirmed S7-01 delivery with three follow-up actions before S7-02
+begins:
+
+1. **Raise the budget alert to $150/month, same 50/80/100% thresholds.**
+   The ~$122/month full-architecture estimate is accepted as the real
+   cost of a deliberately-chosen architecture (unified Fargate + single
+   NAT Gateway + ALB + RDS), not something to redesign around.
+   Done — `infra/variables.tf`'s `budget_limit_usd` default raised
+   50 → 150. By the time this was applied, the live AWS budget was
+   already showing $150 (changed outside this session, presumably by
+   Borys directly), so `terraform plan` found no drift — reconciled via
+   `terraform apply -refresh-only` to persist that into remote state.
+   Notification thresholds remain 50/80/100% (percentage-based, so they
+   now trigger at $75/$120/$150) — confirmed via
+   `aws budgets describe-notifications-for-budget`, all three
+   `NotificationState: OK`.
+2. **Pre-existing admin IAM user (`KBC_analyser_deploy`, `AdministratorAccess`)
+   — Borys will personally check and decide its fate.** No action taken
+   by Codee; left exactly as found.
+3. **Verify AWS billing currency; recreate the budget in the correct
+   currency if not USD.** Verified via AWS's own documentation (not
+   assumed): AWS Budgets, Cost Explorer, and the Cost & Usage Report
+   always track internally in USD, regardless of what currency an
+   account is actually invoiced in — a structural property of those
+   services, not a per-account configuration. No currency mismatch risk
+   exists; no recreation needed. `ARCHITECTURE.md`'s cost-guardrail entry
+   updated to state this as verified fact rather than an open flag.
+
+Actions (1) and (3) are complete. Action (2) is intentionally left to
+Borys. Proceeding to S7-02 per his instruction.

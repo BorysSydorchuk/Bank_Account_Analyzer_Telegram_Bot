@@ -155,15 +155,20 @@ overwritten — enforces the "tag sensibly, not just `latest`" discipline
 S7-02 asks for at the infrastructure level) and scan-on-push enabled.
 
 **Cost guardrail:** an AWS Budget (`kbc-analyzer-monthly-budget`), COST
-type, $50/month limit, notifying `boris.sydorchuk@gmail.com` at 50/80/100%
-of actual spend. Created via the AWS CLI directly (not Terraform) as the
-literal first resource in the account, per S7-01's Step 0, then imported
-into Terraform state so it's IaC-managed going forward. **Denominated in
-USD, not EUR** — AWS Budgets' `LimitUnit` was set to `USD` as the most
-broadly-supported unit; if this account's billing currency turns out to be
-EUR, the effective threshold could drift from a true €50 by the prevailing
-exchange rate. Unconfirmed — flagged for Borys to verify against the
-account's actual billing currency.
+type, **$150/month limit** (raised from the initial $50 once the full
+target architecture's real projected cost — see S7-01's ticket file
+amendment — was priced out and accepted as the real cost of a
+deliberately-chosen architecture, not something to redesign around),
+notifying `boris.sydorchuk@gmail.com` at 50/80/100% of actual spend
+(now $75/$120/$150). Created via the AWS CLI directly (not Terraform) as
+the literal first resource in the account, per S7-01's Step 0, then
+imported into Terraform state so it's IaC-managed going forward.
+**Denominated in USD, verified correct:** AWS Budgets, Cost Explorer, and
+the Cost & Usage Report always track and display in USD internally,
+regardless of what currency an account is actually invoiced in — this is
+a structural property of those AWS services, not a configuration choice,
+so no currency mismatch risk exists here even if this account's invoices
+are settled in EUR.
 
 **S3 Gateway VPC Endpoint:** not created. The ticket's condition for
 adding one ("if the app uses S3 for anything") checked negative — no

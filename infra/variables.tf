@@ -18,7 +18,7 @@ variable "budget_notification_email" {
 variable "budget_limit_usd" {
   description = "Monthly account cost budget limit, in USD"
   type        = number
-  default     = 50
+  default     = 150
 }
 
 variable "vpc_cidr" {
