@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 
 ================================================================
 TICKET S7-02 — Containerize for Production & Push to ECR
@@ -188,3 +188,51 @@ first time.
 Pushing to ECR next; real `aws ecr describe-images` evidence to follow
 in this file once pushed, tagged with this delivery's real git SHA
 rather than a placeholder.
+
+### Pushed to ECR — real `aws ecr describe-images` output (2026-08-25)
+
+Tagged and pushed with this delivery's actual git SHA (`c9e7152`, the
+commit containing this ticket's code), not a placeholder:
+
+```
+$ docker tag kbc-analyzer-web:test    904854373619.dkr.ecr.eu-central-1.amazonaws.com/kbc-analyzer-web:c9e7152
+$ docker tag kbc-analyzer-worker:test 904854373619.dkr.ecr.eu-central-1.amazonaws.com/kbc-analyzer-worker:c9e7152
+$ docker push .../kbc-analyzer-web:c9e7152
+c9e7152: digest: sha256:b6786213db4777411991ab5932c6f701794c57d0cca912a0d00f6b4b7dc3b988 size: 856
+$ docker push .../kbc-analyzer-worker:c9e7152
+c9e7152: digest: sha256:dee89756c2dc3604ebfaf6b87df57e8ab18f2cf90ef3e0dc32d7bb6da4a705bb size: 856
+
+$ aws ecr describe-images --repository-name kbc-analyzer-web
+{
+    "imageDetails": [
+        {
+            "repositoryName": "kbc-analyzer-web",
+            "imageDigest": "sha256:b6786213db4777411991ab5932c6f701794c57d0cca912a0d00f6b4b7dc3b988",
+            "imageTags": ["c9e7152"],
+            "imageSizeInBytes": 100069111,
+            "imagePushedAt": 1787672268.271,
+            "imageStatus": "ACTIVE"
+        }
+        // + 2 untagged attestation/manifest-index sub-artifacts BuildKit
+        //   pushes alongside every image — expected, not a finding.
+    ]
+}
+
+$ aws ecr describe-images --repository-name kbc-analyzer-worker
+{
+    "imageDetails": [
+        {
+            "repositoryName": "kbc-analyzer-worker",
+            "imageDigest": "sha256:dee89756c2dc3604ebfaf6b87df57e8ab18f2cf90ef3e0dc32d7bb6da4a705bb",
+            "imageTags": ["c9e7152"],
+            "imageSizeInBytes": 99743219,
+            "imagePushedAt": 1787672279.578,
+            "imageStatus": "ACTIVE"
+        }
+        // same, + 2 untagged sub-artifacts
+    ]
+}
+```
+
+Both images ~100 MB, `ACTIVE`, tagged `c9e7152` — real, in ECR, tied to
+the exact commit that produced them. S7-02 delivered.
