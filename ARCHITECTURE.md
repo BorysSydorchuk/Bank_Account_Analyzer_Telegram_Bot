@@ -198,6 +198,60 @@ No CI pipeline yet — build/push is a documented manual sequence; S7-02's
 ticket file flags GitHub Actions as a worthwhile follow-up, not built
 now.
 
+**RDS & Redis (provisioned, S7-03):** real bank data now lives on AWS
+for the first time. RDS PostgreSQL 16, `db.t4g.micro`, Single-AZ, 20 GB
+gp3, private subnets only (`aws_db_subnet_group`), deletion protection
+and a final snapshot on destroy both on — this instance holds real
+migrated financial data, not throwaway test data. Master credentials are
+AWS-managed (`manage_master_user_password`, an auto-rotated Secrets
+Manager secret) — this project never holds the master password itself,
+anywhere.
+
+| Resource | Identifier |
+|---|---|
+| RDS instance | `kbc-analyzer-db` |
+| RDS endpoint (host:port, no credentials) | `kbc-analyzer-db.c34kquggcima.eu-central-1.rds.amazonaws.com:5432` |
+| RDS security group | `sg-0a5edd4f0ba3c0dce` — inbound 5432 from the app SG only, no CIDR ranges at all |
+| Redis (self-hosted, Fargate, S7-01's decision) | ECS service `kbc-analyzer-redis`, own task, no ALB |
+| Redis reachable at | `redis.kbc-analyzer.internal:6379` (AWS Cloud Map private DNS, namespace `kbc-analyzer.internal`) — not a raw task IP, which changes on every task replacement |
+| Redis security group | `sg-0fe7c9d8fb1dfe17e` — inbound 6379 from the app SG only, no CIDR ranges at all |
+| App security group (placeholder) | `sg-016088c92a7c160f7` — represents whatever runs the Fargate web/worker services (not created until a later ticket) and one-off in-VPC tasks; RDS/Redis name only this SG as their allowed source |
+| ECS cluster | `kbc-analyzer-cluster` |
+
+**Migration verified, not just executed:** the full Alembic chain
+(`1149a517cb33` baseline through `5c9a2e6b8f14` head — every migration
+since S2-01) applied cleanly to a genuinely fresh RDS instance with zero
+errors. Real local dev data (366 transactions, 50 insights, 10
+categories, 3 budgets, 3 settings, 1 user) migrated via `pg_dump`/
+`pg_restore`, verified matching exactly, per table, before vs after. A
+real Fernet-encrypted API key (`gemini_api_key`, `anthropic_api_key`)
+decrypted correctly post-migration using the same `SETTINGS_SECRET` —
+the encryption round-trip survives the environment crossing. All three
+genuinely Redis-backed features (`app/auth/session.py`, `app/sync_lock.py`,
+`app/job_store.py`) confirmed working end-to-end against the new AWS
+Redis via real function calls, not just a container health check.
+`rate_limit.py` is explicitly **not** Redis-backed (in-memory, see this
+file's Auth section) — nothing to verify there; the gap is tracked in
+`docs/backlog.md`, not silently assumed fixed.
+
+**How this was actually run:** RDS and Redis sit in private subnets with
+no route from outside AWS at all — a security group can't fix that,
+only a route table can. All of the above ran from *inside* the VPC, via
+a temporary `kbc-analyzer-migration-runner` ECS task (reusing the S7-02
+worker image, which already has `alembic`/`psycopg`/`redis-py`),
+connected to via `aws ecs execute-command` (ECS Exec), then stopped —
+never a persistent service. Full real command output, including the
+migration chain, row-count verification, and decryption test, is in
+`docs/tickets/S7-03-rds-redis-migration.md`.
+
+**Free Tier discovered:** this AWS account is on AWS Free Tier — found
+empirically when RDS rejected a 7-day backup retention with
+`FreeTierRestrictionError` (reduced to 1 day). This likely means actual
+spend for the first 12 months is meaningfully lower than S7-01's ~$122/mo
+estimate, which didn't assume Free Tier eligibility. Not re-priced here —
+flagged for whoever next reviews the cost picture (S7-10 sprint close is
+the natural point).
+
 **Cost guardrail:** an AWS Budget (`kbc-analyzer-monthly-budget`), COST
 type, **$150/month limit** (raised from the initial $50 once the full
 target architecture's real projected cost — see S7-01's ticket file

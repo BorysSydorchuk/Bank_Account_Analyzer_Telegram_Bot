@@ -1,6 +1,12 @@
 # Secrets
 .env
 
+# Real data dumps (S7-03 migration) — never committed, always deleted
+# after the migration this ticket performs is verified complete.
+*.pgdump
+*.sql
+*.dump
+
 # Terraform local state and working files
 .terraform/
 .terraform.lock.hcl

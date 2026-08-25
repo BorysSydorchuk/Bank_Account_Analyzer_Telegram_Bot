@@ -26,3 +26,9 @@ variable "vpc_cidr" {
   type        = string
   default     = "10.0.0.0/16"
 }
+
+variable "migration_runner_image_tag" {
+  description = "Tag of the kbc-analyzer-worker ECR image the S7-03 migration-runner task uses"
+  type        = string
+  default     = "c9e7152"
+}
