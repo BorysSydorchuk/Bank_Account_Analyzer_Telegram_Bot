@@ -292,6 +292,48 @@ local dev, per this project's standing practice of not deleting the old
 path until the new one is proven working end-to-end (blocked on the
 domain delegation below).
 
+**CSRF state validation (added same day, before this route had ever run
+against real production traffic):** `POST /reauthorize` now generates
+its own `state` (`secrets.token_urlsafe(24)`), stores it in a new
+`eb_oauth_state` cookie (httponly, `secure=COOKIE_SECURE`,
+`samesite=lax` — same shape as `user_auth.py`'s `oauth_state`), and
+passes it through to Enable Banking (`enablebanking.py`'s `start_auth`,
+`eb_service.py`'s `get_reauthorize_url`) instead of the value those
+methods used to generate and immediately discard ("not checked by us
+but required by the spec"). The callback compares the cookie against
+Enable Banking's returned `state` and rejects any mismatch or missing
+cookie with a 400 before ever calling `complete_reauthorization`. This
+mattered here specifically because moving the callback from
+localhost-only to a public domain turned a latent gap into a real one —
+a forged link could otherwise trick an already-authenticated user's
+browser into completing reauthorization with an attacker-supplied code.
+Verified with a real `TestClient` round-trip (dependency-overridden, no
+live bank credentials needed): matching state passes through to
+`complete_reauthorization`, mismatched state and no-cookie-at-all both
+correctly 400.
+
+`enablebanking.py`'s `REDIRECT_URL` is now `EB_REDIRECT_URL`-driven
+(defaults to the local mkcert value, set to
+`https://mymble.be/api/auth/enable-banking/callback` in the web ECS
+task's environment) — the request Enable Banking receives has to carry
+the same redirect URL that's actually registered for it, or it's
+rejected regardless of what's registered in the portal.
+
+**Known limitation, current as of this commit — session cookies do not
+survive a round trip yet:** the web task sets `COOKIE_SECURE=true`
+(correct for the eventual HTTPS domain), but the ALB currently only has
+an HTTP:80 listener — no HTTPS exists until the ACM cert lands, which
+is blocked on Borys completing DNS delegation (below). A `Secure`
+cookie is never sent back by a browser over a plain HTTP connection, so
+right now, hitting the ALB directly, no session/state cookie set by
+this app (login sessions, `oauth_state`, `eb_oauth_state`) actually
+persists across a request. This is not a bug to fix in isolation — it
+resolves automatically once the HTTPS listener exists, and setting
+`COOKIE_SECURE=false` in the interim would be the wrong fix (shipping
+an insecure cookie flag to a production task definition). Documented
+here so it isn't mistaken for a new regression if someone tests against
+the ALB's HTTP endpoint before delegation completes.
+
 **Blocked on Borys — three things only he can do:**
 1. **DNS delegation:** `mymble.be` is registered externally. Configure
    these as its NS records at that registrar:

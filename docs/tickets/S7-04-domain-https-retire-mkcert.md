@@ -170,3 +170,111 @@ piecemeal here.
 Do not start S7-05 until the delegation/console/portal items above are
 done and I've completed the remaining ACM/HTTPS/OAuth verification —
 this ticket stays open, not confirmed.
+
+## FINDINGS ADDENDUM (2026-08-25) — Reviewer pass, addressed
+
+Borys relayed a Reviewer pass with several findings. Addressed here, in
+the order he prioritized them:
+
+### Finding 3 — CSRF state validation on the Enable Banking callback (real, worsened by this ticket)
+
+Confirmed real: `enablebanking.py`'s `start_auth` generated a `state`
+value on every call and discarded it immediately (its own comment said
+so — "not checked by us but required by the spec"). Harmless while the
+callback only ever ran on `localhost:3001` behind a temporary catcher
+process; a genuine CSRF exposure now that this ticket put the callback
+on a public domain behind an ALB — a forged
+`https://mymble.be/api/auth/enable-banking/callback?code=...` link
+could trick an already-authenticated victim's browser into completing
+reauthorization with an attacker-supplied code.
+
+**Fixed**, mirroring `user_auth.py`'s existing `oauth_state` pattern
+exactly: `POST /reauthorize` generates the state, stores it in a new
+`eb_oauth_state` cookie (httponly, `secure=COOKIE_SECURE`, `samesite=
+lax`), and passes it through `eb_service.get_reauthorize_url` into
+`enablebanking.start_auth` instead of letting that method generate and
+throw away its own. `GET /callback` compares the cookie against the
+returned `state`, rejects any mismatch or missing cookie with 400
+before ever calling `complete_reauthorization`. `start_auth`'s `state`
+parameter is optional (defaults to a fresh one) so the existing
+terminal/bot caller, which has no cookie to compare against, is
+unaffected.
+
+**Verified with a real test**, not just code review — `TestClient` with
+dependency overrides (no live bank credentials needed):
+```
+PASS: reauthorize sets eb_oauth_state cookie matching the real outgoing state
+PASS: mismatched state rejected with 400
+PASS: forged callback with no cookie at all rejected with 400
+PASS: matching state passes CSRF check, completes reauthorization
+ALL_PASS
+```
+
+**Related fix in the same change, not separately requested but required
+for the CSRF fix to be meaningful in production:** `enablebanking.py`'s
+`REDIRECT_URL` was still hardcoded to `https://localhost:3001/callback`
+— the actual request Enable Banking receives would have kept pointing
+at an unreachable local address even after the portal registers the new
+URI, making the whole flow non-functional regardless of the CSRF state
+of things. Made `EB_REDIRECT_URL`-driven; the web ECS task now sets it
+to `https://mymble.be/api/auth/enable-banking/callback`. Flagging this
+explicitly since Borys didn't ask for it by name — it was directly
+entangled with the state fix (same method, same field being touched)
+and the CSRF fix would have shipped non-functional without it.
+
+Rebuilt and redeployed both images (new commit's SHA) to the live ECS
+services — the fix is live, not just committed.
+
+### Documented: interim COOKIE_SECURE/no-HTTPS limitation
+
+Added to `ARCHITECTURE.md` (see "Known limitation" under the S7-04
+section): `COOKIE_SECURE=true` is set correctly for the eventual HTTPS
+domain, but the ALB is HTTP-only until the ACM cert lands (blocked on
+DNS delegation), so no cookie this app sets — session, `oauth_state`,
+`eb_oauth_state` — actually survives a round trip against the ALB right
+now. Not something to fix in isolation (the fix is HTTPS existing, not
+loosening the cookie flag), but worth being explicit about so it isn't
+mistaken for a new regression by whoever tests against the ALB before
+delegation completes.
+
+### Finding 1 — the callback route's ARCHITECTURE.md documentation genuinely did not land in the same commit
+
+Checked directly, not assumed: `git show --stat e8c177d` (the commit
+that added `GET /api/auth/enable-banking/callback`) touches exactly one
+file, `app/routers/auth.py`. The corresponding `ARCHITECTURE.md`
+section didn't land until `9abc547`, twelve minutes later. This is a
+real violation of CLAUDE.md's same-commit rule for a new
+route/redirect, not a false positive.
+
+**Not fixed by rewriting history** — both commits are already pushed to
+`origin/master`, and amending/rebasing pushed commits conflicts with
+this project's own git safety practice (never force-push, always a new
+commit, never amend). Logged here as a real process miss instead:
+mid-ticket code commits made to obtain a real git SHA for image tagging
+(a pattern used repeatedly across S7-01 through S7-04, since ECR's
+immutable tags need a real commit to reference) need their
+documentation updates folded into that same commit going forward, not
+deferred to a later "and here's the docs" commit. This finding's own
+fix (the CSRF/limitation work above) was committed together with its
+`ARCHITECTURE.md` update in one commit, specifically to not repeat this.
+
+### Finding 2 and the variable-defaults note — folded in
+
+**One-ticket-two-commits:** S7-04 shipped as multiple commits
+(`e8c177d` code, `9abc547` infra+docs, this addendum's commit) rather
+than CLAUDE.md's stated "one commit per ticket." Root cause is the same
+as Finding 1's: needing a real git SHA before tagging/pushing images
+forces at least one code-then-infra split for any ticket that builds
+and deploys a container image. Not resolved here (would need rethinking
+the tag-by-git-sha convention itself, e.g. build-then-tag against a
+placeholder and republish, which is out of this ticket's scope) — noted
+as a standing tension between two of this project's own conventions,
+worth a deliberate decision at a sprint close rather than a mid-ticket
+fix.
+
+**Variable-defaults footgun:** `infra/variables.tf` and `infra/web.tf`
+both had image-tag variables defaulting to a specific git SHA with no
+comment explaining the risk. Added comments to both flagging that the
+default documents "what this delivery used," not something safe to
+rely on for a future real `terraform apply` — always pass `-var`
+explicitly.

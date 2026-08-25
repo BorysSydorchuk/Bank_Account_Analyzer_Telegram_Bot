@@ -27,6 +27,9 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
+// Same footgun as web.tf's app_image_tag default: fine as "what S7-03
+// used," not something to rely on for a future real run — pass -var
+// explicitly.
 variable "migration_runner_image_tag" {
   description = "Tag of the kbc-analyzer-worker ECR image the S7-03 migration-runner task uses"
   type        = string

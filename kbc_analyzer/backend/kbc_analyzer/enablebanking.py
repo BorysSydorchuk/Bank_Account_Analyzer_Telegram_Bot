@@ -33,8 +33,16 @@ SESSION_FILE = "eb_session.json"
 # allowed") because the portal only accepts https:// scheme redirect URIs.
 # The catcher server now serves HTTPS via an mkcert-generated localhost
 # certificate, and https://localhost:3001/callback has been registered for
-# this app_id in the Enable Banking developer portal — this is the live value.
-REDIRECT_URL = "https://localhost:3001/callback"
+# this app_id in the Enable Banking developer portal — this is the live
+# local-dev value, and stays the default so local dev is unaffected.
+#
+# S7-04: env-driven so the production ECS task can point this at
+# https://mymble.be/api/auth/enable-banking/callback instead — the request
+# this module sends to Enable Banking must carry the same redirect URL
+# that's actually registered for it, or the request is rejected outright
+# (same "Redirect URI not allowed" error, now for a mismatch instead of a
+# disallowed scheme).
+REDIRECT_URL = os.getenv("EB_REDIRECT_URL", "https://localhost:3001/callback")
 
 
 class EnableBankingError(Exception):
@@ -173,9 +181,15 @@ class EnableBankingClient:
 
     # ── Non-interactive auth (used by the Telegram bot) ────────────────────────
 
-    def start_auth(self) -> str:
+    def start_auth(self, state: str | None = None) -> str:
         """Step 1 of the OAuth flow: request a new authorization session and return the URL
         the user must open in their browser to grant us access to their KBC account.
+
+        state: the CSRF-protection value the caller will later compare against what
+        Enable Banking's redirect echoes back (S7-04's callback route does this). The
+        terminal/bot flow (line ~285 below) has no session/cookie to compare against,
+        so it's optional there and a fresh one is generated internally if omitted —
+        matching this method's pre-S7-04 behavior.
 
         The Enable Banking OAuth flow:
           1. We POST /auth → get back a URL
@@ -201,8 +215,11 @@ class EnableBankingClient:
                 "name": kbc["name"],
                 "country": kbc.get("country", "BE"),
             },
-            # Random state string to prevent CSRF — not checked by us but required by the spec
-            "state": secrets.token_urlsafe(16),
+            # S7-04: was a throwaway value here ("not checked by us but required by
+            # the spec") — a real CSRF gap once this flow's callback lives on a
+            # public domain, not just localhost. Now the caller's own state (stored
+            # in a cookie, compared on the way back) is what actually gets sent.
+            "state": state or secrets.token_urlsafe(16),
             "redirect_url": REDIRECT_URL,
             "psu_type": "personal",     # PSU = Payment Service User (the account owner)
         })

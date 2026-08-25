@@ -10,16 +10,29 @@ S6-06: all three endpoints require require_enable_banking_owner — the single
 eb_session.json connection belongs to exactly one real account
 (ENABLE_BANKING_OWNER_EMAIL) until Sprint 7's per-user bank session storage.
 """
-from fastapi import APIRouter, Depends
+import secrets
+
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..auth.dependency import require_enable_banking_owner
+from ..auth.session import COOKIE_SECURE
 from ..eb_service import EnableBankingError, EnableBankingService
 from ..models import User
 from ..schemas import CallbackRequest, EnableBankingStatus, ReauthorizeResponse
 from ..tasks.auth import catch_enable_banking_callback
 
 router = APIRouter(prefix="/api/auth/enable-banking", tags=["auth"])
+
+# S7-04, mirrors user_auth.py's oauth_state pattern exactly. Previously
+# Enable Banking's own request carried a state value that was generated and
+# immediately discarded ("not checked by us") — harmless while the callback
+# only existed on localhost, a real CSRF gap once it's a public URL: without
+# this, a forged https://mymble.be/api/auth/enable-banking/callback?code=...
+# link could trick an already-logged-in victim's browser into completing
+# reauthorization with an attacker-supplied code.
+_EB_STATE_COOKIE_NAME = "eb_oauth_state"
+_EB_STATE_COOKIE_TTL_SECONDS = 10 * 60  # generous for a human to complete the bank's own login/consent screen
 
 
 def get_eb_service() -> EnableBankingService:
@@ -36,13 +49,29 @@ def get_status(
 
 @router.post("/reauthorize", response_model=ReauthorizeResponse)
 def reauthorize(
+    response: Response,
     eb: EnableBankingService = Depends(get_eb_service),
     current_user: User = Depends(require_enable_banking_owner),
 ) -> ReauthorizeResponse:
     # S3-07 Item 2: a background task now catches the redirect automatically
     # (app/eb_callback_server.py) instead of the user copy-pasting it back —
     # the frontend's only remaining job is to open auth_url and poll /status.
-    auth_url = eb.get_reauthorize_url()
+    #
+    # S7-04: state is generated here (not left to enablebanking.py's own
+    # throwaway default) and stashed in a cookie on this JSON response —
+    # this endpoint returns auth_url for the frontend to open in a new tab
+    # rather than redirecting itself, so the cookie has to be set here,
+    # unlike user_auth.py's server-side-redirect equivalent.
+    state = secrets.token_urlsafe(24)
+    auth_url = eb.get_reauthorize_url(state)
+    response.set_cookie(
+        key=_EB_STATE_COOKIE_NAME,
+        value=state,
+        max_age=_EB_STATE_COOKIE_TTL_SECONDS,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+    )
     catch_enable_banking_callback.delay()
     return ReauthorizeResponse(auth_url=auth_url)
 
@@ -146,6 +175,8 @@ _ERROR_ICON = (
 
 @router.get("/callback", response_class=HTMLResponse)
 def callback_redirect(
+    request: Request,
+    response: Response,
     code: str | None = None,
     state: str | None = None,
     eb: EnableBankingService = Depends(get_eb_service),
@@ -162,6 +193,24 @@ def callback_redirect(
     JSON body (contrast the POST /callback fallback above, which the
     frontend calls with a manually-pasted code).
     """
+    response.delete_cookie(_EB_STATE_COOKIE_NAME)  # single-use, same as user_auth.py's oauth_state
+
+    expected_state = request.cookies.get(_EB_STATE_COOKIE_NAME)
+    if not state or not expected_state or state != expected_state:
+        # Missing/mismatched state: either a forged callback (CSRF — see the
+        # module docstring above the cookie constants) or a genuinely stale
+        # link (cookie already expired/cleared by a prior attempt). Same
+        # response either way — nothing here should distinguish the two for
+        # an attacker's benefit.
+        return HTMLResponse(
+            _CONFIRMATION_PAGE.format(
+                icon_bg="#FEE2E2",
+                icon_svg=_ERROR_ICON,
+                heading="Bank connection failed",
+                message="This link is no longer valid. Close this tab and click Reconnect to try again.",
+            ),
+            status_code=400,
+        )
     if not code:
         return HTMLResponse(
             _CONFIRMATION_PAGE.format(

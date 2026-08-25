@@ -66,12 +66,15 @@ class EnableBankingService:
             return {"status": "expired", "expires_at": None}
         return {"status": "active", "expires_at": valid_until}
 
-    def get_reauthorize_url(self) -> str:
+    def get_reauthorize_url(self, state: str | None = None) -> str:
         """Start a new Enable Banking authorization session and return the URL the user
         must open in their browser. Does not touch the cached session — nothing is
         considered re-authorized until complete_reauthorization() runs successfully.
+
+        state: passed straight through to the Enable Banking request (S7-04) so the
+        caller can later verify the callback's state matches what it set here.
         """
-        return self._client.start_auth()
+        return self._client.start_auth(state)
 
     def complete_reauthorization(self, code: str) -> dict:
         """Exchange the authorization code (pasted back from the redirect URL) for a new

@@ -1,3 +1,10 @@
+# A default exists so re-applying this delivery doesn't require typing the
+# tag every time — but that's exactly the footgun: a `terraform apply` run
+# months from now without an explicit `-var` override would silently
+# redeploy THIS commit's image, not whatever's actually current. Always
+# pass -var="app_image_tag=<real current sha>" explicitly for any real
+# deploy; treat the default as documentation of "what S7-04 shipped," not
+# as a safe thing to rely on going forward.
 variable "app_image_tag" {
   description = "Git-SHA tag of the kbc-analyzer-web/worker images to run"
   type        = string
@@ -38,6 +45,7 @@ resource "aws_ecs_task_definition" "web" {
         { name = "CELERY_RESULT_BACKEND", value = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.internal.name}:6379/1" },
         { name = "GOOGLE_CLIENT_ID", value = var.google_client_id },
         { name = "GOOGLE_REDIRECT_URI", value = "https://mymble.be/api/auth/google/callback" },
+        { name = "EB_REDIRECT_URL", value = "https://mymble.be/api/auth/enable-banking/callback" },
         { name = "ENABLEBANKING_APP_ID", value = var.enablebanking_app_id },
         { name = "ENABLEBANKING_PRIVATE_KEY_PATH", value = "/tmp/private.pem" },
         { name = "ENABLE_BANKING_OWNER_EMAIL", value = var.enable_banking_owner_email },
