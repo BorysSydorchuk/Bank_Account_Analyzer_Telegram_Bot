@@ -124,3 +124,77 @@ begins:
 
 Actions (1) and (3) are complete. Action (2) is intentionally left to
 Borys. Proceeding to S7-02 per his instruction.
+
+## AMENDMENT (2026-08-25) — Reviewer follow-up: WHEN DONE evidence gap
+
+Reviewer found that S7-01's WHEN DONE answers (resource provisioning proof,
+itemized cost estimate) were only ever narrated in chat, never captured as
+artifacts in the repo — a real gap against the ticket's own acceptance
+criteria ("Show the provisioned foundation resources", "State the final
+itemized cost estimate"), not a paperwork nitpick. Fixed for real below,
+not retroactively adjusted in the ledger.
+
+### Proof the main Terraform config was actually applied
+
+Confirmed two ways: (1) `terraform state list` in `infra/` shows 20 real
+managed resources (not just the 5 in `infra/bootstrap/`), and (2) every
+resource ID below was independently re-queried live against AWS on
+2026-08-25 (`aws ec2 describe-vpcs`, `describe-nat-gateways`,
+`describe-subnets`, `ecr describe-repositories`, `iam get-user`) — not
+just read back from Terraform's own state file, which could in principle
+be stale or wrong. All came back `available`/present with matching
+attributes.
+
+| Resource | ID / ARN | Live-verified attributes |
+|---|---|---|
+| VPC | `vpc-0ff5461f79e531821` | CIDR `10.0.0.0/16`, State `available` |
+| NAT Gateway | `nat-09837d89472437832` | State `available`, in `subnet-0e75497bcd1a73a6f` |
+| Public subnet (1a) | `subnet-0e75497bcd1a73a6f` | `10.0.0.0/24`, `eu-central-1a`, public IP on launch |
+| Public subnet (1b) | `subnet-00a04d56c7b5ef82e` | `10.0.1.0/24`, `eu-central-1b`, public IP on launch |
+| Private subnet (1a) | `subnet-0f95c89b63cf3becd` | `10.0.10.0/24`, `eu-central-1a`, no public IP |
+| Private subnet (1b) | `subnet-03bff6a6b9d70b530` | `10.0.11.0/24`, `eu-central-1b`, no public IP |
+| ECR repo (web) | `arn:aws:ecr:eu-central-1:904854373619:repository/kbc-analyzer-web` | URI `904854373619.dkr.ecr.eu-central-1.amazonaws.com/kbc-analyzer-web` |
+| ECR repo (worker) | `arn:aws:ecr:eu-central-1:904854373619:repository/kbc-analyzer-worker` | URI `904854373619.dkr.ecr.eu-central-1.amazonaws.com/kbc-analyzer-worker` |
+| IAM deploy user | `arn:aws:iam::904854373619:user/deploy/kbc-analyzer-deploy` | Created `2026-08-24T13:44:05Z` |
+| Budget | `arn:aws:budgets::904854373619:budget/kbc-analyzer-monthly-budget` | $150/mo, thresholds 50/80/100%, all `NotificationState: OK` |
+
+Verdict: the main config was genuinely applied on 2026-08-24, not just
+planned or narrated. No cover-up needed here — the resources are real;
+only the written record of them was missing until now.
+
+### Itemized monthly cost estimate (real line items, not a bare total)
+
+Priced directly against AWS's Price List API for `eu-central-1`
+(queried 2026-08-24, not third-party estimates — see method note below).
+Sizing assumptions: web Fargate task 0.5 vCPU/1 GB, worker and Redis
+tasks at Fargate's floor (0.25 vCPU/0.5 GB) each, all three running
+24/7 (730 hrs/month); RDS `db.t4g.micro` Single-AZ with 20 GB gp3
+storage; NAT Gateway with ~10 GB/month processed (low-traffic solo
+project); ALB with ~1 average LCU (not yet provisioned — arrives in
+S7-04, included here because the ticket's acceptance criterion asks for
+"this exact architecture," not just what S7-01 itself provisions).
+
+| Component | Rate | Sizing | Monthly cost |
+|---|---|---|---|
+| NAT Gateway | $0.052/hr + $0.052/GB | 730 hrs + ~10 GB processed | $38.48 |
+| Fargate — web | $0.04656/vCPU-hr + $0.00511/GB-hr | 0.5 vCPU / 1 GB, 24/7 | $20.72 |
+| Fargate — worker | $0.04656/vCPU-hr + $0.00511/GB-hr | 0.25 vCPU / 0.5 GB, 24/7 | $10.36 |
+| Fargate — Redis | $0.04656/vCPU-hr + $0.00511/GB-hr | 0.25 vCPU / 0.5 GB, 24/7 | $10.36 |
+| RDS `db.t4g.micro` Single-AZ | $0.019/hr instance + $0.137/GB-mo gp3 | 730 hrs + 20 GB | $16.61 |
+| ALB (S7-04, not yet live) | $0.027/hr + $0.008/LCU-hr | 730 hrs + ~1 LCU avg | $25.55 |
+| ECR storage | $0.10/GB-mo | ~2 GB | $0.20 |
+| S3 (TF state) + DynamoDB (lock) | negligible, near free tier | minimal | $0.05 |
+| **Total, full target architecture** | | | **$122.33** |
+| **Live today (S7-01 foundation only)** | NAT Gateway + ECR/S3/DynamoDB, no Fargate/RDS/ALB running yet | | **≈$38.53** |
+
+**Pricing method, for reproducibility:** `aws pricing get-products`
+against `us-east-1` (the Price List API's endpoint region — it still
+returns per-region rates), filtered `Type=TERM_MATCH,Field=regionCode,
+Value=eu-central-1`, per service (`AmazonECS` for Fargate, `AmazonRDS`,
+`AmazonEC2` for NAT Gateway, `AmazonECR`, `AWSELB` for ALB). Raw query
+JSON was written to temp files and deleted after extracting the rates
+above — not retained in the repo, since it's derivable from the AWS API
+at any time and isn't itself a project artifact worth versioning.
+
+This replaces the bare "$122/month" total that previously existed only
+as prose in chat, per Reviewer's finding.

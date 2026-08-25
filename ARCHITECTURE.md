@@ -117,15 +117,22 @@ background worker like Celery. Redis will be a self-hosted container in
 the same cluster, not ElastiCache — a deliberate cost saving at this
 traffic scale, not yet provisioned as of S7-01.
 
-**Network (provisioned, S7-01):**
+**Network (provisioned, S7-01 — resource IDs live-verified 2026-08-25,
+full detail and independent live-AWS cross-check in
+`docs/tickets/S7-01-aws-foundation.md`'s Reviewer-follow-up amendment):**
 
-| Resource | Value |
-|---|---|
-| VPC CIDR | `10.0.0.0/16` |
-| Public subnets | 2, one per AZ (`10.0.0.0/24`, `10.0.1.0/24`) — host the ALB and the NAT Gateway |
-| Private subnets | 2, one per AZ (`10.0.10.0/24`, `10.0.11.0/24`) — will host both Fargate services, RDS, and the self-hosted Redis container |
-| NAT Gateway | **Single** (not one per AZ) — both private subnets route through it |
-| Internet Gateway | 1, attached to the VPC |
+| Resource | ID | Value |
+|---|---|---|
+| VPC | `vpc-0ff5461f79e531821` | CIDR `10.0.0.0/16` |
+| Public subnet (1a) | `subnet-0e75497bcd1a73a6f` | `10.0.0.0/24` — hosts the NAT Gateway |
+| Public subnet (1b) | `subnet-00a04d56c7b5ef82e` | `10.0.1.0/24` — will host the ALB |
+| Private subnet (1a) | `subnet-0f95c89b63cf3becd` | `10.0.10.0/24` — will host both Fargate services, RDS, Redis container |
+| Private subnet (1b) | `subnet-03bff6a6b9d70b530` | `10.0.11.0/24` — same, other AZ |
+| NAT Gateway | `nat-09837d89472437832` | **Single** (not one per AZ) — both private subnets route through it |
+| Internet Gateway | (see `infra/vpc.tf` — 1, attached to the VPC) | |
+| ECR repo (web) | `arn:aws:ecr:eu-central-1:904854373619:repository/kbc-analyzer-web` | |
+| ECR repo (worker) | `arn:aws:ecr:eu-central-1:904854373619:repository/kbc-analyzer-worker` | |
+| IAM deploy user | `arn:aws:iam::904854373619:user/deploy/kbc-analyzer-deploy` | ECR push/pull only |
 
 The single NAT Gateway is a deliberate cost/availability tradeoff for a
 portfolio-scale solo project: if the AZ holding the NAT Gateway has an
