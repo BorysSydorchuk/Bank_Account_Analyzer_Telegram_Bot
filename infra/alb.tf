@@ -78,13 +78,33 @@ resource "aws_lb_target_group" "web" {
   }
 }
 
-# Temporary: HTTP only, forwards directly. Becomes a redirect-to-HTTPS
-# once the ACM cert is issued (blocked on Borys completing the mymble.be
-# NS delegation — see infra/dns.tf) and a :443 listener is added.
+# HTTP now redirects to HTTPS — the temporary forward-directly listener
+# from before the cert existed. 301 (permanent): this is the real,
+# durable behavior going forward, not a transient A/B state.
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = 80
   protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = 443
+  protocol          = "HTTPS"
+  # 2023 is the current AWS-recommended baseline (TLS 1.2+, drops older
+  # weak ciphers) — no reason to pin an older policy for a service that
+  # went live in 2026.
+  ssl_policy      = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn = aws_acm_certificate_validation.mymble.certificate_arn
 
   default_action {
     type             = "forward"

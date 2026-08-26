@@ -319,20 +319,55 @@ task's environment) — the request Enable Banking receives has to carry
 the same redirect URL that's actually registered for it, or it's
 rejected regardless of what's registered in the portal.
 
-**Known limitation, current as of this commit — session cookies do not
-survive a round trip yet:** the web task sets `COOKIE_SECURE=true`
-(correct for the eventual HTTPS domain), but the ALB currently only has
-an HTTP:80 listener — no HTTPS exists until the ACM cert lands, which
-is blocked on Borys completing DNS delegation (below). A `Secure`
-cookie is never sent back by a browser over a plain HTTP connection, so
-right now, hitting the ALB directly, no session/state cookie set by
-this app (login sessions, `oauth_state`, `eb_oauth_state`) actually
-persists across a request. This is not a bug to fix in isolation — it
-resolves automatically once the HTTPS listener exists, and setting
-`COOKIE_SECURE=false` in the interim would be the wrong fix (shipping
-an insecure cookie flag to a production task definition). Documented
-here so it isn't mistaken for a new regression if someone tests against
-the ALB's HTTP endpoint before delegation completes.
+**RESOLVED (2026-08-26):** the interim COOKIE_SECURE/no-HTTPS limitation
+below no longer applies — real HTTPS is live (see the ACM/ALB section
+further down). Left here, struck through in spirit rather than deleted,
+as a record of a real interim state this project actually shipped
+through, not because it's still true: the web task set
+`COOKIE_SECURE=true` while the ALB only had an HTTP:80 listener, so no
+session/state cookie survived a round trip against the ALB for the
+roughly one-hour window between S7-04's first delivery and DNS
+delegation actually going live. Nothing shipped to real users during
+that window; local dev was never affected.
+
+**ACM certificate & HTTPS (S7-04, real evidence — 2026-08-26):**
+`mymble.be` now serves real, CA-validated HTTPS. ACM certificate
+(`infra/acm.tf`), DNS-validated via a CNAME in the Route 53 zone this
+project controls (not email validation — survives renewal
+automatically without action). ALB has two listeners: HTTP:80 (301
+redirects to HTTPS), HTTPS:443 (`ELBSecurityPolicy-TLS13-1-2-2021-06`,
+forwards to the web target group). A Route 53 alias A record at the
+zone apex (`infra/dns.tf`) points `mymble.be` itself at the ALB —
+previously only the zone and its NS records existed, nothing routed the
+bare domain anywhere.
+
+```
+$ echo | openssl s_client -connect mymble.be:443 -servername mymble.be
+depth=0 CN=mymble.be
+verify return:1
+Certificate chain: mymble.be -> Amazon RSA 2048 M01 -> Amazon Root CA 1
+Verify return code: 0 (ok)
+
+$ curl -sv https://mymble.be/health
+< HTTP/1.1 200 OK
+{"status":"ok"}
+```
+
+Full evidence (openssl chain dump, curl output for both HTTP redirect
+and HTTPS response) in `docs/tickets/S7-04-domain-https-retire-mkcert.md`.
+DNS delegation itself took roughly 90 minutes to actually activate
+after being configured at the registrar (domain was registered fresh
+via behostings.com right before this ticket, which appears to have
+added its own registry-activation delay beyond ordinary NS
+propagation) — resolved, not currently actionable, noted for the
+historical record.
+
+Enable Banking and Google OAuth live round-trips are still pending —
+they need Borys to personally complete an interactive bank login and
+Google sign-in now that the domain and HTTPS both work. mkcert remains
+in place until those two are proven working end-to-end, per this
+project's standing practice of not retiring an old path until the new
+one is verified live.
 
 **Blocked on Borys — three things only he can do:**
 1. **DNS delegation:** `mymble.be` is registered externally. Configure

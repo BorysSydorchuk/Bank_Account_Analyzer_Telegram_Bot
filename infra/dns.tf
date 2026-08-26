@@ -6,3 +6,18 @@
 resource "aws_route53_zone" "mymble" {
   name = "mymble.be"
 }
+
+# Alias, not a plain A record with a hardcoded IP — the ALB's IPs can
+# change (scaling, AZ failover), an alias record tracks it automatically
+# and, unlike a CNAME, is allowed at the zone apex.
+resource "aws_route53_record" "apex_alias" {
+  zone_id = aws_route53_zone.mymble.zone_id
+  name    = "mymble.be"
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.main.dns_name
+    zone_id                = aws_lb.main.zone_id
+    evaluate_target_health = true
+  }
+}

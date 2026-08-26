@@ -278,3 +278,87 @@ comment explaining the risk. Added comments to both flagging that the
 default documents "what this delivery used," not something safe to
 rely on for a future real `terraform apply` — always pass `-var`
 explicitly.
+
+## DELIVERY (2026-08-26) — HTTPS live, real evidence
+
+DNS delegation confirmed live (independently, across Google/Cloudflare/
+OpenDNS resolvers agreeing on the four Route 53 nameservers) after the
+domain — registered fresh via behostings.com right before this ticket
+started — took roughly 90 minutes to actually activate at the registry.
+That delay was on the registrar/registry side, not anything in this
+project's control; documented for the record, not something to action
+further now that it's resolved.
+
+### Infrastructure added
+
+`infra/acm.tf`: ACM certificate for `mymble.be`, DNS validation (a
+CNAME record created in the Route 53 zone this project controls, not
+email validation — survives renewal automatically). `infra/alb.tf`:
+new HTTPS listener (port 443, `ELBSecurityPolicy-TLS13-1-2-2021-06`)
+forwarding to the existing web target group; the HTTP listener now
+redirects (301) to HTTPS instead of forwarding directly.
+`infra/dns.tf`: an alias A record at the zone apex pointing `mymble.be`
+itself at the ALB (previously only the zone and its NS records existed
+— nothing actually routed the bare domain to anything).
+
+`terraform apply`: 5 added, 1 changed, 0 destroyed. ACM validation
+completed in about 30 seconds — confirming the delegation is genuinely
+live, not just resolving NS records without the zone actually being
+authoritative yet.
+
+### Real evidence — mymble.be resolving over HTTPS with a valid cert chain
+
+```
+$ echo | openssl s_client -connect mymble.be:443 -servername mymble.be
+depth=2 C=US, O=Amazon, CN=Amazon Root CA 1
+verify return:1
+depth=1 C=US, O=Amazon, CN=Amazon RSA 2048 M01
+verify return:1
+depth=0 CN=mymble.be
+verify return:1
+---
+Certificate chain
+ 0 s:CN=mymble.be
+   i:C=US, O=Amazon, CN=Amazon RSA 2048 M01
+   v:NotBefore: Aug 26 00:00:00 2026 GMT; NotAfter: Mar 11 23:59:59 2027 GMT
+ 1 s:C=US, O=Amazon, CN=Amazon RSA 2048 M01
+   i:C=US, O=Amazon, CN=Amazon Root CA 1
+ 2 s:C=US, O=Amazon, CN=Amazon Root CA 1
+   i:C=US, ST=Arizona, ..., CN=Starfield Services Root Certificate Authority - G2
+---
+Verify return code: 0 (ok)
+
+$ curl -sv https://mymble.be/health
+< HTTP/1.1 200 OK
+< Content-Type: application/json
+< server: uvicorn
+{"status":"ok"}
+
+$ curl -sv http://mymble.be/health
+< HTTP/1.1 301 Moved Permanently
+< Location: https://mymble.be:443/health
+```
+
+Full trusted chain (mymble.be → Amazon RSA 2048 M01 → Amazon Root CA 1),
+`Verify return code: 0 (ok)` — not self-signed, not a warning ignored,
+a genuine CA-issued and validated certificate. HTTP correctly redirects
+to HTTPS with a permanent (301) status.
+
+### Acceptance criteria status, updated
+
+- mymble.be resolving over HTTPS with a real cert chain: **done**, real
+  evidence above.
+- Enable Banking OAuth round-trip: still blocked — needs Borys to
+  personally complete the interactive bank login now that the domain
+  and HTTPS both work.
+- Google OAuth sign-in: still blocked — same, needs Borys's live
+  sign-in.
+- mkcert retired: still not yet — correctly deferred until both live
+  round-trips above are proven working end-to-end, per this project's
+  standing practice.
+- Local dev unchanged: confirmed, this delivery only touched `infra/`.
+
+Ready for Borys to do the live Enable Banking and Google OAuth
+round-trips against `https://mymble.be` — real evidence from those,
+not narration, is still required before this ticket can be marked
+confirmed and mkcert retired.
