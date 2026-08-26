@@ -56,12 +56,10 @@ services:
     build: ./backend
     command: celery -A app.celery_app worker --loglevel=info
     env_file: .env
-    # S3-07 Item 2: the Enable Banking OAuth redirect lands here, in the
-    # user's real browser on the host — this container is where the
-    # temporary catcher server (app/eb_callback_server.py) actually runs,
-    # so it (not backend) needs the published port.
-    ports:
-      - "3001:3001"
+    # RETIRED (S7-04): the local HTTPS catcher server that used to run in
+    # this container and need port 3001 published (S3-07 Item 2) is gone
+    # — Enable Banking's redirect now lands directly on the real production
+    # domain's own callback route. See kbc_analyzer/enablebanking.py.
     volumes:
       - ./backend:/app
     depends_on:

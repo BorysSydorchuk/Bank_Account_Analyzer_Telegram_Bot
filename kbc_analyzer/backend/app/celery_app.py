@@ -14,6 +14,10 @@ celery_app = Celery(
     backend=os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/1"),
     # Explicit rather than Celery's Django-style autodiscover_tasks(), which
     # expects an installed-apps list this project doesn't have. One entry per
-    # module under app/tasks/ — add the next one here when S3-04 or later adds it.
-    include=["app.tasks.analysis", "app.tasks.auth"],
+    # module under app/tasks/ — add the next one here when a later ticket
+    # adds it. app.tasks.auth (S3-07 Item 2's Enable Banking callback
+    # catcher task) was retired in S7-04 along with the mkcert-based local
+    # catcher server it existed to drive — real production HTTPS makes it
+    # unnecessary, see ARCHITECTURE.md.
+    include=["app.tasks.analysis"],
 )

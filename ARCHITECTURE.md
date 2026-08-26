@@ -51,17 +51,20 @@ S6-07 entries already captured.
 | `backend` | `backend/Dockerfile` | 8000 | FastAPI (`app.main:app`); runs `alembic upgrade head` then `uvicorn --reload` on every start |
 | `frontend` | `frontend/Dockerfile` | 5173 | Vite dev server |
 | `redis` | `redis:7-alpine` | 6379 | Celery broker (db 0) + result backend (db 1) |
-| `celery_worker` | `backend/Dockerfile` (same image as backend) | **3001** | `celery -A app.celery_app worker`, **and** the Enable Banking OAuth callback catcher |
+| `celery_worker` | `backend/Dockerfile` (same image as backend) | none published | `celery -A app.celery_app worker` |
 
-`celery_worker`, not `backend`, publishes port 3001 — deliberate
-(`docker-compose.yml`'s `celery_worker` service, `ports:` mapping): the OAuth redirect lands in the user's real
-browser on the host, and the catcher (`app/eb_callback_server.py`) runs
-inside the Celery process (`app/tasks/auth.py`), not the FastAPI process.
-It's a Celery task (`catch_enable_banking_callback`), TLS via
-`certs/localhost.pem`/`localhost-key.pem` (mkcert, expires 2028-11-08 —
-regenerate or retire per Sprint 6 production HTTPS), handles exactly one
-request then shuts down, and raises `CallbackPortBusyError` if a second
-reconnect races the first.
+**RETIRED (S7-04):** `celery_worker` used to also publish port 3001 for a
+local HTTPS catcher server that caught Enable Banking's OAuth redirect
+(S3-07 Item 2) — that server, its Celery task, and the mkcert
+certificate it used are all deleted, not just unused. Enable Banking's
+OAuth redirect now lands directly on the real production domain's own
+`GET /api/auth/enable-banking/callback` route (see the ACM/HTTPS section
+further down) — proven working end-to-end via a real live reconnect
+against `https://mymble.be`, which is what closed this out. A developer
+who needs to exercise the Enable Banking OAuth flow purely locally
+(without hitting the real production domain) uses the `POST /callback`
+manual-paste fallback instead — same mechanism as before S3-07 Item 2
+ever existed.
 
 `backend` and `celery_worker` both run as a non-root `appuser`
 (`backend/Dockerfile`, S4-09 Item 1) — the image's final `USER appuser`
@@ -306,18 +309,19 @@ S7-02 image) is written to `/tmp/private.pem` by a command-override
 script at container start, matching `ENABLEBANKING_PRIVATE_KEY_PATH` —
 no image rebuild needed to supply it.
 
-**New production Enable Banking callback route
+**Production Enable Banking callback route
 (`GET /api/auth/enable-banking/callback`, `app/routers/auth.py`):**
-replaces the mkcert-based local catcher server's role for production.
-That server (`app/eb_callback_server.py`) only ever existed because
-local dev has no publicly-reachable HTTPS endpoint for Enable Banking's
-redirect to land on — it ran its own temporary HTTPS listener on a
-separate port. A real domain behind an ALB doesn't need that: this new
-route *is* the reachable endpoint. **Not yet retired** —
-`eb_callback_server.py`/`app/tasks/auth.py` are untouched, still used by
-local dev, per this project's standing practice of not deleting the old
-path until the new one is proven working end-to-end (blocked on the
-domain delegation below).
+replaced the mkcert-based local catcher server's role for production.
+That server (`app/eb_callback_server.py`, now deleted) only ever
+existed because local dev has no publicly-reachable HTTPS endpoint for
+Enable Banking's redirect to land on — it ran its own temporary HTTPS
+listener on a separate port. A real domain behind an ALB doesn't need
+that: this route *is* the reachable endpoint. **Retired (S7-04):**
+`eb_callback_server.py`, `app/tasks/auth.py`, and the mkcert certificate
+they used are all deleted — a real live Enable Banking reconnect against
+`https://mymble.be` proved the new path works end-to-end first, per this
+project's standing practice of not deleting the old path until the new
+one is proven working.
 
 **CSRF state validation (added same day, before this route had ever run
 against real production traffic):** `POST /reauthorize` now generates
@@ -339,8 +343,9 @@ live bank credentials needed): matching state passes through to
 `complete_reauthorization`, mismatched state and no-cookie-at-all both
 correctly 400.
 
-`enablebanking.py`'s `REDIRECT_URL` is now `EB_REDIRECT_URL`-driven
-(defaults to the local mkcert value, set to
+`enablebanking.py`'s `REDIRECT_URL` is `EB_REDIRECT_URL`-driven (defaults
+to `https://localhost:3001/callback`, a placeholder-only value now that
+mkcert is retired — see below; set to
 `https://mymble.be/api/auth/enable-banking/callback` in the web ECS
 task's environment) — the request Enable Banking receives has to carry
 the same redirect URL that's actually registered for it, or it's
@@ -389,32 +394,22 @@ added its own registry-activation delay beyond ordinary NS
 propagation) — resolved, not currently actionable, noted for the
 historical record.
 
-Enable Banking and Google OAuth live round-trips are still pending —
-they need Borys to personally complete an interactive bank login and
-Google sign-in now that the domain and HTTPS both work. mkcert remains
-in place until those two are proven working end-to-end, per this
-project's standing practice of not retiring an old path until the new
-one is verified live.
+**CONFIRMED (2026-08-26):** both live round-trips — password login →
+explicit Google account linking from Settings (S6-07's linking-safety
+fix), and Enable Banking reconnect — completed successfully by Borys
+against `https://mymble.be`. This is what closed the "mkcert stays until
+proven working" condition; see the mkcert-retirement section further
+down for what was actually deleted.
 
-**Blocked on Borys — three things only he can do:**
-1. **DNS delegation:** `mymble.be` is registered externally. Configure
-   these as its NS records at that registrar:
-   `ns-1030.awsdns-00.org`, `ns-1821.awsdns-35.co.uk`,
-   `ns-409.awsdns-51.com`, `ns-935.awsdns-52.net`. Nothing past this
-   point (ACM cert, real HTTPS, mkcert retirement) can proceed until
-   delegation is live.
-2. **Google Cloud Console:** add `https://mymble.be/api/auth/google/callback`
-   as an authorized redirect URI on the OAuth client.
-3. **Enable Banking developer portal:** register
-   `https://mymble.be/api/auth/enable-banking/callback` as a redirect
-   URI (the code's own comment confirms the existing
-   `https://localhost:3001/callback` was pre-registered there — this is
-   the same kind of portal action, not an API call).
-
-Real live Enable Banking and Google OAuth round-trips both also need
-Borys personally to complete an interactive login (bank credentials/2FA,
-Google account picker) — not something automatable regardless of
-infrastructure state.
+**DNS delegation:** `mymble.be` was registered externally (behostings.com);
+Route 53's nameservers (`ns-1030.awsdns-00.org`, `ns-1821.awsdns-35.co.uk`,
+`ns-409.awsdns-51.com`, `ns-935.awsdns-52.net`) were configured at the
+registrar and confirmed live (independently checked against three public
+resolvers). **Google Cloud Console:** `https://mymble.be/api/auth/google/callback`
+was added as an authorized redirect URI on the OAuth client. **Enable
+Banking developer portal:** `https://mymble.be/api/auth/enable-banking/callback`
+was registered as a redirect URI. All three completed by Borys; both
+live round-trips confirmed working (see above).
 
 **Branding survey (KBC Personal Finance Analyzer → Mymble), enumerated
 per the ticket's ask, not all fixed:** `frontend/index.html`'s `<title>`,
@@ -479,15 +474,17 @@ Revisit if S3 usage is introduced later.
 
 | URL | Value | Served by |
 |---|---|---|
-| Enable Banking redirect URI | `https://localhost:3001/callback` | `celery_worker` / `app/eb_callback_server.py`'s `CALLBACK_PORT` constant |
+| Enable Banking redirect URI (local dev) | `EB_REDIRECT_URL`, default `https://localhost:3001/callback` | `kbc_analyzer/enablebanking.py`'s `REDIRECT_URL` — this is a placeholder value only; **nothing automatically completes a redirect to it** since S7-04 retired the local catcher server. Use `POST /api/auth/enable-banking/callback` (manual code paste) to test this flow purely locally. |
 | Google OAuth redirect URI (S6-03) | `GOOGLE_REDIRECT_URI`, default `http://localhost:8000/api/auth/google/callback` | `backend` / `routers/user_auth.py`'s `google_callback` — must exactly match a redirect URI registered on the Google Cloud OAuth client, or Google rejects the request outright |
 | Frontend origin (CORS) | `FRONTEND_ORIGIN`, default `http://localhost:5173` | `backend/app/main.py`'s `CORSMiddleware` setup, `allow_credentials=True` as of S6-03 (session cookie must reach a cross-origin frontend fetch) |
 | Frontend's API base | `VITE_API_URL`, default `http://localhost:8000` | `frontend/src/lib/api.ts`'s `API_URL` constant, injected via compose, no `.env` file on disk |
 
 The redirect URI must be `https://` — Enable Banking's `/auth` endpoint
-rejects `http://` live (400), which is why the mkcert cert exists.
-`POST /api/auth/enable-banking/callback` is a manual fallback only; the
-frontend no longer calls it now that reconnect auto-catches the redirect.
+rejects `http://` live (400). In production this is real HTTPS on
+`mymble.be` (see the ACM/HTTPS section); locally, since S7-04 retired
+the mkcert-based catcher, `POST /api/auth/enable-banking/callback` (a
+manual fallback since S2-02) is how a developer completes this flow
+without hitting the real production domain.
 
 Live-verified end-to-end 2026-08-17 (S4-10 step m, with Borys completing
 the real KBC login himself — Codee never handles bank credentials):
@@ -679,11 +676,12 @@ readable by client-side JS — closes the main XSS session-theft path),
 redirect, but not cross-site subrequests — CSRF protection sufficient for
 a cookie-only session with no state-changing GET routes), `Secure`
 controlled by the `COOKIE_SECURE` env var, **default `false`**. Not
-hardcoded `true`: `backend`/`frontend` both run over plain `http://` in
-every environment this app runs in today (see URLs & Redirects — the only
-TLS in this stack is the unrelated port-3001 OAuth-callback catcher's
-mkcert cert), and a browser refuses to ever send a `Secure` cookie back to
-a plain-`http://` origin. Chromium-family browsers do special-case
+hardcoded `true`: local dev's `backend`/`frontend` still run over plain
+`http://` (see URLs & Redirects), and a browser refuses to ever send a
+`Secure` cookie back to a plain-`http://` origin — `false` stays the
+correct local-dev default. Production (`mymble.be`, real HTTPS since
+S7-04) sets `COOKIE_SECURE=true` in the ECS task definition.
+Chromium-family browsers do special-case
 `http://localhost` as a "potentially trustworthy" origin for some
 secure-context APIs, but that exemption isn't reliably specified to also
 cover the cookie `Secure` attribute across every browser/version — an
@@ -923,9 +921,11 @@ at S5-06. Both providers also implement `stream_complete()` (S4-06, chat) —
 both are now live-verified (Gemini 2026-08-16, Claude 2026-08-18, see
 docs/verification_debt.md's CLOSED section for both).
 
-**mkcert certificate**: `backend/certs/localhost.pem`, valid
-2026-08-08 → **2028-11-08**, SANs `localhost`/`127.0.0.1`/`::1`. Regenerate
-with mkcert before expiry, or retire in favor of real HTTPS by Sprint 6.
+**mkcert certificate**: RETIRED (S7-04). `backend/certs/localhost.pem`/
+`localhost-key.pem` are deleted along with the local catcher server that
+used them — real production HTTPS on `mymble.be`, proven working via a
+live Enable Banking reconnect, closed the condition this item used to
+be waiting on.
 
 ## Invariants
 

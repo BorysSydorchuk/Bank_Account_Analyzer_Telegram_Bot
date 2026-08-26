@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 
 ================================================================
 TICKET S7-04 — Domain, Real HTTPS, Retire mkcert
@@ -617,3 +617,126 @@ output). Ready for Borys to retry the real interactive Google sign-in
 and Enable Banking reconnect against `https://mymble.be` — this time
 worth doing a hard refresh (or private/incognito window) first, given
 the caching investigation above.
+
+## RETIREMENT COMPLETE (2026-08-26) — all six acceptance criteria met
+
+Borys confirmed both live round-trips against `https://mymble.be`:
+password login → explicit Google account linking from Settings (S6-07's
+account-linking safety fix), and Enable Banking reconnect. Proceeding to
+retire mkcert per the ticket's own instruction: don't delete until the
+new path is proven working end-to-end — it now is.
+
+### Deleted
+
+- `backend/app/eb_callback_server.py` — the local HTTPS catcher server
+- `backend/app/tasks/auth.py` — the Celery task (`catch_enable_banking_callback`)
+  that drove it
+- `backend/certs/localhost.pem` / `localhost-key.pem` — the mkcert
+  certificate they used (never git-tracked, gitignored — no `git rm`
+  needed, confirmed via `git ls-files`)
+- `backend/certs/` directory itself (now empty)
+
+### Updated (every real dependency, checked directly — not assumed)
+
+- `app/celery_app.py` — `include=["app.tasks.analysis", "app.tasks.auth"]`
+  → `include=["app.tasks.analysis"]`. **This was a real, would-have-broken
+  dependency**, not just documentation: Celery's `include` list tries to
+  import every listed module at worker startup, so leaving the deleted
+  module referenced would have crashed `celery_worker` immediately.
+- `app/routers/auth.py` — removed the `from ..tasks.auth import
+  catch_enable_banking_callback` import and the `.delay()` call in
+  `/reauthorize` (the callback route now completes reauthorization
+  inline, synchronously, when Enable Banking's redirect lands on it
+  directly — no background task needed at all anymore).
+- `kbc_analyzer/enablebanking.py`, `app/auth/session.py`,
+  `docker-compose.yml` — comments/config referencing the retired
+  server updated to describe what actually exists now, not what used to.
+- `tests/test_enable_banking_callback_csrf.py` — removed the two
+  `monkeypatch.setattr("app.routers.auth.catch_enable_banking_callback.delay", ...)`
+  calls (the attribute no longer exists to patch — the whole reason they
+  existed, working around a background task binding a local port, no
+  longer applies since that task is gone).
+- `CLAUDE.md` and `ARCHITECTURE.md` — every reference to the mkcert cert
+  or catcher server updated to past tense / marked RETIRED, not left
+  claiming current existence (ARCHITECTURE.md's own rule: "describes
+  what IS," not history — several sections had gone stale mid-ticket as
+  earlier S7-04 commits described "not yet retired" and needed a real
+  pass now that it's actually done).
+
+### Real verification, not narrated
+
+```
+$ python -m pytest -q   # full suite, backend
+104 passed, 1 warning in 12.01s
+
+$ docker exec kbc_analyzer-backend-1 python -c \
+    "from app.main import app; from app.celery_app import celery_app; print('IMPORT_OK')"
+IMPORT_OK
+
+$ docker exec kbc_analyzer-backend-1 python -c \
+    "from app.celery_app import celery_app; celery_app.loader.import_default_modules(); \
+     print(sorted(t for t in celery_app.tasks if t.startswith('app.')))"
+['app.tasks.analysis.run_sync_job']
+```
+`catch_enable_banking_callback` confirmed genuinely gone from Celery's
+task registry, not just deleted-but-still-imported-somewhere.
+
+**Real local dev stack rebuilt and restarted** with the actual on-disk
+changes (not just the dev container's live-mounted files):
+```
+$ docker compose up -d --build celery_worker backend
+...
+Container kbc_analyzer-backend-1 Started
+Container kbc_analyzer-celery_worker-1 Started
+
+$ curl -s http://localhost:8000/health
+{"status":"ok"}
+
+$ docker logs kbc_analyzer-celery_worker-1 | tail -15
+[tasks]
+  . app.tasks.analysis.run_sync_job
+celery@... ready.
+```
+No port 3001 published (confirmed via `docker compose ps` — `celery_worker`
+now shows no host port mapping at all, only the internal `8000/tcp`).
+
+### grep confirmation, with an honest distinction
+
+Per the ticket's own criterion ("confirmed via grep that nothing still
+references it"). Full repo-wide grep for `mkcert` still returns hits —
+being transparent about what they actually are rather than claiming a
+misleading zero:
+
+- **Code that still depends on mkcert to function: zero.** No import,
+  no file path reference to a cert that still needs to exist, no
+  runtime code path that requires it.
+- **Historical/explanatory comments correctly describing what was
+  retired and why** (`app/celery_app.py`, `app/routers/auth.py`,
+  `kbc_analyzer/enablebanking.py`, `ARCHITECTURE.md`, `CLAUDE.md`): kept
+  deliberately, same as this project's standing practice for every other
+  "replaces X" comment (e.g. S7-02's Dockerfile comments about what it
+  replaces from local dev). Removing these would remove real, useful
+  context, not close a dependency.
+- **Ticket files** (`docs/tickets/S4-*`, `S5-00`, `S6-*`, `S7-00`,
+  this file): historical record, never edited per this project's
+  ground-truth convention — same treatment as old "KBC Personal Finance
+  Analyzer" branding mentions in those same files.
+- **`docs/multi_user_migration_plan.md`**: a dated S5-01 audit snapshot,
+  historical by its own stated nature, not live-fixed for the same
+  reason.
+
+### All six acceptance criteria — final status
+
+1. mymble.be resolving over HTTPS with a real cert chain: **done**
+   (real openssl/curl evidence above).
+2. Enable Banking OAuth round-trip: **done** — confirmed by Borys, live.
+3. Google OAuth sign-in: **done** — confirmed by Borys, live (password
+   login → explicit linking from Settings, per S6-07).
+4. mkcert dependency fully retired: **done** — see above.
+5. Local dev environment still works unchanged: **confirmed** — real
+   dev stack rebuilt and restarted, `/health` returns `200`, Celery
+   worker starts clean with the correct (smaller) task registry.
+6. Branding references enumerated, two closed: **done** — see the
+   earlier Finding 1 fix commit.
+
+Sending to Reviewer for the final full pass.

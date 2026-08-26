@@ -45,8 +45,7 @@ REFRESH_THRESHOLD_SECONDS = 5 * 24 * 60 * 60
 SESSION_COOKIE_NAME = "session_id"
 
 # Secure must be off for local dev: backend/frontend both run over plain
-# http:// today (ARCHITECTURE.md's URLs & Redirects — only the unrelated
-# OAuth-callback catcher on port 3001 uses mkcert TLS), and a browser will
+# http:// today (ARCHITECTURE.md's URLs & Redirects), and a browser will
 # refuse to ever send a Secure cookie back to a plain http:// origin.
 # Chromium-family browsers do special-case http://localhost as a
 # "potentially trustworthy" origin for some secure-context APIs, but that

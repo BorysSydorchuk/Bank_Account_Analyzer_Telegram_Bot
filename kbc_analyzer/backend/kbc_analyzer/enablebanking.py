@@ -25,23 +25,30 @@ BASE_URL = "https://api.enablebanking.com"
 # Local file where we cache the active session (account UIDs + expiry date)
 SESSION_FILE = "eb_session.json"
 
-# Where Enable Banking redirects after login/consent. S3-07 Item 2 replaced
-# the old copy-paste-the-URL flow with a local catcher server (see
-# backend/app/eb_callback_server.py and backend/app/tasks/auth.py) that
-# listens on this exact address. An earlier http:// version of this URI was
-# rejected LIVE by Enable Banking's /auth endpoint ("400 Redirect URI not
-# allowed") because the portal only accepts https:// scheme redirect URIs.
-# The catcher server now serves HTTPS via an mkcert-generated localhost
-# certificate, and https://localhost:3001/callback has been registered for
-# this app_id in the Enable Banking developer portal — this is the live
-# local-dev value, and stays the default so local dev is unaffected.
+# Where Enable Banking redirects after login/consent. An earlier http://
+# version of this URI was rejected LIVE by Enable Banking's /auth endpoint
+# ("400 Redirect URI not allowed") because the portal only accepts https://
+# scheme redirect URIs.
 #
-# S7-04: env-driven so the production ECS task can point this at
-# https://mymble.be/api/auth/enable-banking/callback instead — the request
-# this module sends to Enable Banking must carry the same redirect URL
-# that's actually registered for it, or the request is rejected outright
-# (same "Redirect URI not allowed" error, now for a mismatch instead of a
+# S7-04: env-driven so the production ECS task points this at
+# https://mymble.be/api/auth/enable-banking/callback — the request this
+# module sends to Enable Banking must carry the same redirect URL that's
+# actually registered for it, or the request is rejected outright (same
+# "Redirect URI not allowed" error, now for a mismatch instead of a
 # disallowed scheme).
+#
+# RETIRED (S7-04): S3-07 Item 2's local catcher server
+# (app/eb_callback_server.py) and its mkcert-generated certificate are
+# gone — both have been proven unnecessary now that the real production
+# domain's own GET /api/auth/enable-banking/callback route (behind real
+# HTTPS) receives Enable Banking's redirect directly, no separate local
+# HTTPS listener required. The https://localhost:3001/callback default
+# below is kept only as a placeholder value (still what's registered for
+# this app_id at the Enable Banking developer portal for local dev) —
+# nothing automatically completes a redirect to it anymore. A developer
+# who needs to exercise this flow locally uses the POST /callback manual
+# fallback (paste the code from the browser's address bar), same as
+# before S3-07 Item 2 ever existed.
 REDIRECT_URL = os.getenv("EB_REDIRECT_URL", "https://localhost:3001/callback")
 
 

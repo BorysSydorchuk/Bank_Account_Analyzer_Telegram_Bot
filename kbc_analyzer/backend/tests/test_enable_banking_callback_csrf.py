@@ -49,16 +49,8 @@ def _login_as(client, user: User) -> None:
 
 
 def test_reauthorize_sets_state_cookie_matching_the_real_outgoing_state(
-    client, db_session, mock_enable_banking_client, monkeypatch
+    client, db_session, mock_enable_banking_client
 ):
-    # catch_enable_banking_callback.delay() runs eagerly in this test
-    # suite (conftest.py's _celery_eager) — left un-mocked it would
-    # actually call wait_for_callback() and block on binding a local
-    # port. Not what this test is about, so it's stubbed out; the CSRF
-    # logic under test lives entirely in the /reauthorize and /callback
-    # routes, not in that background task.
-    monkeypatch.setattr("app.routers.auth.catch_enable_banking_callback.delay", lambda: None)
-
     user = _make_eb_owner(db_session)
     _login_as(client, user)
 
@@ -106,14 +98,12 @@ def test_callback_rejects_a_forged_link_with_no_cookie_at_all(client, db_session
 
 
 def test_callback_with_matching_state_completes_reauthorization(
-    client, db_session, mock_enable_banking_client, monkeypatch
+    client, db_session, mock_enable_banking_client
 ):
     """The real success path — Reviewer's finding was specifically that
     this case had never actually been exercised. Real matching state,
     real cookie, real call through to EnableBankingService via the
     fake client (not a mocked-out complete_reauthorization)."""
-    monkeypatch.setattr("app.routers.auth.catch_enable_banking_callback.delay", lambda: None)
-
     user = _make_eb_owner(db_session)
     _login_as(client, user)
 

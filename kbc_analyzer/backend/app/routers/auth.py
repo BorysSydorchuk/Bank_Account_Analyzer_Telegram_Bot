@@ -20,7 +20,6 @@ from ..auth.session import COOKIE_SECURE
 from ..eb_service import EnableBankingError, EnableBankingService
 from ..models import User
 from ..schemas import CallbackRequest, EnableBankingStatus, ReauthorizeResponse
-from ..tasks.auth import catch_enable_banking_callback
 
 router = APIRouter(prefix="/api/auth/enable-banking", tags=["auth"])
 
@@ -53,11 +52,13 @@ def reauthorize(
     eb: EnableBankingService = Depends(get_eb_service),
     current_user: User = Depends(require_enable_banking_owner),
 ) -> ReauthorizeResponse:
-    # S3-07 Item 2: a background task now catches the redirect automatically
-    # (app/eb_callback_server.py) instead of the user copy-pasting it back —
-    # the frontend's only remaining job is to open auth_url and poll /status.
+    # S7-04: Enable Banking's redirect now lands directly on GET /callback
+    # below, over the real production domain — no background task or local
+    # catcher server needed (S3-07 Item 2's mkcert-based one is retired,
+    # see ARCHITECTURE.md). The frontend's only remaining job is to open
+    # auth_url and poll /status.
     #
-    # S7-04: state is generated here (not left to enablebanking.py's own
+    # state is generated here (not left to enablebanking.py's own
     # throwaway default) and stashed in a cookie on this JSON response —
     # this endpoint returns auth_url for the frontend to open in a new tab
     # rather than redirecting itself, so the cookie has to be set here,
@@ -72,7 +73,6 @@ def reauthorize(
         secure=COOKIE_SECURE,
         samesite="lax",
     )
-    catch_enable_banking_callback.delay()
     return ReauthorizeResponse(auth_url=auth_url)
 
 
