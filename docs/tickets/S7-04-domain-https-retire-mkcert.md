@@ -419,3 +419,95 @@ blocker it described is resolved, its job is done, and it also repeated
 the now-corrected unverified test claim. No replacement letter written;
 a stale status update isn't worth rewriting into something it wasn't at
 the time.
+
+## FIX (2026-08-26) — Finding 1: registration & Google sign-in root cause and fix
+
+Borys reported two live-test failures on `https://mymble.be`: registration
+and Google sign-in both failed at `/register`. His hypothesis (unconfirmed,
+correctly flagged as such): the `GOOGLE_CLIENT_SECRET`-in-Secrets-Manager
+wiring from earlier finally surfacing as a real failure.
+
+### Root cause, from real logs, not assumed
+
+Checked CloudWatch first, per instruction. `/ecs/kbc-analyzer` web log
+streams for the period around the reported failures show `/`, `/assets/*`,
+and `/health` traffic — real page loads — but **zero `/api/auth/*` POST
+requests anywhere**. The requests never reached the backend at all, which
+already rules out any backend-side cause (including the
+`GOOGLE_CLIENT_SECRET` hypothesis — a request that never arrives can't be
+failing because of a backend config value).
+
+Confirmed why directly: `curl`'d the live production JS bundle
+(`assets/index-DQSJkXVW.js`) and found `http://localhost:8000` baked into
+it, twice. `frontend/src/lib/api.ts` reads
+`import.meta.env.VITE_API_URL ?? "http://localhost:8000"` — a **Vite
+build-time** substitution, not something a container's runtime environment
+variables can influence after the fact. `Dockerfile.prod` (from S7-02)
+never declared `VITE_API_URL` as a build `ARG`, so every image ever built
+from it — including every one deployed in S7-04 — silently baked in the
+dev fallback. Every browser hitting `mymble.be` was POSTing
+`http://localhost:8000/api/auth/register` — the visitor's own machine, not
+the deployed backend. This explains both failures identically (one root
+cause, not two).
+
+### Fix
+
+`Dockerfile.prod`: `ARG VITE_API_URL=""`, promoted to `ENV` for the
+`npm run build` step. Empty string, not `https://mymble.be` — S7-02
+already serves the frontend and API from one FastAPI origin, so
+`api.ts`'s `${API_URL}${path}` pattern produces plain relative paths
+(`/api/auth/register`) that resolve against whatever origin actually
+served the page. More robust than hardcoding the domain: survives a
+future domain change with no rebuild.
+
+### Real verification, re-run and re-checked, not narrated
+
+```
+$ docker run --rm --entrypoint sh kbc-analyzer-web:test -c \
+    "grep -c 'localhost:8000' static/assets/*.js"
+0
+$ docker run --rm --entrypoint sh kbc-analyzer-web:test -c \
+    "grep -o '/api/auth/register' static/assets/*.js"
+/api/auth/register
+```
+
+Rebuilt, tagged `73ce39a`, pushed, redeployed. ECS rolling deployment
+confirmed complete (old task revision `4079462` fully drained — checked
+directly, not assumed, since the ALB round-robins across all healthy
+targets and would have kept serving the broken bundle from the old task
+until it drained):
+
+```
+$ curl -s https://mymble.be/ | grep -oE '/assets/[^"]*\.js'
+/assets/index-Snc-7-wd.js   # new content hash, confirms a genuinely new build
+
+$ curl -s https://mymble.be/assets/index-Snc-7-wd.js | grep -c "localhost:8000"
+0
+$ curl -s https://mymble.be/assets/index-Snc-7-wd.js | grep -c "/api/auth/register"
+1
+```
+
+**Real end-to-end registration against live production:**
+```
+$ curl -s -w "\nHTTP %{http_code}\n" -X POST https://mymble.be/api/auth/register \
+    -H "Content-Type: application/json" \
+    -d '{"email":"s7-04-verify-test@example.com","password":"TestPassword123!"}'
+{"id":"cb4813b7-bde8-457e-9dfa-89f0a694745d","email":"s7-04-verify-test@example.com"}
+HTTP 201
+```
+Confirmed in the real backend logs (not just the curl response):
+```
+INFO:     10.0.1.168:15212 - "POST /api/auth/register HTTP/1.1" 201 Created
+```
+Test user deleted afterward (real production database — cleaned up via
+the migration-runner task, `DELETE 1`, same pattern as S7-03).
+
+### Status
+
+Registration confirmed fixed and working end-to-end. Google sign-in
+should be fixed by the same change (same root cause — a relative
+`/api/auth/google/login` path now resolves correctly), but Borys still
+needs to personally complete the real interactive Google sign-in for
+that specific evidence, same as the Enable Banking round-trip. Finding
+2 (Enable Banking reconnect on `mymble.be`) is now unblocked and ready
+to test.
