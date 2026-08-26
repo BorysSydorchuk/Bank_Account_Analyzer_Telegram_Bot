@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 
 ================================================================
 TICKET S7-06 — Per-User Enable Banking Session Storage
@@ -245,18 +245,66 @@ $ grep -n "open(SESSION_FILE\|os.path.exists(SESSION_FILE" kbc_analyzer/backend/
   isolation tests, not asserted from code review.
 - ARCHITECTURE.md updated: **done**.
 
+### Deployed (2026-08-26, real evidence)
+
+Migration run for real against the production RDS instance, via the
+migration-runner pattern (same as S7-03), before either service was
+redeployed — production images don't run `alembic upgrade head`
+automatically (that's a local-dev-only Dockerfile CMD override), so
+running it first mattered, not just as a formality:
+
+```
+$ alembic current
+5c9a2e6b8f14
+$ alembic upgrade head
+INFO  [alembic.runtime.migration] Running upgrade 5c9a2e6b8f14 -> a3f6c8e2b704, add enable_banking_sessions table
+$ alembic current
+a3f6c8e2b704 (head)
+```
+
+Real schema, queried directly on RDS (not read back from the migration
+file):
+```
+('user_id', 'uuid')
+('session_id_encrypted', 'text')
+('account_uids_encrypted', 'text')
+('valid_until', 'timestamp with time zone')
+('updated_at', 'timestamp with time zone')
+```
+
+Both images built from `Dockerfile.prod`, tagged `7bc18df`, pushed to
+ECR, deployed via `terraform apply` (removed `ENABLE_BANKING_OWNER_EMAIL`
+from both task definitions in the same apply). Both services confirmed
+`ecs wait services-stable`, running count 1/1 on the new task
+definitions. `GET /health` returns `200` post-deploy.
+
+**Real production test — the owner gate is actually gone, not just in
+task-def env vars:** registered a throwaway test user
+(`s7-06-verify-test@example.com`), hit
+`GET /api/auth/enable-banking/status` with their session — `200
+{"status":"expired","expires_at":null}`, not the `403` this exact
+request would have returned before this ticket. `POST /reauthorize`
+for that same user returned a real Enable Banking authorization URL
+(`https://tilisy.enablebanking.com/ais/start?sessionid=...`) and set
+both cookies — the cookie jar confirms `eb_oauth_user_id` carried this
+test user's own real UUID
+(`b53077d0-e887-4079-8951-809bdc615a92`), matching their registration
+response exactly. Test account deleted afterward (migration-runner
+pattern, `DELETED 1`, independently re-confirmed via a `401` on a
+follow-up login attempt), same discipline as every other test account
+this project has created and cleaned up.
+
 ### What's still needed before this is confirmed
 
-1. Run the `a3f6c8e2b704` migration against the real RDS instance
-   (migration-runner pattern, same as S7-03) and rebuild/redeploy both
-   ECS services with this code — not yet done as of this delivery note.
-2. **Borys does one real reconnect** through `https://mymble.be`'s
-   Settings page after that deploy — this is both "restore his bank
-   connection" and the real live-flow evidence the ticket originally
-   asked for, just correctly reframed given the premise-check finding
-   that there was nothing left to migrate.
-3. After (2): a real sync against his real data, proving the
+1. **Borys does one real reconnect** through `https://mymble.be`'s
+   Settings page — this is both "restore his bank connection" and the
+   real live-flow evidence the ticket originally asked for, correctly
+   reframed given the premise-check finding that there was nothing left
+   to migrate (his prior session was already gone before this ticket
+   started).
+2. After (1): a real sync against his real data, proving the
    web-writes/worker-reads gap identified in the premise check is
-   actually closed, not just theoretically fixed.
+   actually closed, not just theoretically fixed by moving storage into
+   Postgres.
 
-Do not start S7-07 until (1)–(3) are complete and confirmed.
+Do not start S7-07 until (1)–(2) are complete and confirmed.
