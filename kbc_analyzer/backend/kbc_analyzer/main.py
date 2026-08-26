@@ -1,11 +1,24 @@
 """Terminal entry point — runs the analyzer interactively in the console.
 
-This is the non-Telegram way to use the tool. Run it with:
+DEV/PERSONAL-USE TOOL, NOT PART OF MYMBLE (the web app in kbc_analyzer/frontend
+and kbc_analyzer/backend/app/). This predates the web app entirely — a
+standalone CLI with its own local SQLite cache and direct Gemini calls,
+sharing only enablebanking.py's OAuth client code. It is NOT how a Mymble
+user connects a bank account (see app/routers/auth.py's reauthorize/callback
+routes, S7-04/S7-06/S7-07) and was never the primary onboarding path for the
+web app, even before those tickets — README.md has always documented it
+honestly as a separate CLI tool. Kept because it's genuinely useful on its
+own terms, not because anything web-facing still depends on it.
+
+Run it with:
     kbc-analyze         (after pip install -e .)
     python -m kbc_analyzer.main
 
 It uses the interactive auth flow (prints a URL, waits for the user to paste back the
-redirect URL) rather than the async Telegram bot flow.
+redirect URL) rather than the async Telegram bot flow. This flow — and the
+eb_session.json file it writes — is entirely local to whichever machine runs
+it; it has no connection to Mymble's per-user Postgres-backed sessions
+(app/eb_session_store.py).
 """
 import os
 import sys

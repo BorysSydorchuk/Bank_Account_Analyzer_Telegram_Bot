@@ -103,7 +103,9 @@ export interface StatisticsResponse {
 }
 
 export interface EnableBankingStatusResponse {
-  status: "active" | "expired"
+  // S7-07: "not_connected" (no session has ever existed for this user) is
+  // distinct from "expired" (one existed, then lapsed).
+  status: "active" | "expired" | "not_connected"
   expires_at: string | null
 }
 

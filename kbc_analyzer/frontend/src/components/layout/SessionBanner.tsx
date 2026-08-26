@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { AlertTriangle, CheckCircle2, Loader2, OctagonAlert, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Landmark, Loader2, OctagonAlert, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useEnableBankingReconnect } from "@/hooks/useEnableBankingReconnect"
@@ -23,13 +23,19 @@ export function SessionBanner() {
   const warningThresholdMs = WARNING_THRESHOLD_DAYS * 24 * 60 * 60 * 1000
 
   const isExpired = data.status === "expired"
+  // S7-07: distinct from isExpired — a first-time user has never
+  // connected anything, so "expired"/"reconnect" copy would be
+  // confusing. This is also this ticket's actual onboarding entry
+  // point: without it, a brand-new user has no nudge toward Settings
+  // at all, only an empty dashboard.
+  const isNotConnected = data.status === "not_connected"
   // Compares raw milliseconds rather than rounding to whole days — rounding (e.g. Math.ceil)
   // pushes a real 7.7-days-remaining session to "8 days," silently missing the 7-day banner.
   const isNearingExpiry = !isExpired && expiresAtMs !== null && expiresAtMs - Date.now() <= warningThresholdMs
 
-  if (phase === "idle" && !isExpired && !isNearingExpiry) return null
+  if (phase === "idle" && !isExpired && !isNearingExpiry && !isNotConnected) return null
 
-  const variant = phase === "success" ? "success" : isExpired ? "danger" : "warning"
+  const variant = phase === "success" ? "success" : isExpired ? "danger" : isNotConnected ? "primary" : "warning"
 
   const expiresAtLabel = data.expires_at
     ? new Date(data.expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
@@ -41,7 +47,8 @@ export function SessionBanner() {
         "flex flex-col gap-3 border-b px-6 py-3",
         variant === "danger" && "border-danger/30 bg-danger/10",
         variant === "warning" && "border-warning/30 bg-warning/10",
-        variant === "success" && "border-success/30 bg-success/10"
+        variant === "success" && "border-success/30 bg-success/10",
+        variant === "primary" && "border-primary/30 bg-primary/10"
       )}
     >
       <div className="flex items-start justify-between gap-4">
@@ -49,14 +56,18 @@ export function SessionBanner() {
           {variant === "danger" && <OctagonAlert className="mt-0.5 size-4 shrink-0 text-danger" />}
           {variant === "warning" && <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />}
           {variant === "success" && <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />}
+          {variant === "primary" && <Landmark className="mt-0.5 size-4 shrink-0 text-primary" />}
           <p className="text-sm text-text-primary">
-            {variant === "success" && "Bank connection reconnected — you're all set."}
+            {variant === "success" && "Bank connected — you're all set."}
             {variant === "danger" &&
               phase === "idle" &&
               "Bank connection expired. Reconnect to sync your transactions."}
             {variant === "warning" &&
               phase === "idle" &&
               `Your bank connection expires on ${expiresAtLabel}. Reconnect now to avoid interruption.`}
+            {variant === "primary" &&
+              phase === "idle" &&
+              "Connect your bank to start syncing transactions."}
             {phase === "waiting" && "Waiting for you to finish authorizing in the new tab…"}
             {phase === "error" && "Complete the KBC authorization in the new tab, then try again."}
           </p>
@@ -65,7 +76,7 @@ export function SessionBanner() {
         <div className="flex shrink-0 items-center gap-2">
           {phase === "idle" && (
             <Button size="sm" onClick={start} disabled={isStarting}>
-              {isStarting ? "Starting…" : "Reconnect"}
+              {isStarting ? "Starting…" : isNotConnected ? "Connect" : "Reconnect"}
             </Button>
           )}
           {phase === "waiting" && <Loader2 className="size-4 animate-spin text-text-secondary" />}

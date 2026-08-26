@@ -1002,6 +1002,49 @@ the ordinary Settings-page flow after this ships, exactly like any other
 user's first connection; that write lands directly in
 `enable_banking_sessions`, encrypted, durable across the next redeploy.
 
+**First-time connection needs no separate flow (S7-07).** `POST
+/reauthorize` never checked for an existing session before starting a
+fresh Enable Banking authorization — S7-06 already made "connect for
+the first time" and "reconnect" the same code path, without anyone
+setting out to do that. What S7-07 actually found and fixed:
+`EnableBankingStatus.status` gained a third value,
+`"not_connected"` (`app/schemas.py`), alongside `"active"`/`"expired"`
+— `eb_service.get_session_status()` used to report a user who had
+*never* connected identically to one whose session had genuinely
+lapsed, so `SessionBanner.tsx`/`BankConnectionSection.tsx` both showed
+"expired... reconnect," confusing copy for someone who'd never
+connected anything. Both components now branch on `not_connected` with
+distinct copy ("Connect your bank") and a distinct button label
+("Connect" vs "Reconnect") — same `useEnableBankingReconnect` hook and
+`start()` call either way, only the label changes.
+`SessionBanner.tsx` now also renders for `not_connected` (previously it
+stayed hidden unless expired/nearing-expiry) — this is the dashboard's
+only onboarding nudge toward Settings for a brand-new user; without it
+a first-time user had no discoverable path to connecting a bank at all
+beyond finding Settings unprompted.
+
+Also fixed: `app/eb_service.py`'s `EnableBankingAuthError` message —
+surfaced directly in a failed sync job's `error` field — used to tell
+the caller to run `python -m kbc_analyzer.main`, impossible advice for
+a web user with no terminal. Now points at Settings.
+
+**`kbc_analyzer/main.py` (and `bot.py`) kept, not deleted — confirmed
+not a Mymble onboarding path at all, not just deprioritized.**
+`ensure_session()` (the interactive terminal auth flow) is only ever
+called from `main.py`'s own `main()` — no web code path has ever
+invoked it. These are a genuinely separate, still-useful standalone
+tool (local SQLite cache, direct Gemini calls, Rich terminal output,
+predating the web app entirely) — deleting them would remove real,
+working functionality unrelated to Mymble, not retire dead auth code.
+`README.md` has always described them honestly as a separate CLI/bot
+tool and never claimed to be part of Mymble's onboarding. `main.py`'s
+own docstring now states this explicitly (S7-07) so it can't be
+mistaken for the web app's connection path by a future reader; its
+`eb_session.json` file (via `FileSessionStore`, the default
+`kbc_analyzer.enablebanking.EnableBankingClient` still falls back to)
+is entirely local to whatever machine runs it, with no connection to
+`enable_banking_sessions`.
+
 `GET /api/auth/me` — the frontend's route guard's one page-independent
 way to ask "does a valid session exist," rather than inferring it from
 whichever page-specific query happens to fire first. `AppShell`

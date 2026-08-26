@@ -1,4 +1,4 @@
-import { CheckCircle2, ExternalLink, Loader2, OctagonAlert } from "lucide-react"
+import { CheckCircle2, ExternalLink, Landmark, Loader2, OctagonAlert } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,6 +10,10 @@ export function BankConnectionSection() {
   const { phase, errorMessage, start, cancel, isStarting } = useEnableBankingReconnect()
 
   const isActive = data?.status === "active"
+  // S7-07: never-connected is a distinct state from expired — same
+  // underlying flow (start() below), different copy so a first-time
+  // user sees "Connect," not a message implying something was lost.
+  const isNotConnected = data?.status === "not_connected"
   const expiresAtLabel = data?.expires_at
     ? new Date(data.expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
     : null
@@ -29,11 +33,16 @@ export function BankConnectionSection() {
                 <CheckCircle2 className="size-4 text-success" />
                 <span className="text-text-primary">
                   {phase === "success"
-                    ? "Reconnected — connection is active."
+                    ? "Connected — connection is active."
                     : expiresAtLabel
                       ? `Active — expires ${expiresAtLabel}.`
                       : "Active."}
                 </span>
+              </>
+            ) : isNotConnected ? (
+              <>
+                <Landmark className="size-4 text-text-secondary" />
+                <span className="text-text-primary">No bank connected yet.</span>
               </>
             ) : (
               <>
@@ -43,8 +52,8 @@ export function BankConnectionSection() {
             )}
           </div>
           {phase === "idle" && (
-            <Button size="sm" variant="outline" onClick={start} disabled={isStarting}>
-              {isStarting ? "Starting…" : "Reconnect"}
+            <Button size="sm" variant={isNotConnected ? "default" : "outline"} onClick={start} disabled={isStarting}>
+              {isStarting ? "Starting…" : isNotConnected ? "Connect your bank" : "Reconnect"}
             </Button>
           )}
         </div>

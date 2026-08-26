@@ -49,9 +49,13 @@ class EnableBankingService:
 
     def get_account_uids(self) -> list[str]:
         if not self._client.session_valid():
+            # S7-07: used to tell the caller to run `python -m
+            # kbc_analyzer.main` — impossible advice for a web user, and
+            # the one place the web app's own code still pointed someone
+            # at a terminal command instead of the Settings page.
             raise EnableBankingAuthError(
-                "No active KBC session (or it has expired). Run "
-                "`python -m kbc_analyzer.main` once to authorize access, then retry."
+                "No active bank connection (or it has expired). Connect your "
+                "bank in Settings, then try again."
             )
         return self._client.get_cached_uids()
 
@@ -77,9 +81,19 @@ class EnableBankingService:
         Deliberately doesn't use session_valid()'s 1-day safety buffer — that buffer
         exists to stop *sync* from using a nearly-dead session, whereas this reports
         the real expiry so the frontend can decide its own warning threshold.
+
+        S7-07: "never connected" and "connected, then lapsed" used to both
+        report as "expired" — correct for sync (either way, sync can't
+        run), wrong for the UI, which needs to say "Connect your bank" to
+        a first-time user and "Reconnect" to someone whose session
+        actually expired. `get_session_info() is None` is the only signal
+        that distinguishes them — session_store.load() returns None only
+        when no row has ever been written for this user.
         """
         info = self._client.get_session_info()
-        valid_until = info.get("valid_until") if info else None
+        if info is None:
+            return {"status": "not_connected", "expires_at": None}
+        valid_until = info.get("valid_until")
         if not valid_until or datetime.fromisoformat(valid_until) <= datetime.now():
             return {"status": "expired", "expires_at": None}
         return {"status": "active", "expires_at": valid_until}

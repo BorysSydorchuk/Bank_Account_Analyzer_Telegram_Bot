@@ -76,6 +76,23 @@ def test_two_users_get_independent_encrypted_sessions(db_session, fake_eb_post):
     assert EnableBankingService(db_session, user_b.id).get_account_uids() == ["acct-uid-for-code-for-b"]
 
 
+def test_sync_error_for_an_unconnected_user_never_mentions_the_cli(db_session):
+    """S7-07: the one live place the web app's own code used to tell a
+    user to run `python -m kbc_analyzer.main` — impossible advice for a
+    web user with no terminal access."""
+    from app.eb_service import EnableBankingAuthError
+
+    user = _make_user(db_session, "eb-cli-message@example.com")
+
+    with pytest.raises(EnableBankingAuthError) as exc_info:
+        EnableBankingService(db_session, user.id).get_account_uids()
+
+    message = str(exc_info.value)
+    assert "kbc_analyzer.main" not in message
+    assert "python -m" not in message
+    assert "Settings" in message
+
+
 def test_a_second_users_reauthorization_never_touches_the_first_users_row(db_session, fake_eb_post):
     """The on_conflict_do_update in DatabaseSessionStore.save() is keyed
     on user_id — this proves that scoping is real, not just declared:
@@ -97,6 +114,39 @@ def test_a_second_users_reauthorization_never_touches_the_first_users_row(db_ses
     assert row_a_after.session_id_encrypted == session_id_before
     assert row_a_after.account_uids_encrypted == account_uids_before
     assert row_a_after.valid_until == valid_until_before
+
+
+def test_never_connected_is_distinct_from_expired(db_session, fake_eb_post):
+    """S7-07: a brand-new user with zero enable_banking_sessions rows
+    must report 'not_connected', not 'expired' — the two need different
+    frontend copy ('Connect your bank' vs 'Reconnect'), and this proves
+    the distinction is real at the service layer, not just declared in
+    the schema's Literal type."""
+    user_new = _make_user(db_session, "eb-never-connected@example.com")
+    user_lapsed = _make_user(db_session, "eb-lapsed@example.com")
+
+    # user_lapsed genuinely had a connection once — completed reauthorization
+    # for real, then its session lapsed (set directly to a past date, same
+    # as the existing expiry test above).
+    EnableBankingService(db_session, user_lapsed.id).complete_reauthorization("code-for-lapsed")
+    from datetime import datetime, timedelta
+
+    DatabaseSessionStore(db_session, user_lapsed.id).save(
+        {
+            "session_id": "lapsed-session",
+            "account_uids": ["lapsed-acct"],
+            "valid_until": (datetime.now() - timedelta(days=1)).isoformat(),
+        }
+    )
+
+    new_status = EnableBankingService(db_session, user_new.id).get_session_status()
+    lapsed_status = EnableBankingService(db_session, user_lapsed.id).get_session_status()
+
+    assert new_status["status"] == "not_connected"
+    assert lapsed_status["status"] == "expired"
+    # Never a false positive in either direction.
+    assert new_status["status"] != "expired"
+    assert lapsed_status["status"] != "not_connected"
 
 
 def test_expiry_status_is_independent_per_user(db_session):

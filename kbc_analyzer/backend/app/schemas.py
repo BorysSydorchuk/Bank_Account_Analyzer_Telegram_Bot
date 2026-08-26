@@ -174,7 +174,11 @@ class StatisticsResponse(BaseModel):
 
 
 class EnableBankingStatus(BaseModel):
-    status: Literal["active", "expired"]
+    # S7-07: "not_connected" (no session has ever existed for this user)
+    # is distinct from "expired" (one existed, then lapsed) — the two
+    # need different copy in the frontend ("Connect your bank" vs
+    # "Reconnect").
+    status: Literal["active", "expired", "not_connected"]
     expires_at: datetime | None
 
 
