@@ -198,6 +198,33 @@ No CI pipeline yet — build/push is a documented manual sequence; S7-02's
 ticket file flags GitHub Actions as a worthwhile follow-up, not built
 now.
 
+**Real bug found and fixed (2026-08-26, S7-04): `VITE_API_URL` was
+never wired into the build.** `frontend/src/lib/api.ts` reads
+`import.meta.env.VITE_API_URL ?? "http://localhost:8000"` — a Vite
+**build-time** substitution, not something a container's runtime
+environment can influence. S7-02's `Dockerfile.prod` never declared it
+as a build `ARG`, so every image (including the ones actually deployed
+in S7-04) silently baked in the `localhost:8000` dev fallback. Real
+production symptom: registration and Google sign-in both failed on
+`mymble.be` with **zero requests ever reaching the backend** — confirmed
+via CloudWatch (`/ecs/kbc-analyzer` web log streams filtered for
+`register`/`google`/error patterns and by time range: only `/`,
+`/assets/*`, `/health` traffic, no `/api/auth/*` POSTs at all) — because
+the browser was silently POSTing to the visitor's own machine, not the
+deployed backend. This ruled out an earlier hypothesis (that
+`GOOGLE_CLIENT_SECRET` was never actually wired into Secrets Manager) —
+the request never got far enough for that secret to matter.
+
+Fixed: `ARG VITE_API_URL=""` in `Dockerfile.prod`, promoted to `ENV` for
+the `npm run build` step (Vite only reads real env vars, not raw Docker
+args). Defaults to an **empty string, not the ALB/domain URL** — S7-02's
+own design already serves the frontend and API from one FastAPI origin,
+so `api.ts`'s `${API_URL}${path}` pattern produces plain relative paths
+(`/api/...`) that resolve against whatever origin actually served the
+page. More robust than hardcoding `mymble.be` into the image: works
+unchanged if the domain ever changes, and doesn't require rebuilding
+images per-environment.
+
 **RDS & Redis (provisioned, S7-03):** real bank data now lives on AWS
 for the first time. RDS PostgreSQL 16, `db.t4g.micro`, Single-AZ, 20 GB
 gp3, private subnets only (`aws_db_subnet_group`), deletion protection

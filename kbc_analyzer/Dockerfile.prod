@@ -21,6 +21,27 @@ COPY frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.js
 COPY frontend/vite.config.ts frontend/index.html frontend/components.json ./
 COPY frontend/public ./public
 COPY frontend/src ./src
+# VITE_API_URL is a Vite BUILD-TIME env var (import.meta.env is inlined
+# into the compiled JS, not read at container runtime) — S7-04 shipped
+# without this ARG, so every image silently baked in api.ts's dev
+# fallback ("http://localhost:8000") regardless of what the ECS task's
+# runtime environment set. Real production symptom: registration and
+# Google sign-in both failed on mymble.be with zero requests ever
+# reaching the backend (confirmed via CloudWatch — no /api/auth/* POSTs
+# in the logs at all), because the browser was POSTing to the visitor's
+# own machine, not the deployed backend. No default here — a missing
+# build arg should fail loudly, not silently reproduce this bug again.
+# Defaults to "" (same-origin, relative paths — api.ts does
+# `${API_URL}${path}`, so an empty string produces plain "/api/..."
+# requests that fetch() resolves against whatever origin served the
+# page). Correct default for this architecture: FastAPI serves both the
+# API and the compiled frontend from one origin (S7-02), so the frontend
+# never actually needs to know its own domain. Override only for a setup
+# where the API is genuinely on a different origin than the static
+# assets. Promoted from ARG to ENV because Vite's import.meta.env only
+# sees real environment variables at build time, not Docker build args.
+ARG VITE_API_URL=""
+ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 # ---- Stage: Python dependencies, built once in a venv so build tools
