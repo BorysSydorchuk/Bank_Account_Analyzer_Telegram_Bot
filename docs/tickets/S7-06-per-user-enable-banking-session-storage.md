@@ -294,17 +294,65 @@ pattern, `DELETED 1`, independently re-confirmed via a `401` on a
 follow-up login attempt), same discipline as every other test account
 this project has created and cleaned up.
 
-### What's still needed before this is confirmed
+### Borys reconnected — real account-identity finding, resolved (2026-08-26/27)
 
-1. **Borys does one real reconnect** through `https://mymble.be`'s
-   Settings page — this is both "restore his bank connection" and the
-   real live-flow evidence the ticket originally asked for, correctly
-   reframed given the premise-check finding that there was nothing left
-   to migrate (his prior session was already gone before this ticket
-   started).
-2. After (1): a real sync against his real data, proving the
-   web-writes/worker-reads gap identified in the premise check is
-   actually closed, not just theoretically fixed by moving storage into
-   Postgres.
+Borys reconnected through the live Settings page. Checking the result
+surfaced something worth flagging rather than assuming: the new
+`enable_banking_sessions` row landed under
+`boryssydorchuk@gmail.com` (`user_id 7370c4ac-...`, a second account,
+Google + password login, created the same day) — **not**
+`boris.sydorchuk@gmail.com` (`user_id e8cb5276-...`), the original
+bootstrap account this project has referenced as "Borys's account"
+since Sprint 4. Confirmed via `AskUserQuestion`: this was intentional —
+proceed with `boryssydorchuk@gmail.com`.
 
-Do not start S7-07 until (1)–(2) are complete and confirmed.
+### Real sync, real evidence, real production data
+
+Running this exposed two real gaps in `infra/migration_runner.tf`
+itself, both fixed properly via Terraform (not worked around by typing
+a secret into a terminal command — see `e265700`): it had never needed
+`SETTINGS_SECRET` (couldn't decrypt the new table) or Enable Banking
+credentials (couldn't call the real API) before this ticket needed to
+verify a real per-user sync through it.
+
+With both fixed, called `app.tasks.analysis.run_sync_job` directly —
+the exact function Celery invokes in production, not a special test
+path — against `boryssydorchuk@gmail.com`'s real session, for a real
+90-day range:
+
+```
+$ run_sync_job(job_id, "2026-05-28", "2026-08-26", "7370c4ac-5236-4a6e-9e93-719474e77d10")
+Categorization skipped: No API key configured for gemini. Add one in Settings before running analysis.
+FINAL_JOB_STATUS: {'status': 'failed', 'stage': 'categorizing', 'error': 'No API key configured for gemini...'}
+```
+
+The failure is real and expected — this account has no LLM key
+configured yet, unrelated to this ticket. What matters is everything
+*before* that stage: the fetching and storing stages both completed
+successfully, which only happens if the session this task read from
+Postgres (written by the web container's callback route) was valid and
+usable by this worker-equivalent process. Confirmed directly against
+the database, not inferred from the job status alone:
+
+```
+$ SELECT COUNT(*), MIN(booking_date), MAX(booking_date) FROM transactions WHERE user_id = '7370c4ac-...'
+(342, date(2026, 5, 29), date(2026, 8, 26))
+```
+
+342 real transactions, real dates, genuinely fetched from Enable
+Banking and stored — this is the actual proof the premise check's
+finding (web writes a session the worker could never see) is closed,
+not a theoretical argument about the code being correct. Migration
+runner task stopped afterward.
+
+### Acceptance criteria — final status
+
+- Borys's real connection working post-migration: **done**, reframed
+  per the premise check (a fresh reconnect, not a data migration) and
+  now proven with a real fetch-and-store against real production data.
+- Everything else: unchanged from the earlier delivery note above —
+  all done with real evidence.
+
+This delivery is complete, with real evidence for every acceptance
+criterion. Per this project's convention, `Status:` above stays
+`delivered` — confirmation is Borys's call, not mine to declare.
