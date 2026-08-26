@@ -68,26 +68,6 @@ create it early rather than tracking by memory").
   confirmation (or a fresh rotation if the confirmation comes back
   negative).
 
-### S7-05 test account left in production DB — cleanup blocked by missing tooling (S7-05)
-
-- **What was deferred:** `s7-05-verify-test@example.com`, created to
-  prove `COOKIE_SECURE`/session cookies round-trip correctly against
-  live HTTPS, was not deleted afterward (unlike the equivalent S7-04
-  test account, which was cleaned up via `aws ecs execute-command` into
-  the migration-runner task).
-- **Why:** `aws ecs execute-command` requires the Session Manager
-  plugin, which isn't installed on this machine — attempting it failed
-  with `SessionManagerPlugin is not found`. The migration-runner task
-  itself was started, confirmed running, then stopped cleanly (no
-  ongoing Fargate cost) once exec proved unavailable.
-- **What would close it:** Install the Session Manager plugin, or have
-  Borys delete the row directly (`DELETE FROM users WHERE email =
-  's7-05-verify-test@example.com'`) via any working path into the VPC.
-  Low urgency — it's an inert test account, no financial data attached,
-  same shape as every prior test account this project has created.
-- **Status (2026-08-26, S7-05):** OPEN — closes once either path above
-  runs.
-
 ### Email verification — not built (S6-04, out of scope by design)
 
 - **What was deferred:** No email address is ever verified as belonging
@@ -280,6 +260,41 @@ create it early rather than tracking by memory").
 ---
 
 ## CLOSED (recent)
+
+### S7-05 test account cleanup — SSM plugin installed, row deleted from production (closed 2026-08-26)
+
+Was OPEN: `s7-05-verify-test@example.com` left in the production
+database after the COOKIE_SECURE round-trip test, because `aws ecs
+execute-command` (the same cleanup path S7-04 used) needs the Session
+Manager plugin, not installed on this machine.
+
+**Closed for real:** installed the plugin (`winget install
+Amazon.SessionManagerPlugin`, v1.2.835.0), added it to `PATH`, then
+re-ran the migration-runner exec pattern with a `SELECT` before and
+after the `DELETE` — not just trusting the delete's own report:
+
+```
+BEFORE: [(UUID('7a0cad13-...'), 's7-05-verify-test@example.com')]
+DELETED rowcount: 1
+AFTER: []
+```
+
+Independently re-confirmed a third way, against the live API rather
+than the same migration-runner connection that did the delete:
+
+```
+$ curl -X POST https://mymble.be/api/auth/login \
+    -d '{"email":"s7-05-verify-test@example.com","password":"..."}'
+{"detail":"Invalid email or password."}
+HTTP 401
+```
+
+Migration-runner task stopped afterward (`STOPPED`, no lingering
+Fargate cost). RDS Query Editor was checked first as a possibly-faster
+path and ruled out with evidence, not assumed: `aws rds
+describe-db-instances` confirms this instance's engine is plain
+`postgres` (16.13) — Query Editor is an Aurora + Data API feature only,
+not available here regardless of console settings.
 
 ### Borys's real-account set-password + /login /register real-browser render (S6-04, closed 2026-08-21)
 

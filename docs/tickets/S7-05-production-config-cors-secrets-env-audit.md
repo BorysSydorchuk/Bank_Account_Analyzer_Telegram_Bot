@@ -202,3 +202,21 @@ Two items need Borys before this closes fully: confirm the Google
 Console secret rotation, and either install the SSM plugin or delete
 the leftover test row directly. Everything else meets its acceptance
 criterion with real evidence. Do not start S7-06 until confirmed.
+
+## CLEANUP (2026-08-26) — test account deleted, ledger entry closed
+
+Borys asked for the fastest path to delete
+`s7-05-verify-test@example.com`. RDS Query Editor checked and ruled out
+first (`aws rds describe-db-instances` confirms plain `postgres`
+16.13 — Query Editor needs Aurora + Data API, not available on this
+engine). Installed the Session Manager plugin (`winget install
+Amazon.SessionManagerPlugin`), then repeated the migration-runner exec
+pattern: `SELECT` before (row present), `DELETE` (rowcount 1), `SELECT`
+after (empty) — plus a third, independent check against the live
+`/api/auth/login` endpoint (`401 Invalid email or password`, proving
+the deletion is visible from outside the exec session too, not just
+inside the same DB connection that did it). Migration-runner task
+stopped afterward. `docs/verification_debt.md`'s OPEN entry for this
+moved to CLOSED with the real evidence.
+
+Only the Google Console confirmation remains open.
