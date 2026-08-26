@@ -589,3 +589,31 @@ fix at all** — it's configured entirely in Google Cloud Console (the
 app name/logo shown during sign-in), not sent by the backend in any
 form. Flagged for Borys to update directly in Console; noting this
 explicitly so it isn't mistaken for something still owed in code.
+
+## DEPLOYED & VERIFIED (2026-08-26) — b509fc9 live
+
+```
+$ curl -s https://mymble.be/ | grep -oE '/assets/[^"]*\.js'
+/assets/index-5O3Zm65w.js   # new bundle hash
+
+$ curl -s https://mymble.be/assets/index-5O3Zm65w.js | grep -o Mymble | wc -l
+2                            # LoginPage + RegisterPage wordmarks live
+
+$ curl -s -D - https://mymble.be/ -o /dev/null | grep cache-control
+cache-control: no-cache
+
+$ curl -s -D - https://mymble.be/assets/index-5O3Zm65w.js -o /dev/null | grep cache-control
+cache-control: public, max-age=31536000, immutable
+
+$ curl -sv https://mymble.be/api/auth/google/login
+< location: https://accounts.google.com/o/oauth2/v2/auth?...
+    &redirect_uri=https%3A%2F%2Fmymble.be%2Fapi%2Fauth%2Fgoogle%2Fcallback&...
+```
+
+Old task revision (`73ce39a`) confirmed fully drained before this
+verification ran (checked `aws ecs describe-services` directly, waited
+for exactly 1 deployment / 1 running task, not assumed from the apply
+output). Ready for Borys to retry the real interactive Google sign-in
+and Enable Banking reconnect against `https://mymble.be` — this time
+worth doing a hard refresh (or private/incognito window) first, given
+the caching investigation above.
