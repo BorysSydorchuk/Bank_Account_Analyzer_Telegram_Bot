@@ -144,12 +144,37 @@ def health() -> dict:
 # from before S7-02.
 _static_dir = Path(__file__).resolve().parent.parent / "static"
 if _static_dir.is_dir():
-    app.mount("/assets", StaticFiles(directory=_static_dir / "assets"), name="frontend-assets")
+
+    class _ImmutableStaticFiles(StaticFiles):
+        """S7-04: `/assets/*` filenames are Vite's own content hash
+        (`index-<hash>.js`) — a new deploy always produces a new filename,
+        so these are safe to cache forever. Neither `StaticFiles` nor
+        `FileResponse` set `Cache-Control` by default; without this,
+        browsers fall back to heuristic freshness, which can make a
+        stale bundle stick around across a deploy for no real reason.
+        """
+
+        def file_response(self, *args, **kwargs):
+            response = super().file_response(*args, **kwargs)
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return response
+
+    app.mount("/assets", _ImmutableStaticFiles(directory=_static_dir / "assets"), name="frontend-assets")
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str) -> FileResponse:
-        """Serve the SPA's static files, falling back to index.html for client-side routes."""
+        """Serve the SPA's static files, falling back to index.html for client-side routes.
+
+        S7-04: explicit no-cache on everything served here (index.html and
+        any non-hashed top-level file, e.g. favicon.svg) — unlike
+        `/assets/*`, these have stable filenames across deploys, so a
+        browser must always revalidate rather than risk serving a page
+        that references a bundle hash from a previous deploy. This is
+        what actually determines which /assets/index-<hash>.js a visitor
+        loads next; caching it is what let a stale bundle (the
+        VITE_API_URL bug — see ARCHITECTURE.md) persist longer than it
+        should have.
+        """
         candidate = _static_dir / full_path
-        if candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(_static_dir / "index.html")
+        target = candidate if candidate.is_file() else _static_dir / "index.html"
+        return FileResponse(target, headers={"Cache-Control": "no-cache"})

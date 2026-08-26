@@ -34,7 +34,7 @@ export function RegisterPage() {
     <div className="flex h-screen items-center justify-center bg-background p-6">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center gap-1 text-center">
-          <span className="text-lg font-semibold text-primary">KBC Analyzer</span>
+          <span className="text-lg font-semibold text-primary">Mymble</span>
           <p className="text-sm text-muted-foreground">Create an account to get started.</p>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">

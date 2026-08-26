@@ -511,3 +511,81 @@ needs to personally complete the real interactive Google sign-in for
 that specific evidence, same as the Enable Banking round-trip. Finding
 2 (Enable Banking reconnect on `mymble.be`) is now unblocked and ready
 to test.
+
+## INVESTIGATION (2026-08-26) — Google redirect_uri report: real root cause, not what it looked like
+
+Borys reported Google's account-chooser screen showing
+`redirect_uri=http%3A%2F%2Flocalhost%3...` and hypothesized (correctly
+flagged as unconfirmed) that the backend was sending a hardcoded
+localhost redirect URI regardless of domain.
+
+### Checked, not assumed
+
+**ECS task definition — all three revisions checked directly:**
+```
+$ aws ecs describe-task-definition --task-definition kbc-analyzer-web:1 \
+    --query 'taskDefinition.containerDefinitions[0].environment[?contains(name,`GOOGLE`)]'
+[{"name": "GOOGLE_CLIENT_ID", ...}, {"name": "GOOGLE_REDIRECT_URI", "value": "https://mymble.be/api/auth/google/callback"}]
+```
+Same result for revisions 2 and 3 (the currently-running one). The
+correct value has been in every task definition since the very first
+S7-04 deploy — this was never actually unwired in AWS.
+
+**Live reproduction, right now, against the real deployed backend:**
+```
+$ curl -sv https://mymble.be/api/auth/google/login
+< HTTP/1.1 307 Temporary Redirect
+< location: https://accounts.google.com/o/oauth2/v2/auth?...
+    &redirect_uri=https%3A%2F%2Fmymble.be%2Fapi%2Fauth%2Fgoogle%2Fcallback&...
+```
+Decoded: `https://mymble.be/api/auth/google/callback` — correct, right
+now, from the real running service.
+
+**Local `.env` checked for comparison:**
+```
+GOOGLE_REDIRECT_URI=http://localhost:8000/api/auth/google/callback
+```
+This is an exact match for what Borys's screenshot showed. Combined
+with the live backend being provably correct right now, the most likely
+explanation: the screenshot was taken against a stale, browser-cached
+frontend bundle from *before* the `73ce39a` `VITE_API_URL` fix, which
+was still making an absolute navigation to `http://localhost:8000/...`
+— landing on Borys's own locally-running dev backend (if it was running
+at the time), which used his local `.env`'s dev-default value. Not
+proven with certainty (I can't inspect his browser), but every checked
+fact is consistent with it and none contradict it.
+
+### Real, still-open bug found regardless, and fixed
+
+Investigating this surfaced a genuine gap: neither `StaticFiles` nor
+`FileResponse` (`app/main.py`) set any `Cache-Control` header. Without
+one, a browser's default heuristic caching can keep serving a stale
+`index.html` — and therefore a stale bundle reference — across a
+deploy indefinitely. This is a real, independent cause of exactly the
+symptom Borys saw (an old, pre-fix bundle sticking around client-side),
+regardless of whether it's specifically what happened here.
+
+**Fixed:** `/assets/*` (Vite's content-hashed filenames — a new deploy
+always produces a new filename) now serves
+`Cache-Control: public, max-age=31536000, immutable`. `index.html` and
+any other top-level static file serve `Cache-Control: no-cache` (always
+revalidate). Verified locally before deploying:
+```
+$ curl -s -D - http://localhost:18002/ -o /dev/null | grep cache-control
+cache-control: no-cache
+$ curl -s -D - http://localhost:18002/assets/index-5O3Zm65w.js -o /dev/null | grep cache-control
+cache-control: public, max-age=31536000, immutable
+```
+
+### Branding: two real items closed, one flagged as not code-fixable at all
+
+`LoginPage.tsx` and `RegisterPage.tsx`'s "KBC Analyzer" wordmarks fixed
+to "Mymble" — the two pages directly adjacent to the reported bug,
+verified present in the rebuilt bundle (`grep -o Mymble` → 2 matches).
+`App.tsx`/`Sidebar.tsx` left alone, out of scope for this fix.
+
+**Google's OAuth consent screen text is not something this codebase can
+fix at all** — it's configured entirely in Google Cloud Console (the
+app name/logo shown during sign-in), not sent by the backend in any
+form. Flagged for Borys to update directly in Console; noting this
+explicitly so it isn't mistaken for something still owed in code.

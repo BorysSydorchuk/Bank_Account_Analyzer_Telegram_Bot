@@ -417,17 +417,42 @@ Google account picker) — not something automatable regardless of
 infrastructure state.
 
 **Branding survey (KBC Personal Finance Analyzer → Mymble), enumerated
-per the ticket's ask, not all fixed:** `frontend/index.html`'s
-`<title>` fixed directly (trivial, clearly user-facing) — not yet live
-in the running image, needs a rebuild/redeploy. Still referencing the
-old name: `ARCHITECTURE.md` (this file's own title/header),
-`CLAUDE.md`, `REVIEWER.md`, `TESTER.md`,
-`docs/multi_user_migration_plan.md`, and several `docs/tickets/*.md`
-files (S4-03, S4-09, S4-10, S5-00, S6-00, S6-01, S7-00). Ticket files
-are historical record, not live-fixed. `ARCHITECTURE.md`/`CLAUDE.md`/
-`REVIEWER.md`/`TESTER.md` are a real, larger rename worth a deliberate
-pass, not scattered edits mid-ticket — flagged for Borys to decide
-scope/timing.
+per the ticket's ask, not all fixed:** `frontend/index.html`'s `<title>`,
+`frontend/src/pages/LoginPage.tsx`, and `frontend/src/pages/RegisterPage.tsx`
+fixed directly (2026-08-26 — the wordmark shown on the two pages the
+Finding 1 bug directly touched, closing two real items from this list
+rather than leaving them open indefinitely). Verified live in the
+deployed bundle after rebuild, not just in source.
+
+**Google's own OAuth consent screen text is NOT fixable from this
+codebase at all** — it's a Google Cloud Console setting (the app name
+shown during the Google sign-in flow), entirely outside anything the
+backend or frontend can control. Flagged for Borys to update directly
+in Console; noted here so it isn't mistaken for a code gap.
+
+Still referencing the old name: `frontend/src/App.tsx`,
+`frontend/src/components/layout/Sidebar.tsx` (left alone — out of scope
+for this fix, which was about the login/register pages specifically),
+`ARCHITECTURE.md` (this file's own title/header), `CLAUDE.md`,
+`REVIEWER.md`, `TESTER.md`, `docs/multi_user_migration_plan.md`, and
+several `docs/tickets/*.md` files (S4-03, S4-09, S4-10, S5-00, S6-00,
+S6-01, S7-00). Ticket files are historical record, not live-fixed.
+`ARCHITECTURE.md`/`CLAUDE.md`/`REVIEWER.md`/`TESTER.md` are a real,
+larger rename worth a deliberate pass, not scattered edits mid-ticket —
+flagged for Borys to decide scope/timing.
+
+**Static asset caching (2026-08-26, S7-04):** neither `StaticFiles` nor
+`FileResponse` set `Cache-Control` by default — found while
+investigating the Finding 1 Google-redirect-uri report (see the ticket
+file): without it, a browser's heuristic caching could keep serving a
+stale `index.html` (and therefore a stale bundle reference) across a
+deploy indefinitely, which is the most likely explanation for what
+looked like a live config bug but wasn't one. Fixed: `/assets/*`
+(Vite's content-hashed filenames, safe to cache forever) now serves
+`Cache-Control: public, max-age=31536000, immutable`; `index.html` and
+any other top-level static file serve `Cache-Control: no-cache` (always
+revalidate — this is what determines which hashed bundle a visitor
+loads next).
 
 **Cost guardrail:** an AWS Budget (`kbc-analyzer-monthly-budget`), COST
 type, **$150/month limit** (raised from the initial $50 once the full
