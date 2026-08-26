@@ -46,6 +46,48 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### GOOGLE_CLIENT_SECRET rotation — AWS-side confirmed, Google Console side not independently verifiable from this environment (S7-05)
+
+- **What was deferred:** S7-04 disclosed the real
+  `GOOGLE_CLIENT_SECRET` was printed in full during a debug session and
+  recommended regenerating it in Google Cloud Console. S7-05's audit
+  found strong circumstantial evidence this happened (the secret has two
+  Secrets Manager versions, changed via `PutSecretValue` ~7 minutes
+  after the commit that disclosed the exposure and made the
+  recommendation), but Google Cloud Console's own audit trail — the
+  only place that could directly confirm a new secret was generated
+  there and the old one is no longer valid — is outside this
+  environment's access entirely.
+- **Why:** No API/CLI access to Google Cloud Console exists in this
+  project's tooling; only Borys can check the OAuth client's secret
+  list in Console directly.
+- **What would close it:** Borys confirms in Console that the secret
+  currently in Secrets Manager corresponds to a freshly-generated value
+  (not the exposed one), or regenerates it now if it doesn't.
+- **Status (2026-08-26, S7-05):** OPEN — closes on Borys's one-line
+  confirmation (or a fresh rotation if the confirmation comes back
+  negative).
+
+### S7-05 test account left in production DB — cleanup blocked by missing tooling (S7-05)
+
+- **What was deferred:** `s7-05-verify-test@example.com`, created to
+  prove `COOKIE_SECURE`/session cookies round-trip correctly against
+  live HTTPS, was not deleted afterward (unlike the equivalent S7-04
+  test account, which was cleaned up via `aws ecs execute-command` into
+  the migration-runner task).
+- **Why:** `aws ecs execute-command` requires the Session Manager
+  plugin, which isn't installed on this machine — attempting it failed
+  with `SessionManagerPlugin is not found`. The migration-runner task
+  itself was started, confirmed running, then stopped cleanly (no
+  ongoing Fargate cost) once exec proved unavailable.
+- **What would close it:** Install the Session Manager plugin, or have
+  Borys delete the row directly (`DELETE FROM users WHERE email =
+  's7-05-verify-test@example.com'`) via any working path into the VPC.
+  Low urgency — it's an inert test account, no financial data attached,
+  same shape as every prior test account this project has created.
+- **Status (2026-08-26, S7-05):** OPEN — closes once either path above
+  runs.
+
 ### Email verification — not built (S6-04, out of scope by design)
 
 - **What was deferred:** No email address is ever verified as belonging

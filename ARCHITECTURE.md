@@ -309,6 +309,46 @@ S7-02 image) is written to `/tmp/private.pem` by a command-override
 script at container start, matching `ENABLEBANKING_PRIVATE_KEY_PATH` —
 no image rebuild needed to supply it.
 
+**Secrets audit (S7-05, real evidence, not narration).** Every secret
+the running application needs, and its actual verified source — live
+`aws ecs describe-task-definition` output, not read back from Terraform
+source alone:
+
+| Secret | Source | Verified |
+|---|---|---|
+| `DATABASE_URL` | Secrets Manager (`kbc-analyzer/database-url`), assembled from RDS's `manage_master_user_password`-managed secret | `secrets` field, `valueFrom` ARN, both web + worker task defs |
+| `SETTINGS_SECRET` | Secrets Manager (`kbc-analyzer/settings-secret`) | Same |
+| `GOOGLE_CLIENT_SECRET` | Secrets Manager (`kbc-analyzer/google-client-secret`) | Same, web task def only (worker never needs it) |
+| `EB_PRIVATE_KEY_CONTENT` | Secrets Manager (`kbc-analyzer/eb-private-key`) | Same, both task defs |
+| RDS master password | AWS-managed (`manage_master_user_password`), this project never holds it | Unchanged since S7-03 |
+
+`infra/ecs.tf`'s four `data "aws_secretsmanager_secret"` blocks are
+read-only ARN lookups — Terraform's state (checked directly, both the
+bootstrap and main config's local cache) holds only ARNs and metadata,
+never secret material. Every non-secret env var (`GOOGLE_CLIENT_ID`,
+`ENABLEBANKING_APP_ID`, `FRONTEND_ORIGIN`, `EB_REDIRECT_URL`, etc.) is
+plain task-definition `environment`, correctly separated from the four
+real secrets above.
+
+**GOOGLE_CLIENT_SECRET exposure (S7-04) — resolved.** S7-04 disclosed
+that this value was printed in full via an `od -c` debug inspection of
+`.env` mid-session, and flagged it as compromised pending regeneration.
+Checked directly (not assumed): `aws secretsmanager describe-secret`
+shows the secret has two versions (`AWSCURRENT` + `AWSPREVIOUS`), i.e.
+its value was genuinely changed once after creation — a
+`PutSecretValue` call by `KBC_analyser_deploy` at `2026-08-25 23:20:34
+CEST`, confirmed via CloudTrail. That's ~7 minutes after the `4079462`
+commit (23:13:05 CEST, the same delivery block that disclosed the
+exposure and recommended regenerating "once this ticket is otherwise
+wrapped up") — timing consistent with the regeneration actually having
+happened as recommended, not left open. **One caveat honestly flagged:**
+AWS-side evidence can confirm the *value* changed and that Google
+sign-in has since worked live end-to-end (S7-04, Borys confirmed) — it
+cannot independently confirm, from this environment, that the old
+exposed value was also revoked/deleted in Google Cloud Console itself
+(an external system, no API access here). Borys should confirm this
+directly in Console if not already done.
+
 **Production Enable Banking callback route
 (`GET /api/auth/enable-banking/callback`, `app/routers/auth.py`):**
 replaced the mkcert-based local catcher server's role for production.
@@ -351,16 +391,28 @@ task's environment) — the request Enable Banking receives has to carry
 the same redirect URL that's actually registered for it, or it's
 rejected regardless of what's registered in the portal.
 
-**RESOLVED (2026-08-26):** the interim COOKIE_SECURE/no-HTTPS limitation
-below no longer applies — real HTTPS is live (see the ACM/ALB section
-further down). Left here, struck through in spirit rather than deleted,
-as a record of a real interim state this project actually shipped
-through, not because it's still true: the web task set
-`COOKIE_SECURE=true` while the ALB only had an HTTP:80 listener, so no
-session/state cookie survived a round trip against the ALB for the
-roughly one-hour window between S7-04's first delivery and DNS
-delegation actually going live. Nothing shipped to real users during
-that window; local dev was never affected.
+**COOKIE_SECURE confirmed working end-to-end (S7-05, 2026-08-26).**
+`COOKIE_SECURE=true` in the web ECS task, real HTTPS live since S7-04 —
+verified with a real request against production, not just config
+inspection:
+
+```
+$ curl -s -D - -c cookies.txt -X POST https://mymble.be/api/auth/register \
+    -H "Content-Type: application/json" \
+    -d '{"email":"s7-05-verify-test@example.com","password":"..."}'
+< HTTP/1.1 201 Created
+< set-cookie: session_id=...; HttpOnly; Max-Age=2592000; Path=/; SameSite=lax; Secure
+
+$ curl -s -w "\nHTTP %{http_code}\n" -b cookies.txt https://mymble.be/api/auth/me
+{"id":"...","email":"s7-05-verify-test@example.com"}
+HTTP 200
+```
+
+The `Secure` cookie round-trips correctly against the live ALB and
+authenticates a follow-up request — the roughly one-hour interim window
+(S7-04's first delivery, before DNS delegation completed) where this
+didn't work is fully closed and no longer current. Test account created
+for this check.
 
 **ACM certificate & HTTPS (S7-04, real evidence — 2026-08-26):**
 `mymble.be` now serves real, CA-validated HTTPS. ACM certificate
@@ -469,6 +521,30 @@ are settled in EUR.
 adding one ("if the app uses S3 for anything") checked negative — no
 `boto3`/S3 references exist anywhere in `kbc_analyzer/` as of S7-01.
 Revisit if S3 usage is introduced later.
+
+**Environment separation (S7-05).** Local dev and production cannot
+accidentally cross-contaminate — verified structurally, not just by
+convention:
+
+- **No shared credential file.** Local dev reads `kbc_analyzer/.env`
+  (gitignored, `DATABASE_URL`/`REDIS_URL` point at docker-compose
+  service names `db`/`redis`, which don't resolve to anything outside
+  that compose network). Production reads nothing from a file at all —
+  every real secret is injected into the ECS task at container start via
+  the `secrets` field, resolved from Secrets Manager by the execution
+  role (see the secrets audit above). `infra/.env` (AWS deploy
+  credentials, also gitignored) is a third, entirely separate file —
+  local app config, AWS deploy credentials, and production app secrets
+  never share a file or a code path that reads them interchangeably.
+- **No route from a local machine to real RDS/Redis, even with
+  credentials.** Both sit in private VPC subnets with no route table
+  path from outside AWS (S7-03) — a local `.env` literally cannot be
+  pointed at them; the only way in is from inside the VPC (the
+  migration-runner pattern, ECS Exec).
+- **Local dev's `FRONTEND_ORIGIN`/`VITE_API_URL`/`COOKIE_SECURE`
+  defaults are all `localhost`/`false`**, structurally incapable of
+  matching production's `https://mymble.be`/`true` — there's no shared
+  default either environment could silently inherit from the other.
 
 ## URLs & Redirects
 
@@ -1038,13 +1114,34 @@ be waiting on.
   has exactly one configuration path — `allow_origins=[frontend_origin]`,
   always a single explicit origin read from `FRONTEND_ORIGIN`, never `"*"`
   and never a hardcoded list (verified: no other CORS configuration exists
-  anywhere in the codebase). `docker-compose.yml` currently hardcodes
-  `FRONTEND_ORIGIN: http://localhost:${FRONTEND_PORT:-5173}` for the
-  `backend` service — a dev-only value. **Sprint 6 must set
-  `FRONTEND_ORIGIN` to the real production frontend URL** (e.g.
-  `https://app.example.com`), not derived from `FRONTEND_PORT` at all;
-  there is no production compose file or override yet, so this is a real
-  gap to close before any public deployment, not just a value to swap.
+  anywhere in the codebase). `docker-compose.yml` hardcodes
+  `FRONTEND_ORIGIN: http://localhost:${FRONTEND_PORT:-5173}` for local
+  dev only — the production web ECS task sets `FRONTEND_ORIGIN=
+  https://mymble.be` directly in its task definition (confirmed live,
+  S7-05), closing what used to be an open Sprint 6 gap. Real preflight
+  evidence, run against the live domain (S7-05, 2026-08-26):
+
+  ```
+  $ curl -sv -X OPTIONS https://mymble.be/api/auth/login \
+      -H "Origin: https://mymble.be" \
+      -H "Access-Control-Request-Method: POST" \
+      -H "Access-Control-Request-Headers: content-type"
+  < HTTP/1.1 200 OK
+  < access-control-allow-origin: https://mymble.be
+  < access-control-allow-credentials: true
+  < access-control-allow-methods: DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT
+
+  $ curl -sv -X OPTIONS https://mymble.be/api/auth/login \
+      -H "Origin: https://evil.example.com" \
+      -H "Access-Control-Request-Method: POST" \
+      -H "Access-Control-Request-Headers: content-type"
+  < HTTP/1.1 400 Bad Request
+  (no access-control-allow-origin header — origin rejected)
+  ```
+
+  The real backend echoes `https://mymble.be` and only that origin — a
+  spoofed origin gets a `400` with no CORS header at all, not a silent
+  allow.
 - **`settings_service.VALID_PROVIDERS` is derived from
   `API_KEY_FIELD_BY_PROVIDER` (S5-07), not a second hand-kept set.** The
   two used to be independent literals — S5-06 found this let
