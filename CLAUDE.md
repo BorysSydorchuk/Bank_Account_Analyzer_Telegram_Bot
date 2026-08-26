@@ -258,14 +258,21 @@ VERIFICATION DEBT LEDGER:
 - docs/verification_debt.md tracks every verification that
   was deferred or completed structurally-only (no live
   execution). Any WHEN DONE answer containing "verified by
-  code review," "structurally verified," or "could not
-  test" MUST add or update a line in this file in the same
-  commit: what was deferred, why, what would close it, and
-  status.
+  code review," "structurally verified," "could not
+  test," "pending," "not yet," or "still open" MUST add or
+  update a line in this file in the same commit: what was
+  deferred, why, what would close it, and status.
 - Destructive verifications on real data or live credentials
   (breaking the bank session, overwriting a real API key)
   are never performed unilaterally — ask Borys for explicit
   consent, and record his answer in the ledger either way.
+- REMINDER (Reviewer finding, S7-08): ARCHITECTURE.md and
+  verification_debt.md are two different jobs, not one.
+  ARCHITECTURE.md says what's true right now; the ledger
+  says what still needs someone to act. Before closing out
+  any ticket's delivery write-up, check WHEN DONE for
+  "pending"/"not yet"/"still open" and touch BOTH files if
+  found — updating the one that felt natural is not enough.
  
 ================================================================
 PROMPT 5 — SCOPE DISCIPLINE

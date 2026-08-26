@@ -46,6 +46,33 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### SES still in sandbox mode — production access request pending (S7-08)
+
+- **What was deferred:** real users other than the one verified test
+  recipient (`boris.sydorchuk@gmail.com`) cannot receive email from
+  Mymble yet — SES sandbox mode only sends to individually-verified
+  recipient identities. Sandbox-mode sending itself is confirmed
+  working (real email, real receipt, S7-08).
+- **Why:** `aws sesv2 put-account-details` came back
+  `ReviewDetails.Status: DENIED` almost immediately — not a final
+  rejection, but AWS's automated first pass asking for more detail
+  (sending frequency, recipient-list handling, bounce/complaint/
+  unsubscribe handling, example emails). A full reply with real,
+  verified account facts was submitted via AWS Support Center (Case
+  `178778410400368`) — this account has no paid AWS Support plan, so
+  there's no API visibility into the review reasoning or a way to poll
+  case status/communications programmatically; only the console shows
+  it, and only a human can act on it.
+- **What would close it:** AWS's response to that reply (stated as
+  within 24 hours of submission), then — if approved — a follow-up
+  `aws sesv2 put-account-details --production-access-enabled` call (or
+  confirmation the approval already flipped `ProductionAccessEnabled`
+  without one) to move the account out of sandbox for real.
+- **Status (2026-08-27, S7-08):** OPEN — non-blocking for S7-09, which
+  can build and test the verification/reset flows against the one
+  verified sandbox recipient in the meantime. Closes once AWS responds
+  and, if approved, `ProductionAccessEnabled` is confirmed `true`.
+
 ### GOOGLE_CLIENT_SECRET rotation — AWS-side confirmed, Google Console side not independently verifiable from this environment (S7-05)
 
 - **What was deferred:** S7-04 disclosed the real
