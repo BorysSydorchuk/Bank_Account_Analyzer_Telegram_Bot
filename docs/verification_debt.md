@@ -46,29 +46,6 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
-### S7-07 real second-account KBC login not yet performed
-
-- **What was deferred:** the ticket's own acceptance criterion — "a
-  genuinely new test user (not Borys's account) can connect a real bank
-  account entirely through the browser" — needs an actual live KBC
-  login completed through the real consent screen. Everything up to
-  that point (the `not_connected` status fix, the new Connect entry
-  points, the real Enable Banking URL returned by `/reauthorize`) is
-  built, tested, and verified live against production; only the
-  interactive bank login itself is outstanding.
-- **Why:** Codee does not touch real bank credentials, on any account —
-  a standing rule this project has followed since before Sprint 4 (real
-  KBC logins have always been completed by Borys personally). This
-  isn't a tooling gap like S7-05's SSM plugin; it's a hard boundary,
-  not something a future environment change would close.
-- **What would close it:** Borys (or a second real person) completes
-  one real click-through of the KBC consent screen against a genuinely
-  new account, confirming the resulting session lands correctly in
-  `enable_banking_sessions` and is isolated from any other user's row.
-- **Status (2026-08-27, S7-07):** OPEN — blocks S7-08 per the ticket's
-  own "do not start S7-08 until confirmed" instruction. Closes once
-  that one real login is completed and confirmed.
-
 ### GOOGLE_CLIENT_SECRET rotation — AWS-side confirmed, Google Console side not independently verifiable from this environment (S7-05)
 
 - **What was deferred:** S7-04 disclosed the real
@@ -283,6 +260,31 @@ create it early rather than tracking by memory").
 ---
 
 ## CLOSED (recent)
+
+### S7-07 real second-account KBC login — completed, isolation confirmed (closed 2026-08-27)
+
+Was OPEN: the ticket's acceptance criterion needed a real, live KBC
+login through the browser, on a genuinely new account — something
+Codee cannot do (never touches real bank credentials).
+
+**Closed for real:** Borys completed the full browser-only flow end to
+end on a second, genuinely distinct account — no terminal step at any
+point. The categorization stage failed afterward, expected and
+unrelated: the fresh account has no Gemini API key configured yet, same
+non-issue the original S7-06 sync hit on its own fresh account.
+
+Independently re-verified, not just taken on report — queried
+production directly for every `enable_banking_sessions` row and its
+owning account:
+
+```
+('boryssydorchuk@gmail.com', valid_until=2026-11-23, updated_at=2026-08-26 21:51)
+('bathsters@gmail.com',       valid_until=2026-11-23, updated_at=2026-08-26 22:30)
+```
+
+Two distinct real accounts, two distinct rows, real ~90-day expiries —
+the second account's connection exists and is isolated from the first,
+exactly as S7-06/S7-07 were built to guarantee.
 
 ### S7-05 test account cleanup — SSM plugin installed, row deleted from production (closed 2026-08-26)
 

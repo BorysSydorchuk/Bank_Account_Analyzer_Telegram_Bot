@@ -1,4 +1,4 @@
-Status: delivered
+Status: confirmed
 
 ================================================================
 TICKET S7-07 — Web-Only First-Time Bank Authorization
@@ -246,3 +246,23 @@ The exact fix this ticket needed, confirmed live in production: a fresh
 account reports `not_connected`, not `expired`. Test account deleted
 afterward (migration-runner pattern), independently re-confirmed via a
 `401` on a follow-up login attempt.
+
+## CONFIRMED (2026-08-27)
+
+Borys completed the real second-account KBC login: full browser-only
+flow, no terminal step, on a genuinely distinct account
+(`bathsters@gmail.com`). Categorization failure afterward was expected
+(no Gemini key configured on the fresh account) — not a defect.
+
+Independently re-verified against production, not taken on report
+alone — queried every `enable_banking_sessions` row directly:
+
+```
+('boryssydorchuk@gmail.com', valid_until=2026-11-23, updated_at=2026-08-26 21:51)
+('bathsters@gmail.com',       valid_until=2026-11-23, updated_at=2026-08-26 22:30)
+```
+
+Two distinct real accounts, two distinct isolated rows — the last open
+acceptance criterion is met with real evidence.
+`docs/verification_debt.md`'s OPEN entry for this closed with the same
+evidence. Ready for S7-08.
