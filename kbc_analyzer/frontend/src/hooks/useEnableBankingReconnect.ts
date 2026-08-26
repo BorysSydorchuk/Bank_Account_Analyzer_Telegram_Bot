@@ -40,6 +40,11 @@ export function useEnableBankingReconnect() {
     queryFn: getEnableBankingStatus,
     refetchInterval: phase === "waiting" ? POLL_INTERVAL_MS : false,
     refetchIntervalInBackground: true,
+    // S7-09: same reasoning as useEnableBankingStatus.ts — a 403 here
+    // (unverified email) is never transient, and this hook shares that
+    // hook's exact queryKey, so both observers need the same retry
+    // setting to avoid one silently overriding the other's.
+    retry: false,
   })
 
   useEffect(() => {

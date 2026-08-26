@@ -746,7 +746,7 @@ this ticket built.
 
 | Table | Purpose | Key constraints |
 |---|---|---|
-| `users` | Sprint 6 (S6-01) — real accounts | `id` UUID PK; `email` UNIQUE; `password_hash`/`google_id` both nullable, `CHECK (password_hash IS NOT NULL OR google_id IS NOT NULL)` |
+| `users` | Sprint 6 (S6-01) — real accounts | `id` UUID PK; `email` UNIQUE; `password_hash`/`google_id` both nullable, `CHECK (password_hash IS NOT NULL OR google_id IS NOT NULL)`; `email_verified` boolean (S7-09), `true` at creation for Google signups, `false` by default for password signups, backfilled `true` for every pre-S7-09 row |
 | `transactions` | One row per bank transaction | `user_id` UUID FK → `users(id)`, NOT NULL (S6-02); `UNIQUE (user_id, external_id)` — **not** `external_id` alone: Enable Banking's own docs confirm `entry_reference` is not globally unique (S6-02 Step 0, see `docs/multi_user_migration_plan.md`); `manually_edited` boolean, default `false`; `category` FK → `categories(user_id, name)` `ON UPDATE CASCADE ON DELETE SET NULL`, composite since S6-02 |
 | `settings` | Per-user key/value store (LLM provider + encrypted API keys) | `(user_id, key)` composite PK (S6-02 — was a flat global store through Sprint 5); `user_id` FK → `users(id)` |
 | `categories` | Category → display color, per user | `(user_id, name)` composite PK (S6-02 — a category name is only unique per user); `source` ∈ `seed`\|`ai`\|`user`; `ai_color` holds the last AI color separately so "reset to AI" survives a user override |
@@ -932,11 +932,54 @@ Google's flow:
   `5/minute` each — deliberately IP-keyed, not user-keyed, unlike the
   future direction planned for chat/sync/analysis: the caller has no
   session at the exact moment they're hitting either endpoint.
-- **Out of scope, by design, per DECISIONS ALREADY MADE:** email
-  verification and email-based password reset — no transactional email
-  infrastructure exists yet. `/login`'s "Forgot password?" is a plain
-  inline note ("not available yet — contact support"), not a route to a
-  dead end.
+**Email verification (S7-09).** `users.email_verified` (migration
+`b8e4f2a9c317`) — `true` at creation for a Google signup
+(`crud.create_user_from_google`; Google's own OAuth flow already
+proves ownership, nothing this app's own verification email would add),
+`false` by default for a password signup (`crud.create_user_from_password`).
+Existing rows, from before this column existed, were backfilled `true`
+in the same migration — a forward-looking gate on new signups, not a
+retroactive lockout of already-trusted accounts. `POST /api/auth/register`
+sends a real email (S7-08's `verify_email` template, `app/email_service.py`)
+containing a link to a frontend page (`VerifyEmailPage.tsx`), which
+calls `POST /api/auth/verify-email {token}` — a single-use, 24h-TTL
+Redis token (`app/auth/tokens.py`, same opaque-token pattern as
+`auth/session.py`; `GETDEL` is one atomic Redis command, so a token can
+never be consumed twice even under a race). Public route, no session
+required — the link may be clicked on a different device, or with no
+active session at all.
+
+**Unverified-account access policy — a deliberate, stated decision, not
+an accident.** An unverified account gets full app access **except**
+Enable Banking (connect/reconnect/status/callback) and sync
+(`app/auth/dependency.py`'s `require_verified_email`, composed on
+`get_current_user`) — the single highest-stakes feature (attaching a
+real bank account) gated behind proven email ownership. Everything else
+(categories, settings, LLM provider config, browsing an otherwise-empty
+dashboard) stays open, so a new signup isn't locked out of setting up
+their account while they go check their inbox.
+
+**Password reset (S7-09), closing the Sprint 6 ledger entry for
+real.** `POST /api/auth/request-password-reset {email}` always returns
+the same generic response (`"If an account exists for that email,
+we've sent a password reset link."`) regardless of whether the email
+has an account — same enumeration-avoidance shape `/login` already
+uses — and is rate-limited (`REQUEST_PASSWORD_RESET_RATE_LIMIT`,
+`5/minute`, IP-keyed, same reasoning as `LOGIN_RATE_LIMIT`/`REGISTER_RATE_LIMIT`:
+no session exists yet at the moment this is hit). A real user gets a
+real email (S7-08's `password_reset` template) with a link to
+`ResetPasswordPage.tsx`, which calls `POST /api/auth/reset-password
+{token, password}` — a separate 1h-TTL token (deliberately shorter than
+email verification's 24h: this one grants the ability to set a new
+password outright, more sensitive than proving email ownership). Works
+identically whether the account previously had a password or was
+Google-only — `crud.set_password` just sets it either way, so this
+flow also doubles as a way for a Google-only account to gain password
+sign-in, not just the existing authenticated `/set-password` route.
+Password strength is validated *before* the token is consumed, same
+discipline as S5-07's `sync_lock` ("validate before acquiring") — a
+rejected weak-password attempt never burns an otherwise-still-valid
+token.
 
 `/login` (`frontend/src/pages/LoginPage.tsx`) — a layout route outside
 `AppShell` (`App.tsx`), since it's the one route reachable before a
@@ -944,8 +987,10 @@ session exists. The Google button is a plain `<a href>` to
 `GET /api/auth/google/login`, not a `fetch` — signing in is a real
 top-level browser navigation through Google's own consent screen, which a
 CORS-bound `fetch` can't follow the way a real navigation does. Also has
-an email/password form (S6-04) below a divider. `/register`
-(`RegisterPage.tsx`) is the same shape without the Google button.
+an email/password form (S6-04) below a divider, and a real
+`/forgot-password` link (S7-09 — no longer the S6-04 "not available
+yet" inline note). `/register` (`RegisterPage.tsx`) is the same shape
+without the Google button.
 
 **Auth middleware rollout — S6-05 partial, S6-06 full sweep.** S6-05
 protected `GET /api/categories`/`GET /api/budgets` as a first real test

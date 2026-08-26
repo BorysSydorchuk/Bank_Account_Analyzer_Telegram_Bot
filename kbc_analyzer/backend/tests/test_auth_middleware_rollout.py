@@ -99,4 +99,7 @@ def test_get_me_returns_the_authenticated_user(client, db_session):
     response = client.get("/api/auth/me")
 
     assert response.status_code == 200
-    assert response.json() == {"id": str(user.id), "email": "whoami@example.com"}
+    # email_verified: False (S7-09) — this test's user is created directly
+    # via User(...), which defaults to the column's server_default, same
+    # as a real /api/auth/register call would before the link is clicked.
+    assert response.json() == {"id": str(user.id), "email": "whoami@example.com", "email_verified": False}

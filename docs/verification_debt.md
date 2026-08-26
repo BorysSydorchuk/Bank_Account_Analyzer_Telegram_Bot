@@ -95,51 +95,25 @@ create it early rather than tracking by memory").
   confirmation (or a fresh rotation if the confirmation comes back
   negative).
 
-### Email verification — not built (S6-04, out of scope by design)
+### Real received-email confirmation for verification/reset — pending Borys (S7-09)
 
-- **What was deferred:** No email address is ever verified as belonging
-  to the person registering it. `POST /api/auth/register` creates a real,
-  usable account immediately on any syntactically-valid email.
-- **Why:** No transactional email infrastructure exists in this stack
-  yet (no SMTP/provider integration, no email-sending code anywhere) —
-  building it was explicitly out of S6-04's scope, a decision made before
-  that ticket was built, not discovered as a gap afterward. This is also
-  why S6-07 finding 1's account-linking takeover was possible in the
-  first place (see ARCHITECTURE.md's Invariants entry) — the fix there
-  closes the *linking* abuse path without needing verification, but
-  unverified email ownership remains true generally.
-- **What would close it:** Real transactional email sending (a provider
-  like SES/Postmark/Resend), a verification-token model, a
-  `POST /api/auth/register` flow that creates the account in an
-  unverified state and gates some set of actions on verification (exact
-  gating rules are a product decision, not made yet).
-- **Status (2026-08-21, S6-08 sprint close):** OPEN — closes at Sprint 7
-  or later, whichever sprint stands up real transactional email
-  infrastructure (Sprint 7's handoff explicitly names this as a
-  prerequisite).
-
-### Email-based password reset — not built (S6-04, out of scope by design)
-
-- **What was deferred:** `/login`'s "Forgot password?" is a static,
-  honest "not available yet — contact support" note (S6-04's own
-  acceptance criteria), not a working reset flow. A user who forgets
-  their password with no linked Google account has no self-service way
-  back in.
-- **Why:** Same root blocker as email verification above — no
-  transactional email infrastructure exists to deliver a reset link/token
-  safely. Deferring both together, rather than building a partial reset
-  flow now, avoids shipping a reset mechanism that can't verify the
-  request actually reached the account owner's inbox.
-- **What would close it:** Once transactional email exists (see the
-  entry above), a standard token-based reset flow: `POST
-  /api/auth/request-password-reset` (rate-limited, always returns the
-  same generic response regardless of whether the email exists — same
-  enumeration-avoidance shape as `POST /api/auth/login`), a
-  short-lived signed/random reset token emailed to the address, `POST
-  /api/auth/reset-password` consuming it once.
-- **Status (2026-08-21, S6-08 sprint close):** OPEN — closes at Sprint 7
-  or later, same closure condition as the email verification entry above
-  (both need the same underlying infrastructure, likely built together).
+- **What was deferred:** the actual acceptance evidence for both new
+  flows — an actual verification email and an actual reset email,
+  received in a real inbox and clicked through for real. Everything up
+  to that point is built and proven at the API level (see below), but
+  a real received-email screenshot is a categorically different kind of
+  proof, per this sprint's own standard (S7-08's "an actual email sent
+  and received... not a 'send succeeded' log line alone").
+- **Why:** SES is still sandbox-only (see the still-OPEN entry below),
+  so only the one verified recipient can receive real mail right now —
+  same reasoning as every other credential/email-touching step this
+  sprint, this needs Borys personally.
+- **What would close it:** Borys registers (or requests a reset) using
+  his verified sandbox address, receives the real email, clicks the
+  real link, confirms the result.
+- **Status (2026-08-27, S7-09):** OPEN — non-blocking for S7-10 unless
+  that ticket depends on this specific confirmation; closes once Borys
+  completes both real round trips.
 
 ### Date-range validation regression tests — not built (S5-07)
 
@@ -287,6 +261,49 @@ create it early rather than tracking by memory").
 ---
 
 ## CLOSED (recent)
+
+### Email verification — built, real API round-trip proven (closed 2026-08-27, S7-09)
+
+Was OPEN since S6-08: no transactional email infrastructure existed,
+so no email address was ever verified. Closed by S7-08 (real SES
+sending) + S7-09 (the actual verification flow):
+`users.email_verified` (migration `b8e4f2a9c317`), `auth/tokens.py`'s
+single-use Redis tokens, `POST /api/auth/register` sends a real email,
+`POST /api/auth/verify-email` consumes the token.
+
+**Real evidence, not narration:** a real local registration, a real
+token pulled from the real Redis key the send created, a real
+`POST /api/auth/verify-email` call, confirmed via a real `GET
+/api/auth/me` showing `email_verified: true` — run multiple times.
+Backend test suite: 126 passed, including real round-trip tests
+extracting the token from the actual email body the fake-SES fixture
+recorded (not a token generated separately by the test).
+
+**Not yet closed within this entry:** a real *received* email in a
+real inbox, clicked through by a human — tracked separately (see the
+OPEN "Real received-email confirmation" entry above), since that's a
+categorically different kind of proof and needs Borys, same as every
+other credential/email-touching step this sprint.
+
+### Email-based password reset — built, real API round-trip proven (closed 2026-08-27, S7-09)
+
+Was OPEN since S6-08, same root blocker as email verification above.
+Closed by S7-08 + S7-09: `POST /api/auth/request-password-reset`
+(generic response regardless of whether the email exists, rate-limited),
+`POST /api/auth/reset-password` (separate 1h-TTL token, password
+strength validated before the token is consumed).
+
+**Real evidence:** a real reset request, a real token pulled from the
+real email the fake-SES fixture recorded, a real
+`POST /api/auth/reset-password` call setting a new password, then a
+real login confirming the NEW password works and the OLD one no longer
+does. Also confirmed the generic-response shape genuinely doesn't
+depend on whether the email exists (same response, different real
+side effect only for the real account).
+
+**Not yet closed within this entry:** same as email verification
+above — a real received email, clicked through by a human, tracked
+separately.
 
 ### S7-07 real second-account KBC login — completed, isolation confirmed (closed 2026-08-27)
 

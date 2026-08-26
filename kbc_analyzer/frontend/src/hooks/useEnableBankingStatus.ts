@@ -10,5 +10,14 @@ export function useEnableBankingStatus() {
   return useQuery<EnableBankingStatusResponse>({
     queryKey: ["enableBankingStatus"],
     queryFn: getEnableBankingStatus,
+    // S7-09: require_verified_email's 403 is never transient — retrying
+    // it can't change the outcome, only the user verifying their email
+    // can. Without this, React Query's default retry (3 attempts) plus
+    // its network-aware pause/resume behavior can end up cycling
+    // indefinitely in some environments before ever settling into an
+    // error state, leaving isError permanently false and this query
+    // stuck reporting isPending — found while testing this exact 403
+    // case, not a hypothetical.
+    retry: false,
   })
 }

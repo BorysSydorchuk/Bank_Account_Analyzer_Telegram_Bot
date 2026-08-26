@@ -28,7 +28,11 @@ from app.models import User
 
 
 def _make_user(db_session, email: str) -> User:
-    user = User(email=email, password_hash="irrelevant-for-this-test")
+    # email_verified=True (S7-09): these tests exercise the Enable
+    # Banking routes, which require_verified_email now gates — an
+    # unverified user 403s before ever reaching the CSRF logic these
+    # tests are actually about.
+    user = User(email=email, password_hash="irrelevant-for-this-test", email_verified=True)
     db_session.add(user)
     db_session.flush()
     return user

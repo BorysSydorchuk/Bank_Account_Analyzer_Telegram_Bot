@@ -8,7 +8,7 @@ from ..db import get_db
 from ..models import User
 from .session import SESSION_COOKIE_NAME, get_session
 
-__all__ = ["get_current_user"]
+__all__ = ["get_current_user", "require_verified_email"]
 
 _NOT_AUTHENTICATED = HTTPException(status_code=401, detail="Not authenticated. Please log in.")
 
@@ -32,3 +32,21 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
         raise _NOT_AUTHENTICATED
 
     return user
+
+
+def require_verified_email(current_user: User = Depends(get_current_user)) -> User:
+    """S7-09's deliberate unverified-account access policy: an
+    unverified account gets full app access EXCEPT Enable Banking
+    (connect/reconnect/status/callback) and sync — the single
+    highest-stakes feature (attaching a real bank account), gated behind
+    proven email ownership. Everything else (categories, settings, LLM
+    provider config) stays open; this isn't a blanket lockout, only a
+    boundary on the one action with real financial/security stakes. See
+    ARCHITECTURE.md's Auth section for the full justification.
+    """
+    if not current_user.email_verified:
+        raise HTTPException(
+            status_code=403,
+            detail="Verify your email before connecting a bank account. Check your inbox for the verification link.",
+        )
+    return current_user

@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { AlertTriangle, CheckCircle2, Landmark, Loader2, OctagonAlert, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Landmark, Loader2, MailWarning, OctagonAlert, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useEnableBankingReconnect } from "@/hooks/useEnableBankingReconnect"
@@ -12,12 +12,41 @@ import { cn } from "@/lib/utils"
 const WARNING_THRESHOLD_DAYS = 7
 
 export function SessionBanner() {
-  const { data } = useEnableBankingStatus()
+  const { data, isError } = useEnableBankingStatus()
   const { phase, errorMessage, start, cancel, isStarting } = useEnableBankingReconnect()
 
   const [dismissed, setDismissed] = useState(false)
 
-  if (dismissed || !data) return null
+  if (dismissed) return null
+
+  // S7-09: an unverified account 403s this exact request
+  // (require_verified_email) — without this branch, the banner would
+  // just silently disappear (the !data check below), leaving a
+  // freshly-registered user with no visible explanation of why there's
+  // no "Connect your bank" prompt at all. Real-world proof this needed
+  // fixing, not a hypothetical: a fresh local registration surfaced it.
+  if (isError) {
+    return (
+      <div className="flex items-start justify-between gap-4 border-b border-warning/30 bg-warning/10 px-6 py-3">
+        <div className="flex items-start gap-2.5">
+          <MailWarning className="mt-0.5 size-4 shrink-0 text-warning" />
+          <p className="text-sm text-text-primary">
+            Verify your email to connect a bank account — check your inbox for the link.
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="Dismiss"
+          onClick={() => setDismissed(true)}
+          className="rounded p-1 text-text-secondary hover:bg-black/5"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+    )
+  }
+
+  if (!data) return null
 
   const expiresAtMs = data.expires_at ? new Date(data.expires_at).getTime() : null
   const warningThresholdMs = WARNING_THRESHOLD_DAYS * 24 * 60 * 60 * 1000

@@ -27,6 +27,13 @@ export function AccountSection() {
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {user && <p className="text-sm text-text-secondary">Signed in as {user.email}</p>}
+        {user && !user.email_verified && (
+          // S7-09: the only visible cue an unverified account has —
+          // there's no resend-link button (out of this ticket's scope,
+          // flagged in docs/verification_debt.md), so this just states
+          // what's true rather than offering an action that doesn't exist.
+          <p className="text-xs text-warning">Email not verified — check your inbox for the verification link.</p>
+        )}
         {linked && <p className="text-xs text-success">Google account connected.</p>}
         {linkFailed && (
           <p className="text-xs text-danger">

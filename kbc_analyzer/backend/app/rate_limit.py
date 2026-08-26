@@ -34,3 +34,10 @@ ANALYSIS_RATE_LIMIT = "10/minute"
 # scripted guessing loop.
 LOGIN_RATE_LIMIT = "5/minute"
 REGISTER_RATE_LIMIT = "5/minute"
+
+# S7-09: same reasoning as LOGIN/REGISTER — the caller has no session at
+# the exact moment they're hitting this, so IP is the only signal
+# available, and it's the one endpoint whose response deliberately can't
+# reveal anything (see routers/user_auth.py's request_password_reset),
+# making it exactly the kind of probe-able surface those two already are.
+REQUEST_PASSWORD_RESET_RATE_LIMIT = "5/minute"

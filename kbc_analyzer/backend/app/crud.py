@@ -29,12 +29,22 @@ def get_user_by_email(db: Session, email: str) -> User | None:
 
 def create_user_from_google(db: Session, google_id: str, email: str, display_name: str | None) -> User:
     """A brand-new account created by a first Google sign-in — no
-    password_hash, google_id-only (satisfies users_has_auth_method)."""
-    user = User(google_id=google_id, email=email, display_name=display_name)
+    password_hash, google_id-only (satisfies users_has_auth_method).
+    email_verified=True (S7-09): Google's own OAuth flow already proves
+    ownership of this email address, so there's nothing this app's own
+    verification email would add — sending one anyway would just be
+    friction with no security benefit."""
+    user = User(google_id=google_id, email=email, display_name=display_name, email_verified=True)
     db.add(user)
     db.commit()
     db.refresh(user)
     return user
+
+
+class GoogleIdConflictError(Exception):
+    """link_google_id (S7-09, Sprint 6 Security Auditor Finding A) refused
+    to attach google_id — either the target account already has a
+    different one, or this google_id already belongs to someone else."""
 
 
 def link_google_id(db: Session, user: User, google_id: str) -> User:
@@ -42,11 +52,23 @@ def link_google_id(db: Session, user: User, google_id: str) -> User:
     account. As of S6-07 finding 1, the only caller is the explicit,
     authenticated GET /api/auth/google/link flow — never a bare Google
     sign-in callback matching on email alone, which was the account-
-    takeover path that finding closed. Callers are still responsible for
-    checking user.google_id is None themselves first; this function
-    itself will happily overwrite an existing google_id if asked, so
-    routers/user_auth.py's google_callback rejects that case before ever
-    calling this."""
+    takeover path that finding closed.
+
+    S7-09 (Sprint 6 Security Auditor Finding A): these two checks used to
+    live only in routers/user_auth.py's google_callback, which happened
+    to be this function's only caller — nothing stopped a future second
+    caller from skipping them and silently overwriting a google_id or
+    stealing one already claimed elsewhere. Enforced here now, so the
+    invariant holds regardless of who calls this.
+    """
+    if user.google_id is not None and user.google_id != google_id:
+        raise GoogleIdConflictError(
+            f"User {user.id} already has a different google_id linked; refusing to overwrite it."
+        )
+    already_linked_elsewhere = get_user_by_google_id(db, google_id)
+    if already_linked_elsewhere is not None and already_linked_elsewhere.id != user.id:
+        raise GoogleIdConflictError(f"google_id {google_id!r} is already linked to a different account.")
+
     user.google_id = google_id
     db.commit()
     db.refresh(user)
@@ -55,9 +77,24 @@ def link_google_id(db: Session, user: User, google_id: str) -> User:
 
 def create_user_from_password(db: Session, email: str, password_hash: str) -> User:
     """A brand-new account created by /api/auth/register (S6-04) — no
-    google_id, password_hash-only (satisfies users_has_auth_method)."""
+    google_id, password_hash-only (satisfies users_has_auth_method).
+    email_verified defaults to False (the column's server_default) —
+    unlike a Google signup, nothing has proven this email address yet;
+    S7-09's verification email is what closes that gap."""
     user = User(email=email, password_hash=password_hash)
     db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def verify_user_email(db: Session, user: User) -> User:
+    """Marks user's email verified — the one write
+    POST /api/auth/verify-email (S7-09) performs after consuming a real
+    token from auth/tokens.py. Idempotent: setting it True again on an
+    already-verified account is harmless, so no existence/state check is
+    needed here."""
+    user.email_verified = True
     db.commit()
     db.refresh(user)
     return user

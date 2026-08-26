@@ -44,10 +44,6 @@ export function LoginPage() {
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  // Not a route — S6-04 explicitly has no email infrastructure to send a
-  // reset link through yet. A dead/broken link would be worse than
-  // admitting the feature isn't there; this just says so, inline.
-  const [showForgotPasswordNote, setShowForgotPasswordNote] = useState(false)
 
   const loginMutation = useMutation({
     mutationFn: () => login(email, password),
@@ -125,13 +121,12 @@ export function LoginPage() {
                 <label className="text-sm font-medium text-foreground" htmlFor="login-password">
                   Password
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setShowForgotPasswordNote((shown) => !shown)}
+                <Link
+                  to="/forgot-password"
                   className="text-xs text-muted-foreground underline-offset-2 hover:underline"
                 >
                   Forgot password?
-                </button>
+                </Link>
               </div>
               <input
                 id="login-password"
@@ -142,11 +137,6 @@ export function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 className={INPUT_CLASSES}
               />
-              {showForgotPasswordNote && (
-                <p className="text-xs text-muted-foreground">
-                  Password reset isn't available yet — contact support for help getting back in.
-                </p>
-              )}
             </div>
             <Button type="submit" size="lg" className="h-10 w-full" disabled={loginMutation.isPending}>
               {loginMutation.isPending ? "Signing in…" : "Sign in"}

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from .. import crud, job_store, sync_lock
-from ..auth.dependency import get_current_user
+from ..auth.dependency import get_current_user, require_verified_email
 from ..date_range import require_valid_date_range, validate_date_range_body
 from ..db import get_db
 from ..models import User
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 @router.post("/sync", response_model=SyncResponse)
 @limiter.limit(SYNC_RATE_LIMIT)
 def sync_transactions(
-    request: Request, body: SyncRequest, current_user: User = Depends(get_current_user)
+    request: Request, body: SyncRequest, current_user: User = Depends(require_verified_email)
 ) -> SyncResponse:
     # S4-02: the Enable Banking fetch used to happen here, synchronously,
     # before this endpoint could return — 4 to 18 seconds of the request just

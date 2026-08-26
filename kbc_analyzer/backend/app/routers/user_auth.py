@@ -9,6 +9,7 @@ google/link (S6-07 finding 1) is the only route that may ever attach a
 google_id to an existing account — see _LINK_INTENT_COOKIE_NAME's
 docstring below for the account-takeover path this closes.
 """
+import logging
 import os
 import secrets
 from uuid import UUID
@@ -21,11 +22,26 @@ from starlette.status import HTTP_303_SEE_OTHER, HTTP_307_TEMPORARY_REDIRECT
 from .. import crud
 from ..auth.dependency import get_current_user
 from ..auth.password import PasswordTooWeakError, hash_password, validate_password_strength, verify_password
+from ..auth.tokens import (
+    consume_email_verify_token,
+    consume_password_reset_token,
+    create_email_verify_token,
+    create_password_reset_token,
+)
 from ..db import get_db
+from ..email_service import send_templated_email
 from ..google_oauth import GoogleOAuthError, build_authorize_url, exchange_code_for_tokens, fetch_userinfo
 from ..models import User
-from ..rate_limit import LOGIN_RATE_LIMIT, REGISTER_RATE_LIMIT, limiter
-from ..schemas import LoginRequest, RegisterRequest, SetPasswordRequest, UserOut
+from ..rate_limit import LOGIN_RATE_LIMIT, REGISTER_RATE_LIMIT, REQUEST_PASSWORD_RESET_RATE_LIMIT, limiter
+from ..schemas import (
+    LoginRequest,
+    RegisterRequest,
+    RequestPasswordResetRequest,
+    ResetPasswordRequest,
+    SetPasswordRequest,
+    UserOut,
+    VerifyEmailRequest,
+)
 from ..auth.session import (
     COOKIE_SECURE,
     SESSION_COOKIE_NAME,
@@ -34,6 +50,16 @@ from ..auth.session import (
     destroy_session,
     set_session_cookie,
 )
+
+logger = logging.getLogger(__name__)
+
+# Generic response for both the reset-request and reset-completion
+# endpoints — matches the enumeration-avoidance shape already established
+# for /login (S6-04) and this project's own decided shape for this exact
+# endpoint (docs/verification_debt.md's "Email-based password reset"
+# entry, deferred since Sprint 6): never confirm or deny whether an email
+# has an account, or whether a reset token was ever valid.
+_RESET_REQUESTED_MESSAGE = "If an account exists for that email, we've sent a password reset link."
 
 router = APIRouter(prefix="/api/auth", tags=["user-auth"])
 
@@ -84,6 +110,53 @@ _LINK_INTENT_COOKIE_NAME = "oauth_link_user_id"
 
 def _frontend_origin() -> str:
     return os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+
+
+def _send_verification_email(user: User) -> None:
+    """S7-09. The link points at a frontend page (VerifyEmailPage), not a
+    raw backend URL — the frontend then calls POST /verify-email itself
+    via lib/api.ts's request() helper, which already resolves the
+    correct API origin in every environment (local dev has the frontend
+    and backend on different ports; production serves both from one
+    origin). A raw backend link would need its own public-origin env var
+    to get this right in both places; routing through the frontend
+    avoids needing one.
+
+    Never lets an email-sending failure break registration itself — the
+    account is still created and usable (with S7-09's unverified-access
+    restriction in effect); the user can be resent a link later even
+    though no resend endpoint exists yet (flagged in
+    docs/verification_debt.md, not built here — out of this ticket's
+    named scope). Deliberately catches Exception, not just
+    ClientError/BotoCoreError — a real gap found while testing locally:
+    local dev has no AWS_REGION set at all, which raises a bare KeyError
+    from inside email_service.py, not a botocore exception a narrower
+    catch would have covered. This is the one place in the app a broad
+    except is the correct choice, not carelessness: email delivery is a
+    best-effort side effect of registration, never something that should
+    be able to fail the primary action for any reason.
+    """
+    token = create_email_verify_token(user.id)
+    link = f"{_frontend_origin()}/verify-email?token={token}"
+    try:
+        send_templated_email(user.email, "verify_email", link=link)
+    except Exception:
+        logger.exception("Failed to send verification email to user %s", user.id)
+
+
+def _send_password_reset_email(user: User) -> None:
+    """Same never-let-SES-break-the-request reasoning as
+    _send_verification_email — the caller here (request_password_reset)
+    already always returns the same generic response regardless of
+    outcome, so a send failure is invisible to the caller either way,
+    exactly as intended (nothing here should tell an attacker whether
+    the email existed or whether sending succeeded)."""
+    token = create_password_reset_token(user.id)
+    link = f"{_frontend_origin()}/reset-password?token={token}"
+    try:
+        send_templated_email(user.email, "password_reset", link=link)
+    except Exception:
+        logger.exception("Failed to send password reset email to user %s", user.id)
 
 
 def _google_redirect(state: str) -> RedirectResponse:
@@ -206,21 +279,17 @@ def google_callback(
         if linking_user is None:
             return _clear_oauth_cookies(link_error_redirect)
 
-        already_linked_elsewhere = crud.get_user_by_google_id(db, google_id)
-        if already_linked_elsewhere is not None and already_linked_elsewhere.id != linking_user.id:
-            # This Google identity already belongs to a different account
-            # — never repoint it, that would be the same takeover shape
-            # in reverse (stealing a Google identity away from its real
-            # owner into whatever account initiated this link request).
+        # S7-09 (Sprint 6 Security Auditor Finding A): both invariants
+        # below — never repoint a Google identity already claimed
+        # elsewhere, never overwrite a different existing google_id —
+        # used to be checked here, duplicating what crud.link_google_id
+        # itself now enforces. Relying on that single source of truth
+        # instead of re-checking it here first means a future caller of
+        # link_google_id can't accidentally skip this.
+        try:
+            crud.link_google_id(db, linking_user, google_id)
+        except crud.GoogleIdConflictError:
             return _clear_oauth_cookies(link_error_redirect)
-        if linking_user.google_id is not None and linking_user.google_id != google_id:
-            # The account initiating the link already has a different
-            # Google identity attached — crud.link_google_id refuses to
-            # overwrite it (by design), so surface that as a clean
-            # failure here rather than a silent no-op.
-            return _clear_oauth_cookies(link_error_redirect)
-
-        crud.link_google_id(db, linking_user, google_id)
 
         success_redirect = RedirectResponse(
             f"{_frontend_origin()}/settings?linked=google", status_code=HTTP_303_SEE_OTHER
@@ -295,6 +364,7 @@ def register(request: Request, body: RegisterRequest, response: Response, db: Se
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     user = crud.create_user_from_password(db, body.email, hash_password(body.password))
+    _send_verification_email(user)
     session_id = create_session(user.id)
     set_session_cookie(response, session_id)
     return user
@@ -342,3 +412,72 @@ def set_password(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     crud.set_password(db, current_user, hash_password(body.password))
+
+
+@router.post("/verify-email", status_code=204)
+def verify_email(body: VerifyEmailRequest, db: Session = Depends(get_db)) -> None:
+    """S7-09. Public — no session required, since the whole point is a
+    link clicked from an email, possibly on a different device than the
+    one currently signed in (or not signed in at all). The token itself
+    (32 random bytes, single-use, 24h TTL — auth/tokens.py) is the only
+    proof of identity this needs; nothing here reveals whether a given
+    token was ever valid versus already used versus never issued —
+    always the same 204/400 shape.
+    """
+    user_id = consume_email_verify_token(body.token)
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="This verification link is invalid or has expired.")
+
+    user = db.get(User, user_id)
+    if user is None:
+        # The token was real but the account it named is gone (deleted
+        # between the email being sent and the link being clicked) —
+        # same public-facing shape as an invalid/expired token, not a 500.
+        raise HTTPException(status_code=400, detail="This verification link is invalid or has expired.")
+
+    crud.verify_user_email(db, user)
+
+
+@router.post("/request-password-reset", status_code=200)
+@limiter.limit(REQUEST_PASSWORD_RESET_RATE_LIMIT)
+def request_password_reset(
+    request: Request, body: RequestPasswordResetRequest, db: Session = Depends(get_db)
+) -> dict:
+    """S7-09, closing the "Email-based password reset" entry deferred
+    since Sprint 6 (docs/verification_debt.md). Always the same response
+    whether or not body.email has an account — the same
+    enumeration-avoidance shape login already uses, and the exact shape
+    that entry's own "what would close it" already specified. The email
+    is only actually sent when a real user exists; nothing observable
+    from this response depends on that.
+    """
+    user = crud.get_user_by_email(db, body.email)
+    if user is not None:
+        _send_password_reset_email(user)
+    return {"message": _RESET_REQUESTED_MESSAGE}
+
+
+@router.post("/reset-password", status_code=204)
+def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)) -> None:
+    """S7-09. Public — same reasoning as verify_email above (a link
+    clicked from an email, not necessarily from an authenticated
+    session). Works identically whether the account previously had a
+    password or was Google-only (crud.set_password just sets it either
+    way) — a reasonable, harmless side effect: it doubles as a way for a
+    Google-only account to gain password sign-in through this flow too,
+    not just the existing authenticated /set-password route.
+    """
+    try:
+        validate_password_strength(body.password)
+    except PasswordTooWeakError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    user_id = consume_password_reset_token(body.token)
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or has expired.")
+
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or has expired.")
+
+    crud.set_password(db, user, hash_password(body.password))

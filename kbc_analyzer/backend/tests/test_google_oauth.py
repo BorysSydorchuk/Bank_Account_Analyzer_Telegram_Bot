@@ -190,6 +190,56 @@ def test_google_link_rejects_when_the_account_already_has_a_different_google_id(
     assert user.google_id == "original-google-sub"  # unchanged
 
 
+# ── S7-09, Sprint 6 Security Auditor Finding A ──────────────────────────────
+# The two tests above already prove google_callback rejects both invalid
+# cases — but that only proves the router's own pre-checks worked, which
+# is exactly what Finding A said wasn't good enough: those checks used to
+# live only at the one call site. These two call crud.link_google_id
+# directly, bypassing the router and its cookies/session entirely, to
+# prove the function rejects both cases itself, for any caller.
+
+
+def test_link_google_id_directly_rejects_overwriting_a_different_existing_google_id(db_session):
+    user = User(email="direct-call-a@example.com", google_id="original-sub", password_hash="a-real-hash")
+    db_session.add(user)
+    db_session.flush()
+
+    with pytest.raises(crud.GoogleIdConflictError):
+        crud.link_google_id(db_session, user, "a-different-sub")
+
+    db_session.refresh(user)
+    assert user.google_id == "original-sub"  # unchanged
+
+
+def test_link_google_id_directly_rejects_a_google_id_already_claimed_elsewhere(db_session):
+    already_linked = User(email="direct-call-owner@example.com", google_id="claimed-sub")
+    db_session.add(already_linked)
+    wants_to_link = User(email="direct-call-b@example.com", password_hash="a-real-hash")
+    db_session.add(wants_to_link)
+    db_session.flush()
+
+    with pytest.raises(crud.GoogleIdConflictError):
+        crud.link_google_id(db_session, wants_to_link, "claimed-sub")
+
+    db_session.refresh(wants_to_link)
+    assert wants_to_link.google_id is None  # never attached
+
+
+def test_link_google_id_directly_succeeds_for_a_genuinely_new_link(db_session):
+    """The positive case, so the two rejection tests above aren't proving
+    link_google_id rejects everything — confirms it still does its one
+    real job when neither invariant is violated."""
+    user = User(email="direct-call-success@example.com", password_hash="a-real-hash")
+    db_session.add(user)
+    db_session.flush()
+
+    result = crud.link_google_id(db_session, user, "a-fresh-sub")
+
+    assert result.google_id == "a-fresh-sub"
+    db_session.refresh(user)
+    assert user.google_id == "a-fresh-sub"
+
+
 def test_returning_google_user_reuses_their_existing_row(client, db_session, monkeypatch):
     first = _complete_google_sign_in(client, monkeypatch, google_id="google-sub-repeat", email="repeat@example.com")
     first_user_id = get_session(first.cookies[SESSION_COOKIE_NAME])

@@ -1,4 +1,4 @@
-import { CheckCircle2, ExternalLink, Landmark, Loader2, OctagonAlert } from "lucide-react"
+import { CheckCircle2, ExternalLink, Landmark, Loader2, MailWarning, OctagonAlert } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -6,7 +6,7 @@ import { useEnableBankingReconnect } from "@/hooks/useEnableBankingReconnect"
 import { useEnableBankingStatus } from "@/hooks/useEnableBankingStatus"
 
 export function BankConnectionSection() {
-  const { data } = useEnableBankingStatus()
+  const { data, isError } = useEnableBankingStatus()
   const { phase, errorMessage, start, cancel, isStarting } = useEnableBankingReconnect()
 
   const isActive = data?.status === "active"
@@ -26,7 +26,16 @@ export function BankConnectionSection() {
       <CardContent className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm">
-            {!data ? (
+            {isError ? (
+              // S7-09: require_verified_email's 403 — without this
+              // branch, !data below is permanently true for an
+              // unverified account and this card is stuck on "Checking
+              // connection…" forever. Same fix as SessionBanner.tsx.
+              <>
+                <MailWarning className="size-4 text-warning" />
+                <span className="text-text-primary">Verify your email to connect a bank account.</span>
+              </>
+            ) : !data ? (
               <span className="text-text-secondary">Checking connection…</span>
             ) : phase === "success" || isActive ? (
               <>
@@ -51,7 +60,7 @@ export function BankConnectionSection() {
               </>
             )}
           </div>
-          {phase === "idle" && (
+          {phase === "idle" && !isError && (
             <Button size="sm" variant={isNotConnected ? "default" : "outline"} onClick={start} disabled={isStarting}>
               {isStarting ? "Starting…" : isNotConnected ? "Connect your bank" : "Reconnect"}
             </Button>

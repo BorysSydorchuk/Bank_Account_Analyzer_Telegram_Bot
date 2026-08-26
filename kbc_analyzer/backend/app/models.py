@@ -37,6 +37,17 @@ class User(Base):
     password_hash = Column(Text)
     google_id = Column(Text, unique=True)
     display_name = Column(Text)
+    # S7-09: true for every Google-created account (Google already proves
+    # email ownership as part of its own OAuth flow — see
+    # crud.create_user_from_google) and for a password account once its
+    # owner clicks the real verification link S7-08's email sends.
+    # Existing rows (pre-dating this column) were backfilled true in the
+    # same migration — a forward-looking gate on new signups, not a
+    # retroactive lockout of already-trusted accounts. Gates Enable
+    # Banking connect/sync only (app/auth/dependency.py's
+    # require_verified_email) — see ARCHITECTURE.md's Auth section for
+    # the full justification.
+    email_verified = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

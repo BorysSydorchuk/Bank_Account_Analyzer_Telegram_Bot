@@ -365,8 +365,22 @@ class SetPasswordRequest(BaseModel):
     password: str = Field(max_length=128)
 
 
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(max_length=256)
+
+
+class RequestPasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(max_length=256)
+    password: str = Field(max_length=128)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     email: str
+    email_verified: bool

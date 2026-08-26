@@ -6,14 +6,19 @@ can silently refresh that consent on the user's behalf. These endpoints replace 
 terminal-only flow (`python -m kbc_analyzer.main`) with one the dashboard can drive,
 still ending in the user manually completing KBC's own login/consent screen.
 
-S7-06: all three endpoints now use plain get_current_user — any authenticated user
-can establish and manage their own independent Enable Banking connection, replacing
-S6-06's require_enable_banking_owner gate (which restricted this to a single named
-account because the single eb_session.json file could only ever hold one connection
-at a time). Session state itself now lives in enable_banking_sessions, one encrypted
-row per user_id (app/eb_session_store.py) — EnableBankingService is constructed per
+S7-06: all endpoints use per-user auth — any authenticated user can establish and
+manage their own independent Enable Banking connection, replacing S6-06's
+require_enable_banking_owner gate (which restricted this to a single named account
+because the single eb_session.json file could only ever hold one connection at a
+time). Session state lives in enable_banking_sessions, one encrypted row per
+user_id (app/eb_session_store.py) — EnableBankingService is constructed per
 request, scoped to current_user.id, so one user's session can never be read or
 overwritten by another's request.
+
+S7-09: gated behind require_verified_email, not plain get_current_user — Enable
+Banking is the one feature this project's deliberate unverified-account access
+policy restricts (see app/auth/dependency.py's require_verified_email docstring
+and ARCHITECTURE.md's Auth section).
 """
 import secrets
 from uuid import UUID
@@ -22,7 +27,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 
-from ..auth.dependency import get_current_user
+from ..auth.dependency import require_verified_email
 from ..auth.session import COOKIE_SECURE
 from ..db import get_db
 from ..eb_service import EnableBankingError, EnableBankingService
@@ -55,14 +60,14 @@ _EB_STATE_COOKIE_TTL_SECONDS = 10 * 60  # generous for a human to complete the b
 _EB_USER_COOKIE_NAME = "eb_oauth_user_id"
 
 
-def get_eb_service(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> EnableBankingService:
+def get_eb_service(db: Session = Depends(get_db), current_user: User = Depends(require_verified_email)) -> EnableBankingService:
     return EnableBankingService(db, current_user.id)
 
 
 @router.get("/status", response_model=EnableBankingStatus)
 def get_status(
     eb: EnableBankingService = Depends(get_eb_service),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_email),
 ) -> EnableBankingStatus:
     return EnableBankingStatus(**eb.get_session_status())
 
@@ -71,7 +76,7 @@ def get_status(
 def reauthorize(
     response: Response,
     eb: EnableBankingService = Depends(get_eb_service),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_email),
 ) -> ReauthorizeResponse:
     # S7-04: Enable Banking's redirect now lands directly on GET /callback
     # below, over the real production domain — no background task or local
@@ -111,7 +116,7 @@ def reauthorize(
 def callback(
     body: CallbackRequest,
     eb: EnableBankingService = Depends(get_eb_service),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_email),
 ):
     """Manual fallback (S2-02) — no longer called by the frontend now that
     reconnecting catches the redirect automatically (S3-07 Item 2), but kept
@@ -211,7 +216,7 @@ def callback_redirect(
     code: str | None = None,
     state: str | None = None,
     eb: EnableBankingService = Depends(get_eb_service),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_email),
 ) -> HTMLResponse:
     """S7-04: the real production redirect target — Enable Banking's own
     browser-redirect GET request lands here directly, over the app's real

@@ -4,10 +4,11 @@
 export type InsightType = "pattern" | "anomaly" | "saving" | "rhythm" | "category"
 export type InsightSeverity = "info" | "warning" | "positive"
 
-// S6-04
+// S6-04, email_verified added S7-09
 export interface UserOut {
   id: string
   email: string
+  email_verified: boolean
 }
 
 export interface InsightItem {
