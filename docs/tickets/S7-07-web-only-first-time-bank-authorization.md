@@ -220,3 +220,29 @@ to click through the real KBC consent screen once.
 
 Do not start S7-08 until Borys completes one real second-account KBC
 login through the live browser flow, confirming this end-to-end.
+
+### Deployed (2026-08-27, real evidence)
+
+No schema change this ticket — straight to image build/push/deploy, no
+migration step needed. Both images built from `Dockerfile.prod`, tagged
+`106aa2a`, pushed to ECR, deployed via `terraform apply`. Both services
+confirmed `ecs wait services-stable`, running 1/1 on the new task
+definitions.
+
+```
+$ curl -s https://mymble.be/ | grep -oE '/assets/[^"]*\.js'
+/assets/index-9pxxV0Nq.js   # new bundle hash, confirms a genuinely new build
+
+$ curl -s -X POST https://mymble.be/api/auth/register -d '{"email":"s7-07-verify-test@example.com",...}'
+{"id":"db293224-...","email":"s7-07-verify-test@example.com"}
+HTTP 201
+
+$ curl -s -b cookies.txt https://mymble.be/api/auth/enable-banking/status
+{"status":"not_connected","expires_at":null}
+HTTP 200
+```
+
+The exact fix this ticket needed, confirmed live in production: a fresh
+account reports `not_connected`, not `expired`. Test account deleted
+afterward (migration-runner pattern), independently re-confirmed via a
+`401` on a follow-up login attempt.
