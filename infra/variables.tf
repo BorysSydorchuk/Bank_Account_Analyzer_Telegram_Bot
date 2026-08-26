@@ -46,3 +46,8 @@ variable "enablebanking_app_id" {
   type        = string
 }
 
+variable "ses_test_recipient_email" {
+  description = "Real address SES verifies as a recipient for sandbox-mode sending (S7-08) — SES sends a confirmation link here that must be clicked before this identity is usable"
+  type        = string
+}
+

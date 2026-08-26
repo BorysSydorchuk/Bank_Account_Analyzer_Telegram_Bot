@@ -23,3 +23,5 @@ passlib[bcrypt]>=1.7.4
 # spurious "error reading bcrypt version" warning (a known passlib/bcrypt
 # compatibility gap, not a bug in this app).
 bcrypt>=4.0.1,<4.1.0
+# S7-08: transactional email via SES — app/email_service.py
+boto3>=1.34.0

@@ -48,6 +48,12 @@ resource "aws_ecs_task_definition" "web" {
         { name = "EB_REDIRECT_URL", value = "https://mymble.be/api/auth/enable-banking/callback" },
         { name = "ENABLEBANKING_APP_ID", value = var.enablebanking_app_id },
         { name = "ENABLEBANKING_PRIVATE_KEY_PATH", value = "/tmp/private.pem" },
+        # S7-08: boto3 needs an explicit region for SES calls — not
+        # something this project has relied on ECS auto-injecting
+        # elsewhere, so set it the same way every other config value here
+        # is set, explicitly.
+        { name = "AWS_REGION", value = var.aws_region },
+        { name = "SES_SENDER_EMAIL", value = "no-reply@mymble.be" },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = data.aws_secretsmanager_secret.database_url.arn },
