@@ -22,7 +22,6 @@ resource "aws_ecs_task_definition" "worker" {
         { name = "CELERY_RESULT_BACKEND", value = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.internal.name}:6379/1" },
         { name = "ENABLEBANKING_APP_ID", value = var.enablebanking_app_id },
         { name = "ENABLEBANKING_PRIVATE_KEY_PATH", value = "/tmp/private.pem" },
-        { name = "ENABLE_BANKING_OWNER_EMAIL", value = var.enable_banking_owner_email },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = data.aws_secretsmanager_secret.database_url.arn },

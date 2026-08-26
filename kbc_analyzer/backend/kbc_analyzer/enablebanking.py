@@ -57,16 +57,49 @@ class EnableBankingError(Exception):
     pass
 
 
+class FileSessionStore:
+    """The original behavior: one JSON file on local disk, shared by
+    whatever single process reads/writes it. Still correct for the
+    terminal/bot flow (kbc_analyzer.main, the Telegram bot) — a single
+    local process with no multi-user concept. The web app (app/eb_service.py)
+    uses app.eb_session_store.DatabaseSessionStore instead as of S7-06:
+    a local file is neither durable across an ECS redeploy nor visible to
+    the separate worker task that actually runs sync.
+    """
+
+    def __init__(self, path: str = SESSION_FILE) -> None:
+        self.path = path
+
+    def load(self) -> dict | None:
+        if not os.path.exists(self.path):
+            return None
+        with open(self.path) as f:
+            return json.load(f)
+
+    def save(self, data: dict) -> None:
+        with open(self.path, "w") as f:
+            json.dump(data, f)
+
+
 class EnableBankingClient:
     """Wraps the Enable Banking API: JWT auth, OAuth session flow, and transaction fetching."""
 
-    def __init__(self, app_id: str, private_key_path: str):
+    def __init__(self, app_id: str, private_key_path: str, session_store=None):
         # app_id identifies our application in the Enable Banking portal
         self.app_id = app_id
         # Path to the RSA private key PEM file downloaded from the Enable Banking portal
         self.private_key_path = private_key_path
         # Cache the loaded key text so we only read the file once
         self._private_key: str | None = None
+        # S7-06: pluggable so the web app can supply a per-user,
+        # Postgres-backed store (app.eb_session_store.DatabaseSessionStore)
+        # instead of this defaulting to the shared local file — every
+        # session_valid()/get_cached_uids()/get_session_info()/
+        # complete_auth_with_code() call below goes through this object,
+        # never touches SESSION_FILE directly, so callers that do want the
+        # file (the terminal/bot) get identical behavior to before this
+        # ticket, unchanged.
+        self.session_store = session_store or FileSessionStore()
 
     @property
     def private_key(self) -> str:
@@ -156,24 +189,22 @@ class EnableBankingClient:
     def session_valid(self) -> bool:
         """Return True if a cached OAuth session exists and won't expire within a day.
 
-        The session file stores the expiry timestamp set when we first authorized.
+        The session store holds the expiry timestamp set when we first authorized.
         Sessions last ~90 days, after which the user must re-authorize via KBC's website.
         """
-        if not os.path.exists(SESSION_FILE):
+        data = self.session_store.load()
+        if data is None:
             return False  # never authorized before
-        with open(SESSION_FILE) as f:
-            data = json.load(f)
         # Add a 1-day buffer so we don't try to use a nearly-expired session
         return datetime.fromisoformat(data["valid_until"]) > datetime.now() + timedelta(days=1)
 
     def get_cached_uids(self) -> list[str]:
-        """Return the list of account UIDs from the cached session file.
+        """Return the list of account UIDs from the cached session.
 
         Each UID is a unique identifier for one bank account (e.g. a current or savings account).
         Call only after confirming session_valid() == True.
         """
-        with open(SESSION_FILE) as f:
-            return json.load(f)["account_uids"]
+        return self.session_store.load()["account_uids"]
 
     def get_session_info(self) -> dict | None:
         """Return the raw cached session dict (session_id, account_uids, valid_until),
@@ -181,10 +212,7 @@ class EnableBankingClient:
         the web UI — unlike session_valid(), this doesn't apply the 1-day safety buffer,
         since the UI wants the real expiry date, not a buffered "is it safe to use" answer.
         """
-        if not os.path.exists(SESSION_FILE):
-            return None
-        with open(SESSION_FILE) as f:
-            return json.load(f)
+        return self.session_store.load()
 
     # ── Non-interactive auth (used by the Telegram bot) ────────────────────────
 
@@ -265,14 +293,15 @@ class EnableBankingClient:
         # Extract UIDs for all linked accounts (could be current + savings account)
         account_uids = [acc["uid"] for acc in session.get("accounts", [])]
 
-        # Persist the session to disk so we don't need to re-authorize for ~90 days
-        with open(SESSION_FILE, "w") as f:
-            json.dump({
-                "session_id": session.get("session_id", ""),
-                "account_uids": account_uids,
-                # Store when this session expires (89 days to be safe)
-                "valid_until": (datetime.now() + timedelta(days=89)).isoformat(),
-            }, f)
+        # Persist the session so we don't need to re-authorize for ~90 days
+        # (a local file for the terminal/bot flow; per-user Postgres for the
+        # web app — see FileSessionStore/DatabaseSessionStore above)
+        self.session_store.save({
+            "session_id": session.get("session_id", ""),
+            "account_uids": account_uids,
+            # Store when this session expires (89 days to be safe)
+            "valid_until": (datetime.now() + timedelta(days=89)).isoformat(),
+        })
 
         return account_uids
 

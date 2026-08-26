@@ -61,7 +61,7 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
         # that to once the fetch happens here instead — the job's own `error`
         # field is now what carries the same message the exception handlers
         # used to (S4-02's "auth errors surface through job status" requirement).
-        eb = EnableBankingService()
+        eb = EnableBankingService(db, user_id)
         try:
             account_uids = eb.get_account_uids()
             fetched_by_account: list[tuple[str, list[dict]]] = []

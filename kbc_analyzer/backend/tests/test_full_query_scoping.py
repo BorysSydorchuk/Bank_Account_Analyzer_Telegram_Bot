@@ -5,7 +5,6 @@ test_auth_middleware_rollout.py (S6-05's categories/budgets scoping) and
 the per-crud-function tests elsewhere — this file is specifically the
 cross-user, through-the-real-HTTP-routes proof the ticket asks for.
 """
-import os
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -163,15 +162,16 @@ def test_health_stays_public(client):
     assert client.get("/health").status_code == 200
 
 
-# ── Enable Banking owner restriction ────────────────────────────────────────
+# ── Enable Banking status is scoped per-user (S7-06) ────────────────────────
+# S6-06's require_enable_banking_owner (single named account, 403 for
+# everyone else) is gone — S7-06 replaced it with per-user session storage.
+# The real per-user-isolation proof (two distinct users, two independent
+# encrypted sessions, through the real reauthorize/callback routes) lives
+# in tests/test_enable_banking_per_user_sessions.py; this file keeps only
+# the baseline every-endpoint-needs-auth check, matching this file's own
+# scope (cross-user data scoping through real HTTP routes).
 
 
-def test_enable_banking_status_403s_for_a_non_owner_account(client, db_session, monkeypatch):
-    owner_email = os.environ["ENABLE_BANKING_OWNER_EMAIL"]
-    assert owner_email  # conftest.py sets this — sanity-check it's really there
-    someone_else = _make_user(db_session, "definitely-not-the-owner@example.com")
-
-    _login_as(client, someone_else)
+def test_enable_banking_status_requires_authentication(client):
     response = client.get("/api/auth/enable-banking/status")
-
-    assert response.status_code == 403
+    assert response.status_code == 401

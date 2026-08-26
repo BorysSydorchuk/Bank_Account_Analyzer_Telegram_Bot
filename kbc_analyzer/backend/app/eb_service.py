@@ -2,18 +2,28 @@
 
 kbc_analyzer.enablebanking.EnableBankingClient already does the heavy lifting: it signs a
 fresh short-lived JWT for every request (that's the "automatic" token refresh) and caches
-the ~90-day OAuth session to eb_session.json so repeated runs don't need re-authorization.
+the ~90-day OAuth session so repeated runs don't need re-authorization — as of S7-06, into
+a per-user row in Postgres (app.eb_session_store.DatabaseSessionStore) rather than the
+single shared eb_session.json file this class used to rely on implicitly. See that
+module's docstring for why: a local file is neither durable across an ECS redeploy nor
+visible to the separate worker task that runs sync.
 
 The one thing it can't do inside an API request handler is the *interactive* re-auth flow
 (print a URL, block on `input()` for the pasted redirect) — that only makes sense in a
 terminal. So this class stays read-only with respect to authorization: if there's no valid
 cached session, it raises a clear error instead of hanging the request. Re-authorizing still
-happens via `python -m kbc_analyzer.main` until a later ticket adds a web-based auth flow.
+happens via the web reconnect flow (POST /reauthorize + GET /callback) or, for the
+terminal/bot, `python -m kbc_analyzer.main`.
 """
 import os
 from datetime import date, datetime
+from uuid import UUID
+
+from sqlalchemy.orm import Session
 
 from kbc_analyzer.enablebanking import EnableBankingClient, EnableBankingError
+
+from .eb_session_store import DatabaseSessionStore
 
 __all__ = ["EnableBankingService", "EnableBankingAuthError", "EnableBankingError"]
 
@@ -23,10 +33,18 @@ class EnableBankingAuthError(Exception):
 
 
 class EnableBankingService:
-    def __init__(self) -> None:
+    def __init__(self, db: Session, user_id: UUID) -> None:
+        # S7-06: one EnableBankingClient per request, scoped to whichever
+        # user's session is being read or written — replaces the old
+        # no-argument constructor that always pointed at the single shared
+        # eb_session.json file. Every caller (routers/auth.py,
+        # tasks/analysis.py) now passes the authenticated/owning user_id
+        # explicitly, the same pattern S6-06 already established for every
+        # other per-user query in this codebase.
         self._client = EnableBankingClient(
             app_id=os.getenv("ENABLEBANKING_APP_ID"),
             private_key_path=os.getenv("ENABLEBANKING_PRIVATE_KEY_PATH"),
+            session_store=DatabaseSessionStore(db, user_id),
         )
 
     def get_account_uids(self) -> list[str]:

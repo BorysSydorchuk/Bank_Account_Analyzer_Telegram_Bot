@@ -46,7 +46,3 @@ variable "enablebanking_app_id" {
   type        = string
 }
 
-variable "enable_banking_owner_email" {
-  description = "The single real account the app's Enable Banking connection belongs to (S6-06)"
-  type        = string
-}

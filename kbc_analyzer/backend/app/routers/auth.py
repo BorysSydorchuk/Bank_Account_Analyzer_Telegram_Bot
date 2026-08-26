@@ -6,17 +6,25 @@ can silently refresh that consent on the user's behalf. These endpoints replace 
 terminal-only flow (`python -m kbc_analyzer.main`) with one the dashboard can drive,
 still ending in the user manually completing KBC's own login/consent screen.
 
-S6-06: all three endpoints require require_enable_banking_owner — the single
-eb_session.json connection belongs to exactly one real account
-(ENABLE_BANKING_OWNER_EMAIL) until Sprint 7's per-user bank session storage.
+S7-06: all three endpoints now use plain get_current_user — any authenticated user
+can establish and manage their own independent Enable Banking connection, replacing
+S6-06's require_enable_banking_owner gate (which restricted this to a single named
+account because the single eb_session.json file could only ever hold one connection
+at a time). Session state itself now lives in enable_banking_sessions, one encrypted
+row per user_id (app/eb_session_store.py) — EnableBankingService is constructed per
+request, scoped to current_user.id, so one user's session can never be read or
+overwritten by another's request.
 """
 import secrets
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
+from sqlalchemy.orm import Session
 
-from ..auth.dependency import require_enable_banking_owner
+from ..auth.dependency import get_current_user
 from ..auth.session import COOKIE_SECURE
+from ..db import get_db
 from ..eb_service import EnableBankingError, EnableBankingService
 from ..models import User
 from ..schemas import CallbackRequest, EnableBankingStatus, ReauthorizeResponse
@@ -33,15 +41,28 @@ router = APIRouter(prefix="/api/auth/enable-banking", tags=["auth"])
 _EB_STATE_COOKIE_NAME = "eb_oauth_state"
 _EB_STATE_COOKIE_TTL_SECONDS = 10 * 60  # generous for a human to complete the bank's own login/consent screen
 
+# S7-06: now that any authenticated user can reauthorize their own Enable
+# Banking connection (not just one named owner account), the state cookie
+# alone is no longer enough — it proves the callback belongs to *a*
+# browser that started /reauthorize, but not that it's still the *same
+# user's* browser. Mirrors user_auth.py's oauth_link_user_id cookie
+# (Google account-linking, S6-07) exactly, for the same reason: without
+# this, a user who starts reauthorizing, then logs out and back in as a
+# different account in the same browser before finishing KBC's consent
+# screen, would have the callback silently complete against whichever
+# account happens to be logged in when the redirect lands — attaching
+# their bank connection to the wrong user.
+_EB_USER_COOKIE_NAME = "eb_oauth_user_id"
 
-def get_eb_service() -> EnableBankingService:
-    return EnableBankingService()
+
+def get_eb_service(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> EnableBankingService:
+    return EnableBankingService(db, current_user.id)
 
 
 @router.get("/status", response_model=EnableBankingStatus)
 def get_status(
     eb: EnableBankingService = Depends(get_eb_service),
-    current_user: User = Depends(require_enable_banking_owner),
+    current_user: User = Depends(get_current_user),
 ) -> EnableBankingStatus:
     return EnableBankingStatus(**eb.get_session_status())
 
@@ -50,7 +71,7 @@ def get_status(
 def reauthorize(
     response: Response,
     eb: EnableBankingService = Depends(get_eb_service),
-    current_user: User = Depends(require_enable_banking_owner),
+    current_user: User = Depends(get_current_user),
 ) -> ReauthorizeResponse:
     # S7-04: Enable Banking's redirect now lands directly on GET /callback
     # below, over the real production domain — no background task or local
@@ -73,6 +94,16 @@ def reauthorize(
         secure=COOKIE_SECURE,
         samesite="lax",
     )
+    # S7-06: binds this reauthorize attempt to the user who started it —
+    # see the module-level comment on _EB_USER_COOKIE_NAME above.
+    response.set_cookie(
+        key=_EB_USER_COOKIE_NAME,
+        value=str(current_user.id),
+        max_age=_EB_STATE_COOKIE_TTL_SECONDS,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+    )
     return ReauthorizeResponse(auth_url=auth_url)
 
 
@@ -80,7 +111,7 @@ def reauthorize(
 def callback(
     body: CallbackRequest,
     eb: EnableBankingService = Depends(get_eb_service),
-    current_user: User = Depends(require_enable_banking_owner),
+    current_user: User = Depends(get_current_user),
 ):
     """Manual fallback (S2-02) — no longer called by the frontend now that
     reconnecting catches the redirect automatically (S3-07 Item 2), but kept
@@ -180,7 +211,7 @@ def callback_redirect(
     code: str | None = None,
     state: str | None = None,
     eb: EnableBankingService = Depends(get_eb_service),
-    current_user: User = Depends(require_enable_banking_owner),
+    current_user: User = Depends(get_current_user),
 ) -> HTMLResponse:
     """S7-04: the real production redirect target — Enable Banking's own
     browser-redirect GET request lands here directly, over the app's real
@@ -194,14 +225,25 @@ def callback_redirect(
     frontend calls with a manually-pasted code).
     """
     response.delete_cookie(_EB_STATE_COOKIE_NAME)  # single-use, same as user_auth.py's oauth_state
+    response.delete_cookie(_EB_USER_COOKIE_NAME)  # S7-06, same single-use reasoning
 
     expected_state = request.cookies.get(_EB_STATE_COOKIE_NAME)
-    if not state or not expected_state or state != expected_state:
-        # Missing/mismatched state: either a forged callback (CSRF — see the
-        # module docstring above the cookie constants) or a genuinely stale
-        # link (cookie already expired/cleared by a prior attempt). Same
-        # response either way — nothing here should distinguish the two for
-        # an attacker's benefit.
+    expected_user_id = request.cookies.get(_EB_USER_COOKIE_NAME)
+    state_ok = bool(state) and bool(expected_state) and state == expected_state
+    # S7-06: the callback must be completing for the same user who started
+    # it (see _EB_USER_COOKIE_NAME's module-level comment) — current_user
+    # here is resolved from the ordinary session cookie, which could belong
+    # to a different account than the one that clicked Reconnect if the
+    # browser switched accounts mid-flow.
+    user_ok = bool(expected_user_id) and UUID(expected_user_id) == current_user.id
+    if not state_ok or not user_ok:
+        # Missing/mismatched state, or a session that no longer belongs to
+        # the user who started this reauthorization: either a forged
+        # callback (CSRF — see the module docstring above the cookie
+        # constants) or a genuinely stale link (cookies already
+        # expired/cleared by a prior attempt, or an account switch
+        # mid-flow). Same response either way — nothing here should
+        # distinguish the cases for an attacker's benefit.
         return HTMLResponse(
             _CONFIRMATION_PAGE.format(
                 icon_bg="#FEE2E2",

@@ -48,7 +48,6 @@ resource "aws_ecs_task_definition" "web" {
         { name = "EB_REDIRECT_URL", value = "https://mymble.be/api/auth/enable-banking/callback" },
         { name = "ENABLEBANKING_APP_ID", value = var.enablebanking_app_id },
         { name = "ENABLEBANKING_PRIVATE_KEY_PATH", value = "/tmp/private.pem" },
-        { name = "ENABLE_BANKING_OWNER_EMAIL", value = var.enable_banking_owner_email },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = data.aws_secretsmanager_secret.database_url.arn },

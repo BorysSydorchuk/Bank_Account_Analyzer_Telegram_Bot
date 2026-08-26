@@ -164,6 +164,30 @@ class Insight(Base):
     generated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class EnableBankingSession(Base):
+    __tablename__ = "enable_banking_sessions"
+
+    # S7-06: replaces the single global eb_session.json file (never durable
+    # across an ECS redeploy, never visible to the worker task at all —
+    # see the S7-06 ticket file's premise check) with one row per user.
+    # One connection per user, same real-world shape as before (a person
+    # links one bank account to their Mymble account) — a composite key
+    # for multiple simultaneous connections per user is a Sprint-later
+    # concern (multi-bank), not this ticket's.
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
+    # Fernet-encrypted (app/crypto.py, same pattern as Setting's API keys)
+    # — this is bank-session credential material, not a value ever safe to
+    # store in plaintext at rest.
+    session_id_encrypted = Column(Text, nullable=False)
+    # Fernet-encrypted JSON array of account UIDs — not itself as sensitive
+    # as the session_id, but encrypted anyway for consistency: this whole
+    # table is "Enable Banking session state," not a mix of secret and
+    # non-secret columns a reader has to remember which is which.
+    account_uids_encrypted = Column(Text, nullable=False)
+    valid_until = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Budget(Base):
     __tablename__ = "budgets"
     # Declared here too (not just in the migration), same reason as

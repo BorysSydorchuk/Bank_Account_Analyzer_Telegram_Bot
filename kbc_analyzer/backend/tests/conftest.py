@@ -87,11 +87,6 @@ os.environ.setdefault("ENABLEBANKING_PRIVATE_KEY_PATH", str(Path(__file__).paren
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
 os.environ.setdefault("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback")
-# S6-06: the one email allowed to trigger sync / touch Enable Banking
-# status-reauthorize-callback (auth.require_enable_banking_owner). Tests
-# that need the positive case create their user with exactly this email;
-# every other test user is a real negative case for free.
-os.environ.setdefault("ENABLE_BANKING_OWNER_EMAIL", "eb-owner@example.com")
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402

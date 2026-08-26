@@ -683,6 +683,7 @@ in the app reads a comparison result.
 | `categories` | Category → display color, per user | `(user_id, name)` composite PK (S6-02 — a category name is only unique per user); `source` ∈ `seed`\|`ai`\|`user`; `ai_color` holds the last AI color separately so "reset to AI" survives a user override |
 | `insights` | Generated AI insight cards per date range | `user_id` UUID FK → `users(id)`, NOT NULL (S6-02); `crud.list_insights`/`replace_insights` both scoped by it (S6-06) — the `(date_from, date_to)` index itself stays unchanged, scoping happens in the query's `WHERE`, not the index shape; **delete-and-replace** per range on every successful sync — no history retained |
 | `budgets` | Monthly spending limit per category (S4-05) | `category` FK composite → `categories(user_id, name)` `ON UPDATE CASCADE` (S6-02); `amount` CHECK `> 0`; `user_id` UUID FK → `users(id)`, NOT NULL as of S6-02 (was nullable, always `NULL`, through Sprint 5 — the first table built multi-user-ready); `UNIQUE NULLS NOT DISTINCT (user_id, category, period)` |
+| `enable_banking_sessions` | One Enable Banking (KBC) bank connection per user (S7-06) | `user_id` UUID PK + FK → `users(id)` — one row per user, not a surrogate id, since one user has exactly one connection today; `session_id_encrypted`/`account_uids_encrypted` Fernet-encrypted (`app/crypto.py`, same pattern as `settings`' API keys); `valid_until` plain (needed for expiry comparisons); replaces the single global `eb_session.json` file — see the Auth section for the full story, including the real production gap this closed as a side effect |
 
 `manually_edited`: true once a human has set category/subcategory/
 description by hand; the categorization agent excludes these rows even
@@ -884,9 +885,9 @@ protected `GET /api/categories`/`GET /api/budgets` as a first real test
 remaining endpoint, closing S5-01's IDOR findings for real.
 
 **The full public-route list — everything else requires
-`get_current_user` (or, for the three Enable Banking endpoints,
-`require_enable_banking_owner`, which itself requires `get_current_user`
-first):**
+`get_current_user`, including the three Enable Banking endpoints (S7-06
+removed the extra `require_enable_banking_owner` gate they used to sit
+behind — see below):**
 
 | Route | Why public |
 |---|---|
@@ -924,24 +925,82 @@ Two scoping shapes, per S6-06's own split:
   belonging to someone else reads identically to one that doesn't exist).
 
 **Sync is threaded end to end.** `POST /api/transactions/sync` requires
-`require_enable_banking_owner` (below), passes `current_user.id` to
-`sync_lock` (already user-aware since S5-05) and to the Celery task
+`get_current_user`, passes `current_user.id` to `sync_lock` (already
+user-aware since S5-05) and to the Celery task
 (`run_sync_job.delay(job_id, date_from, date_to, str(user_id))` — Celery
 serializes to JSON, so the UUID travels as a string and is parsed back in
 `tasks/analysis.py`). Every stage of `_run()` (fetch, store, categorize,
 generate insights) now writes/reads with that same `user_id`.
 
-**Enable Banking connection restricted to one account (S6-06).** The
-single `eb_session.json` connection is still, physically, one bank
-connection — per-user bank session *storage* is Sprint 7's job (needs
-the public deployment context to do properly). Until then,
-`app/auth/dependency.py`'s `require_enable_banking_owner` (composed on
-top of `get_current_user`) gates `POST /api/transactions/sync` and all
-three `/api/auth/enable-banking/*` endpoints: only the account named by
-the `ENABLE_BANKING_OWNER_EMAIL` env var may use them, `403` for
-everyone else. Not a `404`-shaped IDOR check — this is a real, named
-permission boundary on a feature every authenticated user can see
-exists, not a by-ID lookup hiding whether a resource exists.
+**Enable Banking session storage is per-user (S7-06).** S6-06 restricted
+sync and the three `/api/auth/enable-banking/*` endpoints to a single
+named account (`require_enable_banking_owner`, gated on
+`ENABLE_BANKING_OWNER_EMAIL`) because the single `eb_session.json` file
+could only ever hold one connection at a time — deliberately deferred
+until "the public deployment context" (Sprint 7) existed to do it
+properly. That gate is gone: any authenticated user can now establish
+and manage their own independent bank connection.
+
+*What replaced the file:* `enable_banking_sessions`, one row per
+`user_id` (`app/models.py`'s `EnableBankingSession`, migration
+`a3f6c8e2b704`) — `session_id` and `account_uids` Fernet-encrypted at
+rest (`app/crypto.py`, the same pattern `settings` already used for API
+keys), `valid_until` plain (needed for expiry comparisons, not secret
+material). `app/eb_session_store.py`'s `DatabaseSessionStore` implements
+the same `load()`/`save()` shape `kbc_analyzer/enablebanking.py`'s
+`EnableBankingClient` already expected — that client is now built with a
+pluggable `session_store` (`FileSessionStore` by default, unchanged
+behavior for the terminal/bot; `DatabaseSessionStore(db, user_id)` for
+the web app), so the only thing that changed is *where* a session lives,
+not the OAuth logic itself. `app/eb_service.py`'s `EnableBankingService`
+now takes `(db, user_id)` in its constructor — every call site
+(`routers/auth.py`'s `get_eb_service` dependency, `tasks/analysis.py`'s
+sync task) passes the authenticated/owning user's id explicitly, the
+same pattern S6-06 already established for every other per-user query.
+
+**Real, pre-existing gap this fixed as a side effect, found during this
+ticket's premise check, not assumed:** the old `eb_session.json` file was
+never actually durable in production, and the web and worker services
+could never have seen the same one anyway. Confirmed empirically (not
+theorized) by execing into the live web task immediately after S7-04's
+post-reconnect redeploy: the file was already gone — an ECS Fargate
+redeploy replaces the task, wiping its local filesystem, and `web`/
+`celery_worker` are two separate tasks with two separate filesystems to
+begin with (no EFS or shared volume ever existed between them). This
+means no sync against production could ever have used a session written
+through the web container's reconnect flow — a latent break the single
+Enable Banking round-trip Borys confirmed in S7-04 never actually
+exercised (that test only proved the callback route completed, not that
+a subsequent sync could see the result). Moving session storage into
+Postgres — which both services already share — fixes this structurally:
+there is no longer a "which container's disk" question at all.
+
+**Cross-user race closed, not just the single-owner gate removed.**
+Once any user can reauthorize their own connection, the
+`eb_oauth_state` CSRF cookie (S7-04) alone isn't enough to say *which*
+user a callback belongs to — only that it's a browser that started
+`/reauthorize` at some point. A new `eb_oauth_user_id` cookie (same
+shape as `user_auth.py`'s `oauth_link_user_id` from S6-07's Google
+account-linking fix) binds the reauthorization attempt to the user who
+started it; `GET /callback` rejects (same `400`, same message as a CSRF
+failure — nothing here should distinguish the cases for an attacker's
+benefit) if the currently logged-in user (resolved from the ordinary
+session cookie, which is what identifies *whose* row this callback
+writes to) doesn't match. Without this, a user who starts reauthorizing,
+then switches accounts in the same browser before finishing KBC's
+consent screen, could have their bank connection silently attached to
+the wrong account. Verified with a real test
+(`tests/test_enable_banking_callback_csrf.py::test_callback_rejects_a_valid_state_from_a_different_logged_in_user`):
+user A's authorization code is confirmed never completed against user
+B's session.
+
+**Migration note: there was nothing left to migrate.** The ticket that
+introduced this asked to migrate Borys's existing real session into the
+new store — moot, because (per the empirical finding above) his session
+was already gone before this ticket started. He reconnects once through
+the ordinary Settings-page flow after this ships, exactly like any other
+user's first connection; that write lands directly in
+`enable_banking_sessions`, encrypted, durable across the next redeploy.
 
 `GET /api/auth/me` — the frontend's route guard's one page-independent
 way to ask "does a valid session exist," rather than inferring it from
