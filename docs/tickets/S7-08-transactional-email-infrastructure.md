@@ -108,8 +108,22 @@ within 24 hours of that reply. **Still pending as of this delivery.**
 **Sandbox-mode sending confirmed working — real email, real inbox.**
 Borys's test-recipient identity is now verified
 (`VerifiedForSendingStatus: true`, confirmed after he clicked SES's
-confirmation link). [Real send test evidence to follow in this same
-section once run.]
+confirmation link). First real send attempt (through the real
+`send_templated_email` code path, no mocks) hit a real, informative
+`AccessDenied`: sandbox mode's IAM check covers the recipient identity
+ARN as well as the sender's, and the policy only granted the sender's.
+Fixed properly in `infra/ses.tf` (added the test-recipient identity's
+ARN to the policy's `Resource` list, not widened to `ses:*`), reapplied,
+retested:
+
+```
+$ send_templated_email("boris.sydorchuk@gmail.com", "verify_email", link="https://mymble.be/verify-email?token=S7-08-real-send-test-token")
+SEND_CALL_RETURNED_NO_EXCEPTION
+```
+
+**Real receipt confirmed by Borys** — "I got it" — not just the API
+response, which mail delivery's own failure modes (spam folder,
+bounce) an API success wouldn't catch.
 
 ### Which verification_debt.md entries this unblocks (confirmed, not closed)
 
@@ -121,3 +135,25 @@ section once run.]
   shared blocker is closed, the entry's own closure is S7-09's job.
 
 Neither entry edited in this ticket, per the ticket's own instruction.
+
+### Answers to WHEN DONE
+
+- **Real email sent and received:** confirmed above — real send
+  through the real code path, real `AccessDenied` finding and fix
+  along the way, real receipt confirmed by Borys directly ("I got
+  it"), not inferred from the API's success response alone.
+- **SES's current mode:** sandbox. Production access request status:
+  an initial automated response came back `DENIED` almost immediately
+  (faster than the 1-2 day wait the ticket anticipated), asking for
+  more detail rather than being a final rejection. A full reply citing
+  real, verified account facts was submitted via AWS Support Center
+  (Case `178778410400368`) — Basic support blocks doing this via API,
+  confirmed. AWS's own message states an initial response within 24
+  hours of that reply; still pending as of this delivery.
+- **Sandbox-mode sending confirmed working for S7-09:** yes — one
+  verified test recipient can receive real templated email right now,
+  so S7-09 is not blocked on the production-access outcome to build
+  and test the verification/reset flows against that one address.
+  Sending to arbitrary real users still needs production access.
+
+Do not start S7-09 until confirmed.

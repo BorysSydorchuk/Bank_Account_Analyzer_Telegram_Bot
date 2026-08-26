@@ -673,6 +673,75 @@ load (plain `useState`, no persistence), a `useMutation`
 (`hooks/useCompareInsights.ts`) rather than a cached query — nothing else
 in the app reads a comparison result.
 
+## Transactional Email (S7-08)
+
+`mymble.be` is a verified SES domain identity (`infra/ses.tf`,
+Easy DKIM — SES manages the signing key, three DKIM CNAME records
+published in the Route 53 zone this project already controls; verified
+within about a minute, DKIM status `SUCCESS`). `app/email_service.py`'s
+`send_templated_email(to_email, template_name, **template_vars)` is the
+one send path — two templates today (`verify_email`, `password_reset`),
+real HTML + text-fallback bodies, real variable substitution (no
+templating engine dependency for two static strings with one
+substitution each). Real evidence: a real send through this exact code
+path, to a real inbox, confirmed received by Borys — not just an API
+success response, which mail delivery's own failure modes (spam
+folder, bounce) wouldn't necessarily be caught by.
+
+**Credentials: an IAM role, not Secrets Manager, and that's the correct
+answer here — not a shortcut.** `infra/ses.tf`'s
+`aws_iam_role_policy.ecs_task_send_email` grants the shared
+`aws_iam_role.ecs_task` (web, worker, migration-runner, redis all
+already use this one role) `ses:SendEmail`/`ses:SendRawEmail`, scoped
+to two identity ARNs — the domain identity and, currently, the sandbox
+test-recipient identity (see below) — never `ses:*`. boto3 resolves
+this automatically via the task's credential provider chain; there is
+no access key or secret anywhere for SES, nothing to rotate or leak,
+a stronger position than every other credential in this project's
+Secrets Manager audit (S7-05), which still holds real secret material
+even if well-protected.
+
+**Sandbox mode — real, unexpected finding from testing, not
+assumption.** This account is in SES's default sandbox mode
+(`ProductionAccessEnabled: false`), which restricts sending to
+verified recipient identities only. Requesting production access via
+`aws sesv2 put-account-details` came back `ReviewDetails.Status:
+DENIED` almost immediately — not the 1-2 day pending wait expected.
+This account has no paid AWS Support plan, so the reason wasn't
+retrievable via API; AWS's actual response (received by email, this
+account being on Basic support) asked for detail the bare API call has
+no fields for — sending frequency, recipient-list handling,
+bounce/complaint/unsubscribe handling, example email content — and
+recommended starting from a verified domain identity, already true
+here. A full reply was submitted to the case via AWS Support Center
+(Basic support blocks posting to a case through the API — confirmed,
+only the console works) citing real, verified facts, including that
+SES's account-level suppression list is already active for both
+`BOUNCE` and `COMPLAINT` (`aws sesv2 get-account` →
+`SuppressionAttributes`, checked before citing it, not assumed). AWS
+states an initial response within 24 hours of that reply.
+**Status as of this writing: still pending** — not yet re-checked
+against a new outcome.
+
+**Real, unrelated-to-production-access finding from the sandbox test
+itself:** IAM's authorization check for `ses:SendEmail` in sandbox mode
+covers *both* the sender identity and the recipient identity ARN, not
+just the sender — confirmed by a real `AccessDenied` error naming the
+recipient's ARN when the IAM policy only granted the domain identity.
+This is why `aws_sesv2_email_identity.test_recipient`'s ARN is also in
+the policy's `Resource` list, not just referenced for its own
+verification requirement. Once production access is granted, sandbox's
+per-recipient verification stops applying to real users, but leaving
+this entry in place causes no harm — it's still just permission to
+send to one already-real, already-verified address.
+
+**Unblocks, does not close, `docs/verification_debt.md`'s email
+verification and password reset entries (both OPEN since S6-08).**
+Both name "no transactional email infrastructure exists" as their
+blocker — that's now false — but closing either needs S7-09's actual
+verification-token/reset-token flow, not just the sending capability
+this ticket built.
+
 ## Database Tables
 
 | Table | Purpose | Key constraints |

@@ -36,9 +36,19 @@ resource "aws_sesv2_email_identity" "test_recipient" {
 # capability with zero credential material anywhere — no access key, no
 # Secrets Manager entry, nothing to rotate or leak. boto3 inside the
 # container resolves these permissions automatically via the task's
-# credential provider chain. Scoped to this one identity's ARN, not
-# ses:* — a compromised container could send mail as mymble.be, but
-# never as an arbitrary verified identity elsewhere in the account.
+# credential provider chain. Scoped to two identity ARNs, not ses:* —
+# a compromised container could send mail as mymble.be, but never as an
+# arbitrary verified identity elsewhere in the account.
+#
+# Real finding, not assumed: while the account is in SES sandbox mode,
+# ses:SendEmail's IAM authorization checks BOTH the sender identity and
+# the recipient identity ARN — confirmed by an actual AccessDenied error
+# naming the recipient's ARN, not the sender's, when this policy only
+# granted the domain identity. The test-recipient identity is included
+# here for that reason; once production access is granted, sandbox's
+# per-recipient verification requirement stops applying to real users,
+# but this entry causes no harm left in place — it's still just
+# permission to send to one specific, already-real address.
 resource "aws_iam_role_policy" "ecs_task_send_email" {
   name = "${var.project_name}-ses-send"
   role = aws_iam_role.ecs_task.id
@@ -46,10 +56,13 @@ resource "aws_iam_role_policy" "ecs_task_send_email" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid      = "SendEmail"
-      Effect   = "Allow"
-      Action   = ["ses:SendEmail", "ses:SendRawEmail"]
-      Resource = aws_sesv2_email_identity.mymble.arn
+      Sid    = "SendEmail"
+      Effect = "Allow"
+      Action = ["ses:SendEmail", "ses:SendRawEmail"]
+      Resource = [
+        aws_sesv2_email_identity.mymble.arn,
+        aws_sesv2_email_identity.test_recipient.arn,
+      ]
     }]
   })
 }
