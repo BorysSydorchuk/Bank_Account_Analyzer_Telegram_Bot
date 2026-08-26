@@ -362,3 +362,60 @@ Ready for Borys to do the live Enable Banking and Google OAuth
 round-trips against `https://mymble.be` — real evidence from those,
 not narration, is still required before this ticket can be marked
 confirmed and mkcert retired.
+
+## FIX (2026-08-26) — Reviewer finding: happy-path CSRF test never actually ran
+
+Reviewer confirmed the CSRF rejection logic itself is correct, but found
+the earlier "ALL_PASS" test claim didn't hold up: `FakeEnableBankingClient
+.start_auth` (in `tests/fixtures/fake_enable_banking.py`) had never been
+updated for the new `state` parameter `eb_service.get_reauthorize_url`
+now passes positionally — any test constructing a real
+`EnableBankingService` through this fixture would `TypeError` before
+reaching an assertion. The earlier "4/4 pass" evidence came from an
+ad-hoc scratch script using manual `TestClient` + `dependency_overrides`
+against a hand-rolled mock, not this project's real fixture or test
+infrastructure — it never actually exercised the checked-in code path.
+
+**Fixed for real, verified by re-running it myself:**
+
+1. `tests/fixtures/fake_enable_banking.py`'s `start_auth` now accepts
+   `state: str | None = None`, matching the real client's signature, and
+   records it (`self.last_state`) so a test can assert the real value
+   reached the client.
+2. New committed test file,
+   `tests/test_enable_banking_callback_csrf.py`, exercising all four
+   cases through the real HTTP routes with a real session cookie — not
+   just the two rejection cases already verified live, but the
+   matching-state **success** path too (Reviewer's specific point: this
+   had never actually run).
+3. Running it surfaced a second, real, previously-undetected bug:
+   `FakeEnableBankingClient._valid_until` used a `timezone.utc`-aware
+   datetime, while `eb_service.get_session_status`'s comparison
+   (`<= datetime.now()`) and the *real* Enable Banking client
+   (`kbc_analyzer/enablebanking.py`, confirmed by reading it directly)
+   both consistently use naive datetimes throughout. This was a fixture
+   bug, not a production bug — the real client was never inconsistent
+   with itself, only this fixture had drifted from it — but it's exactly
+   the kind of thing that stays hidden forever if the success path is
+   never actually exercised, which is the whole reason Reviewer's finding
+   mattered. Fixed by matching the fixture to the real client's
+   convention.
+
+**Real, re-run output (not narrated):**
+```
+$ python -m pytest tests/test_enable_banking_callback_csrf.py -v
+tests/test_enable_banking_callback_csrf.py::test_reauthorize_sets_state_cookie_matching_the_real_outgoing_state PASSED
+tests/test_enable_banking_callback_csrf.py::test_callback_rejects_mismatched_state PASSED
+tests/test_enable_banking_callback_csrf.py::test_callback_rejects_a_forged_link_with_no_cookie_at_all PASSED
+tests/test_enable_banking_callback_csrf.py::test_callback_with_matching_state_completes_reauthorization PASSED
+======================== 4 passed, 1 warning in 6.60s =========================
+
+$ python -m pytest -q   # full suite, confirming the fixture fix broke nothing else
+104 passed, 1 warning in 13.01s
+```
+
+`docs/pm_updates/2026-08-26-s7-04-dns-blocker.md` deleted — the DNS
+blocker it described is resolved, its job is done, and it also repeated
+the now-corrected unverified test claim. No replacement letter written;
+a stale status update isn't worth rewriting into something it wasn't at
+the time.
