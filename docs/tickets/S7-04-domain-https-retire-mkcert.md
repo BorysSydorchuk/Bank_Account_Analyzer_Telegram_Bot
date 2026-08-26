@@ -740,3 +740,24 @@ misleading zero:
    earlier Finding 1 fix commit.
 
 Sending to Reviewer for the final full pass.
+
+## PRODUCTION REDEPLOYED (2026-08-26) — fc06592 live
+
+Rebuilt and redeployed both ECS services with the mkcert-retirement
+commit, for consistency between what's documented as retired and what's
+actually running. Confirmed the built image genuinely excludes the
+deleted files before pushing:
+```
+$ docker run --rm --entrypoint sh kbc-analyzer-worker:test -c \
+    "ls app/eb_callback_server.py; ls app/tasks/auth.py"
+ls: cannot access 'app/eb_callback_server.py': No such file or directory
+ls: cannot access 'app/tasks/auth.py': No such file or directory
+```
+Both web and worker deployments confirmed fully rolled over (old task
+revisions drained) before this verification ran:
+```
+$ curl -s https://mymble.be/health
+{"status":"ok"}
+$ echo | openssl s_client -connect mymble.be:443 -servername mymble.be | grep "Verify return code"
+Verify return code: 0 (ok)
+```
