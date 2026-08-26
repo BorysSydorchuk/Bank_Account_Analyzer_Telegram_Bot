@@ -25,20 +25,39 @@ resource "aws_ecs_task_definition" "migration_runner" {
       image     = "${aws_ecr_repository.worker.repository_url}:${var.migration_runner_image_tag}"
       essential = true
       # Overrides the image's default Celery CMD — this task is a shell
-      # to exec into, not a running worker.
-      command = ["sleep", "infinity"]
+      # to exec into, not a running worker. S7-06: materializes the Enable
+      # Banking private key first, same as web.tf/worker.tf's real
+      # services — this task didn't need to make real Enable Banking API
+      # calls before now (S7-03's migration/dump work never touched it),
+      # but verifying a real per-user sync does.
+      command = ["sh", "-c", "${local.materialize_eb_key} && exec sleep infinity"]
       environment = [
         { name = "DB_HOST", value = aws_db_instance.main.address },
         { name = "DB_PORT", value = tostring(aws_db_instance.main.port) },
         { name = "DB_NAME", value = aws_db_instance.main.db_name },
         { name = "DB_USER", value = aws_db_instance.main.username },
         { name = "REDIS_URL", value = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.internal.name}:6379/0" },
+        { name = "ENABLEBANKING_APP_ID", value = var.enablebanking_app_id },
+        { name = "ENABLEBANKING_PRIVATE_KEY_PATH", value = "/tmp/private.pem" },
       ]
       secrets = [
         {
           name      = "DB_PASSWORD"
           valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:password::"
-        }
+        },
+        # S7-06: added once this task actually needed to decrypt a real
+        # Fernet-encrypted value (enable_banking_sessions) or make a real
+        # Enable Banking API call to verify a real sync — DB_PASSWORD alone
+        # was enough for the S7-03 migration/dump work this task
+        # definition was originally built for, neither of these was.
+        {
+          name      = "SETTINGS_SECRET"
+          valueFrom = data.aws_secretsmanager_secret.settings_secret.arn
+        },
+        {
+          name      = "EB_PRIVATE_KEY_CONTENT"
+          valueFrom = data.aws_secretsmanager_secret.eb_private_key.arn
+        },
       ]
       logConfiguration = {
         logDriver = "awslogs"
