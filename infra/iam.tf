@@ -125,10 +125,14 @@ resource "aws_iam_user_policy" "deploy_infra_read" {
           # GetResourcePolicy too, not just DescribeSecret, to fully
           # resolve — still read-only, never GetSecretValue.
           "secretsmanager:GetResourcePolicy",
-          # Same real-gap discovery: refreshing aws_ecr_repository
-          # needs DescribeRepositories, which deploy_ecr's push/pull-only
-          # policy never granted (it only covers layer operations).
-          "ecr:DescribeRepositories",
+          # Same real-gap discovery, found in two rounds (first
+          # DescribeRepositories, then ListTagsForResource) — widened to
+          # the same Describe*/List* pattern as every other service here
+          # rather than adding one action at a time again. deploy_ecr's
+          # push/pull-only policy never granted any of this; it only
+          # covers layer operations.
+          "ecr:Describe*",
+          "ecr:List*",
           "budgets:ViewBudget",
           "iam:GetRole",
           "iam:GetRolePolicy",
