@@ -192,6 +192,21 @@ resource "aws_iam_policy" "deploy_migration_runner" {
         }
       },
       {
+        # Real gap found deploying for real (2026-08-27): rolling out a
+        # new task-definition revision to the running web/worker
+        # services needs ecs:UpdateService, not just the task-definition
+        # management above — registering a new revision doesn't itself
+        # move a service onto it. Scoped to exactly these two services,
+        # not ecs:UpdateService on "*".
+        Sid    = "DeployWebAndWorkerServices"
+        Effect = "Allow"
+        Action = "ecs:UpdateService"
+        Resource = [
+          aws_ecs_service.web.id,
+          aws_ecs_service.worker.id
+        ]
+      },
+      {
         Sid    = "ManageAndExecIntoTasksOnThisCluster"
         Effect = "Allow"
         Action = [
