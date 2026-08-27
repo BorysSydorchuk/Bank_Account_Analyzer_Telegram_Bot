@@ -46,13 +46,25 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
-### Real ING transaction-data verification — no data available from this test account (S8-02)
+### Real ING transaction-data verification — no data available from this test account (S8-02, narrowed S8-03)
 
 - **What was deferred:** verifying the categorization/sync/insights
   pipeline against real ING transaction data, per-institution
   data-shape handling (description formats, currency, dates), and
   `transactions.account_id`'s ability to disambiguate KBC-sourced from
   ING-sourced rows with two live, real datasets.
+  **Narrowed by S8-03 (2026-08-28):** the `external_id` collision
+  question this entry originally also covered is now separately
+  resolved — S8-03 verified the core `UNIQUE (user_id, external_id)`
+  mechanism for real using two distinct real KBC accounts (Enable
+  Banking's collision risk is scoped per-account, not
+  per-institution, so this is the same mechanism a KBC+ING test would
+  exercise). Zero collisions found across 343 real transactions
+  (ARCHITECTURE.md's Invariants section). What remains open here is
+  narrower: categorization/data-shape verification against real ING
+  content, and the specifically cross-institution (KBC+ING) variant of
+  the collision test — not the collision mechanism itself, which no
+  longer needs ING data to be considered verified.
 - **Why:** the real ING connection made on `boris.sydorchuk@gmail.com`
   is genuinely valid — Enable Banking's own `GET /sessions/{id}`
   confirms `"status": "AUTHORIZED"` — but reports zero linked accounts
@@ -68,8 +80,12 @@ create it early rather than tracking by memory").
   real ING account (his own or someone else's, with consent) in a
   later ticket and a real sync is run against it — his explicit call,
   not fixed here by forcing a synthetic pass.
-- **Status (2026-08-28, S8-02):** OPEN — closes whenever that real test
-  happens, ticket number not yet assigned.
+- **Status (re-confirmed 2026-08-28, S8-03):** OPEN, narrowed — the
+  collision-risk portion this entry used to cover is closed (see
+  ARCHITECTURE.md's Invariants section); what's left is
+  categorization/data-shape verification against real ING content and
+  the cross-institution collision variant specifically. Closes
+  whenever that real test happens, ticket number not yet assigned.
 
 ### AWS account credit balance and expiration — not visible via CLI (S7-10)
 

@@ -1444,9 +1444,32 @@ per-user; a Sprint 7 watch-item in `docs/multi_user_migration_plan.md`
 flagged that a user connecting more than one account (multi-bank) could
 still collide under this constraint alone. **No longer hypothetical as
 of S8-01:** a user can now hold simultaneous KBC and ING connections
-(see the Multi-bank section above) — real verification of this exact
-collision risk, and a fix if one is confirmed, is S8-03's scope, not
-deferred further.
+(see the Multi-bank section above).
+
+**Core mechanism verified for real, S8-03 (2026-08-28) — no collision
+found, current constraint confirmed sufficient for this real data.**
+Real test used two distinct real accounts under the same KBC
+connection (`boris.sydorchuk@gmail.com`'s
+`f0329f08-8504-43bd-8824-73761b6f1430` and
+`08ce6229-e5aa-420a-98a6-86a65e937b3d`) rather than KBC+ING —
+Enable Banking's own collision risk is scoped per-account, not
+per-institution, so two accounts at the same bank test the identical
+mechanism the ticket's own text names as an acceptable substitute.
+Fetched both accounts' full real transaction history directly from
+Enable Banking's API (343 real transactions combined, ~8 months):
+**zero shared `external_id` values between the two accounts.** No fix
+was needed — `UNIQUE (user_id, external_id)` held. This is real
+evidence for this real dataset, not a mathematical proof the FAQ's
+"may occur" collision can never happen; worth re-checking if a real
+collision is ever actually observed, same as any external-system
+assumption.
+
+**Cross-institution (KBC+ING) variant of this same test remains
+genuinely open** — the real ING connection has zero linked accounts
+(Enable Banking confirms this itself, cause unresolved, S8-02), so
+there is no real ING data to test a KBC/ING collision against yet.
+Tracked in `docs/verification_debt.md`, not silently assumed covered
+by the two-account result above.
 
 **AI providers** — resolved via `agents/registry.py`, switching in
 Settings changes behavior everywhere at once. `get_provider()` caches one

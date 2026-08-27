@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 
 ================================================================
 TICKET S8-03 — Multi-Account external_id Uniqueness Verification
@@ -71,3 +71,44 @@ deferred — the existing docs/verification_debt.md entry is
 updated to reflect the core mechanism is now verified via the
 two-account case, not closed, since the cross-institution
 variant is still real, open, untested.
+
+================================================================
+WHEN DONE
+================================================================
+
+**Real dual-connection test results:** used the real substitute
+the ticket's own text names ("two accounts at the same bank"),
+since Enable Banking's collision risk is scoped per-account, not
+per-institution. Fetched both of `boris.sydorchuk@gmail.com`'s
+real KBC accounts' full transaction history directly from Enable
+Banking's API (not just what had already synced through the
+app):
+
+    account f0329f08...: 27 real transactions, 27 unique external_ids
+    account 08ce6229...: 316 real transactions, 316 unique external_ids
+    OVERLAP: 0 shared external_id values
+
+343 real transactions total, spanning roughly 8 months, zero
+collisions.
+
+**Confirm whether a fix was needed and, if so, what and why:** no
+fix needed. `UNIQUE (user_id, external_id)` held against real
+data — the current constraint is empirically sufficient for this
+real dataset. This is real evidence for this real data, not a
+mathematical proof against Enable Banking's own "may occur"
+wording — worth re-checking if a real collision is ever actually
+observed.
+
+**Not resolved, explicitly deferred, tracked, not silently
+dropped:** the cross-institution (KBC+ING) variant of this same
+test — real ING transaction data still doesn't exist (S8-02's
+zero-linked-accounts finding, cause unresolved). Both
+`docs/verification_debt.md` and ARCHITECTURE.md's Invariants
+section state this precisely: the collision *mechanism* is
+verified, the *cross-institution* case specifically is not.
+
+ARCHITECTURE.md's Invariants section updated to the now-verified
+(not just planned) state.
+
+Do not start S8-04 assuming the cross-institution variant has
+also been verified — it hasn't.
