@@ -1255,21 +1255,61 @@ single-column primary key. `institution` is a plain text tag ("KBC",
 source of truth both the picker and the backend read from), not a
 foreign key to a lookup table.
 
-**Not yet live in production (deliberately, confirmed 2026-08-27) —
-committed and verified against local dev only.** Production migrations
-here are never automatic (see Environment/URLs section on the
-migration-runner ECS Exec pattern, S7-03) — `docker-compose.yml`'s
-`backend` service runs `alembic upgrade head` on every local start;
-production requires someone to manually run a one-off
-`migration-runner` ECS task and shell in. Nobody has, for this
-migration, as of S8-01's close. Production's `enable_banking_sessions`
-is therefore still on the old `user_id`-only primary key — one
-connection per user, same as before this ticket — until S8-02 runs the
-real migration there as part of its own scope (needed before a real
-ING connection can coexist with Borys's real live KBC session).
-Running it earlier, before S8-02 needs it, would have been a redundant
-deploy — this ticket's own acceptance criteria explicitly excluded
-live connections.
+**Live in production (S8-02, 2026-08-27).** Deliberately deferred at
+S8-01's close (see git history for that reasoning) until S8-02 needed
+it; run for real via the migration-runner ECS Exec pattern (S7-03).
+Real evidence: `alembic current` before, `b8e4f2a9c317` (the
+pre-migration head); `alembic upgrade head` ran clean
+(`Running upgrade b8e4f2a9c317 -> d4a7e19c6b52, widen
+enable_banking_sessions to composite (user_id, institution) key`);
+`alembic current` after, `d4a7e19c6b52 (head)`. Production held two
+real `enable_banking_sessions` rows (not one — a second real user
+besides Borys has a KBC connection too), both confirmed surviving
+byte-for-byte identical (`user_id`, `valid_until` unchanged) via a
+direct SQLAlchemy query inside the migration-runner container, now
+correctly labelled `institution = 'KBC'`.
+
+**Real gap found and fixed running this for real, not anticipated at
+S8-01:** `infra/migration_runner.tf` never injected `DATABASE_URL` —
+unlike `web.tf`/`worker.tf`, it only set `DB_HOST`/`DB_PORT`/`DB_NAME`/
+`DB_USER`/`DB_PASSWORD` individually, a pattern that predates the
+pre-assembled `DATABASE_URL` secret those two now use. `alembic/env.py`
+reads `DATABASE_URL` directly, so `alembic current` failed outright
+("option values must be strings") until this task definition also got
+the same secret injection. Fixed by adding it to `migration_runner.tf`'s
+`secrets` list — the execution role already had read access to that
+secret (`ecs_task_execution_read_app_secrets`, ecs.tf), only the
+container definition was missing the entry.
+
+**`kbc-analyzer-deploy`'s IAM scope widened for this (2026-08-27), not
+ECR-only anymore.** S7-01 scoped it to ECR push/pull only, sufficient
+for S8-01. Real production deploy work needs more: `terraform apply`,
+`ecs run-task`, `ecs execute-command`. Three new policies
+(`infra/iam.tf`), kept separate from the original ECR-only grant for
+independent audit/revocation — broad READ-ONLY (`Describe*`/`List*`/
+`Get*`, never a mutating verb) across every service this stack
+touches, narrow WRITE scoped to exactly ECS task-definition management
+plus `RunTask`/`StopTask`/`DescribeTasks`/`ExecuteCommand` on the
+migration-runner family and this cluster, `iam:PassRole` restricted to
+the two roles that family uses, and Terraform state bucket/lock-table
+access. Real gaps found only by running the actual apply, each fixed
+in its own commit: a 2048-byte inline-policy size limit
+(`deploy_migration_runner` became a managed policy + attachment, AWS's
+6144-byte cap), `ecr:DescribeRepositories`/`ecr:ListTagsForResource`
+(widened to `ecr:Describe*`/`ecr:List*`), `secretsmanager:GetResourcePolicy`,
+and `ecs:TagResource` (this provider's `default_tags` block auto-tags
+every new resource).
+
+Bootstrapping the widening itself needed `KBC_analyser_deploy` — a
+scoped user can never grant itself more IAM permissions. Borys
+reactivated it four times across these fixes; his explicit call after
+the third: leave it active for the rest of Sprint 8 rather than
+deactivate/reactivate per tweak, but reach for it only for IAM
+changes — routine deploy work (build/push, non-IAM `terraform apply`,
+running ECS tasks) uses `kbc-analyzer-deploy`. This supersedes the
+"Retired 2026-08-27" note recorded earlier the same day — accurate as
+a description of what happened at that moment, not as the current
+state.
 
 `app/eb_session_store.py`'s `DatabaseSessionStore` and
 `app/eb_service.py`'s `EnableBankingService` both now take `institution`

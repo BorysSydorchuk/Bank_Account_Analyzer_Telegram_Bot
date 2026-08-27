@@ -69,15 +69,55 @@ migration needs `terraform apply`/`ecs run-task`/`ecs
 execute-command`, not just ECR push/pull) required bootstrapping via
 `KBC_analyser_deploy`, the admin user retired last session — a scoped
 user can never grant itself more IAM permissions. Borys reactivated
-it three times for three separate small `terraform apply` runs (the
+it four times across four separate small `terraform apply` runs: the
 three new deploy policies; a 2048-byte inline-policy-size fix that
 required converting `deploy_migration_runner` to a managed policy;
-two missing read actions — `ecr:DescribeRepositories`,
-`secretsmanager:GetResourcePolicy` — found only by actually running
-the real apply). After the third, Borys explicitly chose to leave it
-active for the rest of Sprint 8 rather than repeat
-deactivate-then-reactivate for every further IAM tweak, scoped to IAM
-changes only — see ARCHITECTURE.md's IAM section for the current,
-accurate state (supersedes the "Retired 2026-08-27" note from the
-prior session's commit, which is now stale as a permanent record but
-accurate as a description of what happened at that moment).
+two missing read actions (`ecr:DescribeRepositories`, then
+`ecr:ListTagsForResource`, widened to `ecr:Describe*`/`ecr:List*`) and
+`secretsmanager:GetResourcePolicy`; and `ecs:TagResource` (this
+provider's `default_tags` auto-tags every new resource) — all found
+only by actually running the real apply, not anticipated in advance.
+After the third, Borys explicitly chose to leave it active for the
+rest of Sprint 8 rather than repeat deactivate-then-reactivate for
+every further IAM tweak, scoped to IAM changes only — see
+ARCHITECTURE.md's IAM section for the current, accurate state
+(supersedes the "Retired 2026-08-27" note from the prior session's
+commit, which is now stale as a permanent record but accurate as a
+description of what happened at that moment).
+
+--- PRODUCTION MIGRATION: DONE, real evidence (2026-08-27) ---
+
+Also found running for real, not anticipated at S8-01: the worker
+image has no `psql` binary (only the `psycopg` Python driver), and
+raw `psycopg.connect()` doesn't understand SQLAlchemy's
+`postgresql+psycopg://` URL scheme — verification queries used
+SQLAlchemy's `create_engine`/`connect()` instead, matching the app's
+own real connection path rather than a workaround.
+
+Also found and fixed: `infra/migration_runner.tf` never injected
+`DATABASE_URL` (unlike `web.tf`/`worker.tf`) — `alembic/env.py` reads
+it directly, so `alembic current` failed outright until this task
+definition got the same secret injection those two already had. Full
+detail and the fix itself in ARCHITECTURE.md's Multi-bank section and
+`infra/migration_runner.tf`'s own comment.
+
+Real command sequence, task revision 9 (revision 8 registered before
+the `DATABASE_URL` fix, stopped without being used):
+
+    $ alembic current
+    b8e4f2a9c317
+    $ alembic upgrade head
+    Running upgrade b8e4f2a9c317 -> d4a7e19c6b52, widen
+    enable_banking_sessions to composite (user_id, institution) key
+    $ alembic current
+    d4a7e19c6b52 (head)
+
+Row-count/identity check, before and after (SQLAlchemy query inside
+the migration-runner container): production held two real
+`enable_banking_sessions` rows, not one (Borys plus a second real
+user who has also connected KBC) — both survived byte-for-byte
+identical (`user_id`, `valid_until` unchanged), now labelled
+`institution = 'KBC'`. Task stopped immediately after (confirmed via
+`describe-tasks` polling to `STOPPED`, then an empty
+`list-tasks --family kbc-analyzer-migration-runner` — no lingering
+Fargate cost).
