@@ -77,12 +77,59 @@ ACCEPTANCE CRITERIA:
   email — actual proof, not assumption
 
 WHEN DONE:
-- Root cause confirmation evidence
-- AWS Support Case follow-up content and current status
-- Contingency investigation result
-- If resolved: real new-address registration proof
-- If not yet resolved: explicit re-check date and what
-  triggers escalation to Borys
-- Do not start S8-06 (Beta Invite Mechanism) until this is
-  either resolved, or a contingency is confirmed sufficient to
-  unblock real beta registration some other way
+
+**Root cause confirmation evidence:** confirmed via real CloudWatch
+Logs, not assumed. `aws sesv2 get-account` shows still-sandbox
+(`ProductionAccessEnabled: false`, `ReviewDetails.Status: DENIED`,
+`CaseId: 178778410400368`). The real failure mode is more precise
+than "sandbox blocks unverified recipients" — CloudWatch Logs shows
+the actual exception for a genuinely new registration
+(`liyaberry27@gmail.com`, 2026-08-27 22:00):
+`botocore.exceptions.ClientError: AccessDenied ... not authorized to
+perform 'ses:SendEmail' on resource '...identity/liyaberry27@gmail.com'`
+— an IAM authorization failure on the recipient's identity ARN
+specifically, the same quirk already documented in ARCHITECTURE.md's
+Auth section (sandbox mode's IAM check covers both sender and
+recipient identity ARNs). A second real registration
+(`secta022024@gmail.com`, 2026-08-27 23:07) failed the same way —
+real, ongoing impact, not a one-off.
+
+**AWS Support Case follow-up content and current status:** could not
+follow up via API — confirmed definitively, not assumed:
+`aws support describe-cases` and `describe-severity-levels` both
+return `SubscriptionRequiredException` (this account has no paid
+Support plan; the Support API is entirely inaccessible regardless of
+what's being requested). Attempted the one API-level lever that does
+exist — a fresh `sesv2 put-account-details` resubmission with a
+materially stronger use-case description (suppression list, DKIM
+status, real current/expected volume) — rejected outright with
+`ConflictException`. **No further action is possible from this
+environment; the account structurally requires Console access, which
+this environment doesn't have.**
+
+**Contingency investigation result:** no faster AWS-native path
+exists — sandbox mode's per-recipient restriction is independent of
+sender-domain verification (`mymble.be` is already fully DKIM-verified
+and it doesn't matter). Two real options identified: wait on the
+existing case (needs Borys's console follow-up, response window
+already passed), or switch to a different transactional email provider
+entirely (real, ~1-2 day engineering effort, sidesteps this specific
+SES account's denial). Neither adopted unilaterally — flagged to
+Borys as a real decision, not made here.
+
+**Not resolved.** A genuinely new address has not completed real
+registration and received a real verification email — cannot be,
+until either the case resolves or a contingency is chosen.
+
+**Explicit re-check trigger:** AWS's own stated 24-hour response
+window (from the 2026-08-27 01:05 CEST Support Center reply) has
+already passed with the case status unchanged — this is the exact
+"AWS doesn't respond within a short, explicit window" condition the
+ticket names for escalating to Borys directly, not a further quiet
+wait. Escalated this session. No further re-check from this
+environment until Borys reports what the Console actually shows.
+
+Do not start S8-06 (Beta Invite Mechanism) until this is either
+resolved, or a contingency is confirmed sufficient to unblock real
+beta registration some other way — status remains blocked on Borys's
+decision.

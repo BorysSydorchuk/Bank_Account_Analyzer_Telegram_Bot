@@ -800,6 +800,51 @@ states an initial response within 24 hours of that reply.
 **Status as of this writing: still pending** — not yet re-checked
 against a new outcome.
 
+**Re-checked for real, S8-05 (2026-08-28) — AWS's own 24-hour window has
+now passed with no change, and this has real, ongoing user impact, not
+theoretical.** `aws sesv2 get-account` still shows `ReviewDetails.Status:
+DENIED`, `CaseId: 178778410400368` — identical to S7-08/S7-10, over 24
+hours after the Support Center reply (submitted 2026-08-27 01:05 CEST,
+per git history) that AWS said would get an initial response within 24
+hours. Two more real people have tried to register since and never
+received a verification email — `liyaberry27@gmail.com` (2026-08-27
+22:00) and `secta022024@gmail.com` (2026-08-27 23:07), both confirmed
+still `email_verified: false`. Real CloudWatch Logs traceback for the
+first: `botocore.exceptions.ClientError: An error occurred (AccessDenied)
+when calling the SendEmail operation: ... is not authorized to perform
+'ses:SendEmail' on resource '...identity/liyaberry27@gmail.com'` — the
+precise mechanism named in the finding below, not SES's own
+`MessageRejected`, confirming this is genuinely the recipient-ARN IAM
+quirk, not a different failure mode.
+
+Attempted a fresh `aws sesv2 put-account-details` resubmission with a
+materially stronger use-case description (explicit mention of the
+already-active suppression list, DKIM status, real current/expected
+volume) — rejected outright with `ConflictException` (empty message),
+confirmed via a direct API call, not assumed. **There is no API-only
+path left to try** — the account is in a state that structurally
+requires the Support Center console specifically, which needs a human
+with console access; this environment has API/CLI credentials only,
+never console/browser login for this AWS account.
+
+**Contingency investigated, per this ticket's own ask — no faster
+AWS-native path exists.** Sandbox mode's per-recipient-verification
+requirement is unrelated to sender-domain verification — `mymble.be`
+being fully DKIM-verified (confirmed live, `VerificationStatus:
+SUCCESS`) has no bearing on it; sandbox always restricts to verified
+*recipients* regardless of sender setup. The only two genuine
+contingencies: (1) wait on the existing AWS case, needs Borys's direct
+console follow-up now that the stated response window has passed with
+no visible change; (2) switch email delivery to a different
+transactional provider entirely (e.g., Postmark, SendGrid, Resend) —
+a real, meaningfully different path since it sidesteps this specific
+SES account's denial, but real engineering effort (a new provider's
+own domain verification, a new SDK replacing `email_service.py`'s
+direct `boto3` SES client, likely 1-2 days of work), not a
+configuration change. Flagged to Borys as a real option, not adopted
+unilaterally — a vendor/cost decision, not an engineering call to make
+alone.
+
 **Real, unrelated-to-production-access finding from the sandbox test
 itself:** IAM's authorization check for `ses:SendEmail` in sandbox mode
 covers *both* the sender identity and the recipient identity ARN, not

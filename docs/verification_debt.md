@@ -137,13 +137,34 @@ create it early rather than tracking by memory").
   `aws sesv2 put-account-details --production-access-enabled` call (or
   confirmation the approval already flipped `ProductionAccessEnabled`
   without one) to move the account out of sandbox for real.
-- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN —
-  re-checked directly (`aws sesv2 get-account`): still
-  `ProductionAccessEnabled: false`, `ReviewDetails.Status: DENIED`,
-  unchanged since S7-08/S7-09. Non-blocking — S7-09's verification/reset
-  flows are already proven against the one verified sandbox recipient.
-  Carried forward into Sprint 8. Closes once AWS responds and, if
-  approved, `ProductionAccessEnabled` is confirmed `true`.
+- **Status (re-confirmed 2026-08-28, S8-05) — no longer non-blocking,
+  real ongoing user impact, escalation trigger hit:** re-checked
+  directly (`aws sesv2 get-account`): still `ProductionAccessEnabled:
+  false`, `ReviewDetails.Status: DENIED`, `CaseId: 178778410400368` —
+  unchanged since S7-08/S7-10, and now more than 24 hours past the
+  point AWS said it would give an initial response to the Support
+  Center reply already submitted (2026-08-27 01:05 CEST). Two real
+  registration attempts have failed for exactly this reason since:
+  `liyaberry27@gmail.com` and `secta022024@gmail.com`, both confirmed
+  still unverified, real `AccessDenied` tracebacks confirmed in
+  CloudWatch Logs (see ARCHITECTURE.md's Auth section for the full
+  entry). Attempted a fresh `put-account-details` resubmission with a
+  stronger use-case description — blocked outright (`ConflictException`,
+  no API-only path left). This account's Support Case is entirely
+  unreachable via API (Basic support tier, `SubscriptionRequiredException`
+  confirmed on both `describe-cases` and `describe-severity-levels`) —
+  **only the AWS Console can read the case or post to it, and this
+  environment has no console access, only CLI credentials.** Per this
+  ticket's own instruction ("if AWS doesn't respond within a short,
+  explicit window, escalate to Borys directly rather than silently
+  waiting") — that window has now passed. Escalated directly, this
+  session, rather than setting a further quiet re-check date.
+- **Re-check point:** Borys checks the Support Center console directly
+  (case `178778410400368`) — either AWS's actual response is sitting
+  there unread by anything with API visibility, or the case genuinely
+  needs a further human reply. No further silent re-checks from this
+  environment until that happens; the API-only path is confirmed
+  exhausted.
 
 ### GOOGLE_CLIENT_SECRET rotation — AWS-side confirmed, Google Console side not independently verifiable from this environment (S7-05)
 
