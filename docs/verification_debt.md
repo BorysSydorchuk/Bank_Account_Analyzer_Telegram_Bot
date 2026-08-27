@@ -175,9 +175,9 @@ create it early rather than tracking by memory").
   most naturally alongside `test_error_contracts.py` or a new
   `test_date_range.py` — each just needs a live TestClient call with a
   backwards or >365-day range and an assertion on the 400 body.
-- **Status (re-confirmed 2026-08-21, S6-08 sprint close):** OPEN — no
-  target session assigned yet; belongs to the Tester's S5-04 follow-on
-  work, same as the sync-lock entry below.
+- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN — content
+  unchanged since S6-08; no target session assigned yet, still belongs to
+  the Tester's S5-04 follow-on work, same as the sync-lock entry below.
 
 ### Sync lock release on two failure early-returns — never empirically triggered (S5-05)
 
@@ -214,9 +214,9 @@ create it early rather than tracking by memory").
   also assert `sync_lock.get_holder()` is `None` after the run, not just
   that `job_store` reports `status: "failed"`. This is Tester-agent scope
   (S5-04's follow-on suite), not something to build here.
-- **Status (re-confirmed 2026-08-21, S6-08 sprint close):** OPEN — no
-  target session assigned yet; belongs to the Tester's S5-04 follow-on
-  work.
+- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN — content
+  unchanged since S6-08; no target session assigned yet, still belongs to
+  the Tester's S5-04 follow-on work.
 
 ### Three regression tests deferred — no frontend test harness yet (S5-04)
 
@@ -242,37 +242,10 @@ create it early rather than tracking by memory").
   banner, one asserting a stalled poll still times out on identical
   payloads, one asserting the api client surfaces an error message from
   either JSON shape.
-- **Status (re-confirmed 2026-08-21, S6-08 sprint close):** OPEN —
+- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN —
   `kbc_analyzer/frontend/package.json` still has no `test` script and no
   vitest/jest dependency; nothing has changed since S5-04. Flagged to PM
   for a frontend-test-infrastructure ticket; no target sprint assigned yet.
-
-### Non-root file-permission protection — unverifiable on Windows Docker Desktop (S4-09 Item 1)
-
-- **What was deferred:** Confirming that the non-root `appuser` (added
-  S4-09 Item 1) actually protects anything — i.e. that a real permission
-  boundary exists between `appuser` and files a different/root process
-  might have written.
-- **Why:** Verified only that `appuser` can read/write
-  `eb_session.json`/`certs/` — necessary but not sufficient. Docker
-  Desktop's Windows bind mounts (`./backend:/app`) report `rwxrwxrwx` to
-  every UID regardless of the container's actual user, so this host can't
-  demonstrate the failure mode the non-root user is meant to prevent
-  (root-owned files becoming inaccessible), and by the same token can't
-  demonstrate the fix actually closes it either. The security property is
-  asserted from the Dockerfile change and Debian/Linux `USER` semantics
-  generally, not observed working on this host.
-- **What would close it:** Run the same stack on a native Linux Docker
-  host (real bind-mount ownership, not synthesized 777) — create a file as
-  root inside a container, confirm `appuser` genuinely cannot write it,
-  confirm the app still runs correctly end-to-end as non-root.
-- **Status (re-confirmed 2026-08-21, S6-08 sprint close):** OPEN — closure
-  condition corrected this pass: the earlier "closes at Sprint 6" text was
-  stale, written before the roadmap split Sprint 5 into two and pushed
-  public/production deployment to Sprint 7 ("Deployment & Public
-  Onboarding"). Closes naturally at Sprint 7, when deployment moves off
-  Windows Docker Desktop onto a real (Linux) host. Nothing about this
-  host itself changed.
 
 ---
 
@@ -304,6 +277,58 @@ create it early rather than tracking by memory").
 ---
 
 ## CLOSED (recent)
+
+### Non-root file-permission protection — verified for real on production Fargate (S4-09 Item 1, closed 2026-08-27, S7-10)
+
+Was OPEN since S4-09: Windows Docker Desktop's bind mounts report
+`rwxrwxrwx` to every UID regardless of the container's actual user, so
+local dev could never demonstrate the failure mode `appuser` is meant to
+prevent. Its own closure condition ("closes at Sprint 7, when deployment
+moves off Windows Docker Desktop onto a real Linux host") became
+checkable for the first time once production ECS Exec was available —
+this ticket ran the actual test rather than re-dating around it.
+
+**Real evidence, not narration.** Exec'd into the live, currently-serving
+`kbc-analyzer-web` Fargate task (`aws ecs execute-command`, real
+production, not a throwaway task) — genuine Linux (Debian 13), no
+synthesized Windows permissions involved.
+
+First confirmed the process actually handling live traffic runs
+non-root, via `/proc`, not assumed from the Dockerfile:
+
+```
+PID:1 OWNER:appuser CMD:python -m uvicorn app.main:app --host ... --port 8...
+```
+
+Then created a root-owned, `600`-permission file and attempted every
+operation `appuser` might need to defeat the boundary with:
+
+```
++ chown root:root /app/root_owned_test_file
++ chmod 600 /app/root_owned_test_file
+-rw-------. 1 root root 20 Aug 27 07:19 /app/root_owned_test_file
+
++ su appuser -s /bin/sh -c "cat /app/root_owned_test_file"
+cat: /app/root_owned_test_file: Permission denied      (exit 1)
+
++ su appuser -s /bin/sh -c "echo overwritten >> /app/root_owned_test_file"
+sh: cannot create /app/root_owned_test_file: Permission denied   (exit 2)
+
++ su appuser -s /bin/sh -c "rm -f /app/root_owned_test_file"
+rm: cannot remove '/app/root_owned_test_file': Permission denied   (exit 1)
+
+FINAL STATE: -rw-------. 1 root root 20 ... /app/root_owned_test_file
+cat: secret-root-content        (unchanged — the write attempt above never landed)
+```
+
+Read, write, and delete all genuinely rejected — real `Permission
+denied` errors and non-zero exit codes, not a synthesized 777. The
+file's content was independently re-read afterward and confirmed
+unchanged, closing the possibility that the "denied" write silently
+partially succeeded. Test file deleted by root immediately after.
+**The app itself is simultaneously proof it "runs correctly end-to-end
+as non-root"** — this was the live production `kbc-analyzer-web` task,
+actually serving real traffic as `appuser` the entire time this test ran.
 
 ### Real received-email confirmation for password reset (closed 2026-08-27, S7-09)
 

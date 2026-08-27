@@ -90,11 +90,17 @@ ever existed.
 `backend` and `celery_worker` both run as a non-root `appuser`
 (`backend/Dockerfile`, S4-09 Item 1) — the image's final `USER appuser`
 directive, after dependencies are installed and the source is copied as
-root. Verified this doesn't break `eb_session.json`/cert access: Docker
-Desktop's Windows bind mounts report `rwxrwxrwx` regardless of the
-container's UID, so this isn't the classic root-owned-files failure mode a
-native Linux host would hit — worth re-verifying if this project ever runs
-on a Linux Docker host.
+root. Local dev only confirmed this doesn't break `eb_session.json`/cert
+access — Docker Desktop's Windows bind mounts report `rwxrwxrwx`
+regardless of the container's UID, so local dev alone could never
+demonstrate the real permission boundary this is meant to provide.
+**Verified for real on production (S7-10, 2026-08-27):** exec'd into the
+live `kbc-analyzer-web` Fargate task (genuine Linux), confirmed the
+actual PID 1 process serving real traffic runs as `appuser`, then
+created a root-owned `600` file and confirmed `appuser` gets a real
+`Permission denied` on read, write, and delete — see
+`docs/verification_debt.md`'s closed S4-09 entry for the full command
+output.
 
 `frontend`'s Vite dev server watches with polling (`vite.config.ts`,
 S4-09 Item 2: `usePolling: true, interval: 1000`) — Docker Desktop's
