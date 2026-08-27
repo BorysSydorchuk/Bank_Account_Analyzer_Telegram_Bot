@@ -31,6 +31,19 @@ resource "aws_sesv2_email_identity" "test_recipient" {
   email_identity = var.ses_test_recipient_email
 }
 
+# S8-02: a second real test recipient, same sandbox-mode reasoning as
+# test_recipient above — needed to verify a real beta-style
+# registration (a genuinely different person's inbox, not just Borys's
+# own) actually receives the verification email while production SES
+# access is still denied (see ARCHITECTURE.md's Auth section). Kept as
+# its own resource rather than widening ses_test_recipient_email to a
+# list, since this is a one-off real test account, not a pattern this
+# project needs to scale — S8-05/S8-06 will need a real answer to SES
+# sandbox mode before real beta invites work at all, tracked there.
+resource "aws_sesv2_email_identity" "liyaberry_test_recipient" {
+  email_identity = "liyaberry27@gmail.com"
+}
+
 # Grants both web and worker (they share this one task role, same as
 # every other ECS-task permission in this project) real sending
 # capability with zero credential material anywhere — no access key, no
@@ -62,6 +75,7 @@ resource "aws_iam_role_policy" "ecs_task_send_email" {
       Resource = [
         aws_sesv2_email_identity.mymble.arn,
         aws_sesv2_email_identity.test_recipient.arn,
+        aws_sesv2_email_identity.liyaberry_test_recipient.arn,
       ]
     }]
   })
