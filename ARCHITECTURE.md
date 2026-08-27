@@ -192,14 +192,25 @@ deploy user), and once more on 2026-08-25 for the S7-04
 CloudTrail — see the S7-04 exposure/resolution note above) — two
 uses total, not a single one-time bootstrap. It was never managed by
 this project's Terraform and was never the identity CI/deploy processes
-use. **Retired 2026-08-27:** Borys deactivated its access key and
-confirmed console sign-in remained disabled (as it already was),
-via the AWS Console. The user object itself was left in place
-(deactivated, not deleted) so the change stays reversible. No
-automation in this repo referenced it — confirmed by grep across the
-codebase and by the absence of any `.github/workflows` or CI
-definitions, plus a check of `infra/iam.tf`, which only manages the
-scoped `kbc-analyzer-deploy` user above.
+use. **Retired 2026-08-27, then deliberately reactivated the same day
+for the remainder of Sprint 8 — current state as of S8-02, not the
+retirement recorded a moment earlier.** Borys first deactivated its
+access key (console sign-in remained disabled, as it already was). It
+was then reactivated to bootstrap S8-02's real IAM changes to
+`kbc-analyzer-deploy` (see the Multi-bank section's deploy-permissions
+note below) — a scoped user can never grant itself more IAM
+permissions, so widening `kbc-analyzer-deploy` genuinely needs an
+identity with `iam:PutUserPolicy`, and this is the only one that has
+it. Borys's explicit call (2026-08-27): leave it active through the
+rest of Sprint 8 rather than deactivate-then-reactivate on every IAM
+tweak, but scoped to IAM changes only — routine deploy work
+(build/push, `terraform apply` for non-IAM resources, running the
+migration-runner task) uses `kbc-analyzer-deploy`, not this one. The
+user object itself was left in place (deactivated or reactivated, not
+deleted) so the change stays reversible either direction. No
+automation in this repo references it either way — confirmed by grep
+across the codebase and by the absence of any `.github/workflows` or
+CI definitions.
 
 **Container registry (provisioned, S7-01):** two ECR repositories,
 `kbc-analyzer-web` and `kbc-analyzer-worker`, both with

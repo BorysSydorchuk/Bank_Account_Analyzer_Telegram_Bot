@@ -61,3 +61,23 @@ WHEN DONE:
 - Real evidence the production migration ran cleanly and
   Borys's live KBC session survived it intact
 - Do not start S8-03 until confirmed
+
+--- IAM NOTE, logged as it happened (2026-08-27) ---
+
+Widening `kbc-analyzer-deploy` (this ticket's real production
+migration needs `terraform apply`/`ecs run-task`/`ecs
+execute-command`, not just ECR push/pull) required bootstrapping via
+`KBC_analyser_deploy`, the admin user retired last session — a scoped
+user can never grant itself more IAM permissions. Borys reactivated
+it three times for three separate small `terraform apply` runs (the
+three new deploy policies; a 2048-byte inline-policy-size fix that
+required converting `deploy_migration_runner` to a managed policy;
+two missing read actions — `ecr:DescribeRepositories`,
+`secretsmanager:GetResourcePolicy` — found only by actually running
+the real apply). After the third, Borys explicitly chose to leave it
+active for the rest of Sprint 8 rather than repeat
+deactivate-then-reactivate for every further IAM tweak, scoped to IAM
+changes only — see ARCHITECTURE.md's IAM section for the current,
+accurate state (supersedes the "Retired 2026-08-27" note from the
+prior session's commit, which is now stale as a permanent record but
+accurate as a description of what happened at that moment).
