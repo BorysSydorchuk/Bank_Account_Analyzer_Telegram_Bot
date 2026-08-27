@@ -46,6 +46,36 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Old production code + new DB schema: bank connect/reconnect will hard-fail (S8-02)
+
+- **What was deferred:** deploying new web/worker images after
+  running S8-02's real production migration (`enable_banking_sessions`
+  widened to composite `(user_id, institution)` primary key,
+  `d4a7e19c6b52`). Production's web/worker ECS services are still
+  running the pre-migration image (`0a438c0`).
+- **Why:** old code's `eb_session_store.py` does
+  `on_conflict_do_update(index_elements=[EnableBankingSession.user_id])`
+  — that `ON CONFLICT (user_id)` target no longer matches any real
+  constraint (the PK is now composite), so Postgres rejects it with
+  "no unique or exclusion constraint matching the ON CONFLICT
+  specification." **Concrete failure mode:** any real user who
+  attempts to connect or reconnect a bank (first-time connect, or a
+  normal ~90-day reauthorization) while old code is still deployed
+  gets a hard database error. Reads (`GET /status`) are unaffected —
+  every user still has exactly one row today, so old code's
+  single-column `db.get()` still resolves correctly; only the write
+  path (`save()`/`complete_reauthorization`) breaks.
+  Flagged to Borys immediately on discovery (2026-08-27, mid S8-02);
+  his explicit call — accept the risk window rather than deploy new
+  code ahead of the rest of S8-02's work.
+- **What would close it:** deploy web/worker images built from current
+  `master` (institution-aware `save()`/`on_conflict_do_update`) to
+  production — naturally happens as part of finishing S8-02's live
+  ING connection work, which needs the new code deployed anyway.
+- **Status (2026-08-27, S8-02, in progress):** OPEN — real, live risk
+  window, accepted by Borys, not unnoticed. Closes when S8-02's web/
+  worker redeploy ships.
+
 ### AWS account credit balance and expiration — not visible via CLI (S7-10)
 
 - **What was deferred:** confirming when the credit currently offsetting

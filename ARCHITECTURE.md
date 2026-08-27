@@ -1311,6 +1311,18 @@ running ECS tasks) uses `kbc-analyzer-deploy`. This supersedes the
 a description of what happened at that moment, not as the current
 state.
 
+**Live risk window, accepted deliberately, tracked in
+`docs/verification_debt.md` — not silently open.** Production's web/
+worker ECS services still run the pre-migration image (`0a438c0`) as
+of this migration; their `eb_session_store.py` targets `ON CONFLICT
+(user_id)` alone, which no longer matches any real constraint on this
+table. Any real user attempting to connect or reconnect a bank while
+old code is still deployed gets a hard database error (reads are
+unaffected — every user still has exactly one row today). Flagged to
+Borys the moment this was reasoned through; his explicit call was to
+accept the window rather than deploy new code ahead of the rest of
+S8-02's work. Closes when S8-02's web/worker redeploy ships.
+
 `app/eb_session_store.py`'s `DatabaseSessionStore` and
 `app/eb_service.py`'s `EnableBankingService` both now take `institution`
 alongside `user_id` — one instance represents one `(user, bank)`
