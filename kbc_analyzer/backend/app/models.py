@@ -238,3 +238,24 @@ class Budget(Base):
     amount = Column(Numeric(10, 2), nullable=False)
     period = Column(Text, nullable=False, server_default="monthly")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class UsageEvent(Base):
+    __tablename__ = "usage_events"
+
+    # S8-04: one row per LLM-calling action a user actually takes (chat
+    # message, categorization run, insight generation) — a real event log,
+    # not a pre-aggregated counter, so `app/usage_limits.py` can just COUNT
+    # rows in a rolling window rather than manage day/month rollover state
+    # itself. Small beta scale (10-20 users) makes row-per-event negligible
+    # overhead, and the real timestamps double as real usage data for
+    # Sprint 9's tier design (the sprint handoff note: "worth Borys
+    # watching actual beta usage, not just guessing at tiers cold").
+    __table_args__ = (Index("ix_usage_events_user_action_created", "user_id", "action", "created_at"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    # "chat", "categorize", or "insights" — app/usage_limits.py's ACTION_LABELS
+    # keys, not a first-class entity with its own table (a fixed, tiny set).
+    action = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

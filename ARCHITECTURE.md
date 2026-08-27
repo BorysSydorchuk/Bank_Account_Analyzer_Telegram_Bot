@@ -1606,6 +1606,38 @@ be waiting on.
   Sprint 6 exposes this publicly, not throttling normal use. A 429 uses
   the same `{"message": ...}` error shape as every other handled
   exception in `main.py`.
+- **Per-user daily/monthly LLM-action caps (S8-04) — a different
+  mechanism from S5-07's rate limiter above, not an overlapping one.**
+  `rate_limit.py`'s `slowapi` limiter is short-window (N per minute,
+  IP-keyed), guarding against a runaway client or a stuck retry loop.
+  `app/usage_limits.py`'s `try_record_usage` is long-window (daily and
+  monthly, keyed on the real authenticated `user_id`, backed by a real
+  `usage_events` table — one row per action actually taken, not a
+  pre-aggregated counter), guarding against cumulative real cost from a
+  legitimate-looking but excessive usage pattern. A user can comfortably
+  stay under every per-minute rate limit while still running up real
+  LLM cost over a day; that's exactly the gap this closes. The two run
+  independently and don't share state — a request can trip either one
+  on its own. Deliberately blunt (Sprint 9's own handoff note calls
+  these "blunt beta caps," meant to be replaced by real plan limits once
+  real usage patterns exist): `DAILY_LIMITS`/`MONTHLY_LIMITS` are fixed
+  per-action constants (`chat`: 50/day, 500/month; `categorize`/
+  `insights`: 10/day, 100/month each), not per-user-tuned. Checked
+  *before* the LLM call in every real caller — `routers/chat.py`
+  (raises `HTTPException(429, ...)` before the SSE stream opens) and
+  `analysis_service.py`'s `categorize_transactions`/`generate_insights`
+  (returns the existing `error_message` field the "no API key
+  configured" path already used — one shared check point covers both
+  the real caller, the sync job pipeline in `tasks/analysis.py`, and
+  the separate, frontend-unused `POST /api/analysis/*` REST endpoints,
+  confirmed by checking `frontend/src/lib/api.ts`, which never calls
+  either) — a rejected call is never recorded, so it doesn't cost the
+  user a slot they didn't get to use. Real evidence: seeded a real
+  user to exactly the daily chat limit, a real `POST /api/chat` request
+  was rejected with `429 {"detail": "You've reached today's beta limit
+  for chat messages (50/day). Try again tomorrow."}`, and the row count
+  was confirmed unchanged after the rejection. `docs/tickets/
+  S8-04-per-user-usage-guardrails.md` has the real screenshot.
 - **CORS never accepts a wildcard origin.** `main.py`'s `CORSMiddleware`
   has exactly one configuration path — `allow_origins=[frontend_origin]`,
   always a single explicit origin read from `FRONTEND_ORIGIN`, never `"*"`

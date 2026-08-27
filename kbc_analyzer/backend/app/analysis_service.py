@@ -19,6 +19,7 @@ from .agents.registry import ProviderNotConfiguredError, get_provider
 from .colors import BACKUP_PALETTE, validate_color
 from .settings_service import get_settings
 from .statistics import compute_statistics
+from .usage_limits import try_record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,19 @@ async def categorize_transactions(
             "failed": len(uncategorized),
             "provider": provider_name,
             "error_message": str(exc),
+        }
+
+    # S8-04: checked here, not before the provider lookup — a categorize
+    # call with nothing to do (the early return above) or no provider
+    # configured never reaches the LLM, so it shouldn't cost a cap slot.
+    cap_message = try_record_usage(db, user_id, "categorize")
+    if cap_message:
+        return {
+            "categorized": 0,
+            "skipped_already_categorized": skipped,
+            "failed": len(uncategorized),
+            "provider": provider_name,
+            "error_message": cap_message,
         }
 
     results: list[dict] = []
@@ -180,6 +194,10 @@ async def generate_insights(db: Session, user_id: UUID, date_from: date, date_to
     except ProviderNotConfiguredError as exc:
         logger.warning("Insight generation skipped: %s", exc)
         return {"insights": [], "provider": provider_name, "generated_at": generated_at, "error_message": str(exc)}
+
+    cap_message = try_record_usage(db, user_id, "insights")
+    if cap_message:
+        return {"insights": [], "provider": provider_name, "generated_at": generated_at, "error_message": cap_message}
 
     transactions = crud.list_transactions(db, user_id, date_from, date_to)
     statistics = compute_statistics(transactions, date_from, date_to)

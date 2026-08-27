@@ -15,6 +15,7 @@ from ..db import get_db
 from ..models import User
 from ..rate_limit import CHAT_RATE_LIMIT, limiter
 from ..schemas import ChatRequest
+from ..usage_limits import try_record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,14 @@ async def chat(
     # input box) into a generic 422 instead of a clear 400.
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="Message can't be empty.")
+
+    # S8-04: checked before the LLM call, not after — a message that never
+    # reaches the provider shouldn't cost a cap slot, and the caller gets a
+    # clear reason before any streaming starts rather than a stream that
+    # opens and then immediately errors.
+    cap_message = try_record_usage(db, current_user.id, "chat")
+    if cap_message:
+        raise HTTPException(status_code=429, detail=cap_message)
 
     try:
         stream, provider = chat_service.start_chat_stream(
