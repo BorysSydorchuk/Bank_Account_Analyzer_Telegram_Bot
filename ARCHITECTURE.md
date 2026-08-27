@@ -185,11 +185,21 @@ else exists yet for it to need access to. Permissions grow ticket-by-
 ticket as ECS/RDS/Secrets Manager resources are created, not granted
 upfront. **Note:** this account also has a pre-existing IAM user,
 `KBC_analyser_deploy` (different casing, created outside this project's
-Terraform), holding `AdministratorAccess`. That user was used to bootstrap
-S7-01 (create the budget, state backend, and the new scoped deploy user)
-but is not managed by this project's Terraform and is not the identity
-CI/deploy processes should use going forward — flagged for Borys to
-decide whether to retire it.
+Terraform), which held `AdministratorAccess`. That user was used to
+bootstrap S7-01 (create the budget, state backend, and the new scoped
+deploy user), and once more on 2026-08-25 for the S7-04
+`GOOGLE_CLIENT_SECRET` regeneration (`PutSecretValue`, confirmed via
+CloudTrail — see the S7-04 exposure/resolution note above) — two
+uses total, not a single one-time bootstrap. It was never managed by
+this project's Terraform and was never the identity CI/deploy processes
+use. **Retired 2026-08-27:** Borys deactivated its access key and
+confirmed console sign-in remained disabled (as it already was),
+via the AWS Console. The user object itself was left in place
+(deactivated, not deleted) so the change stays reversible. No
+automation in this repo referenced it — confirmed by grep across the
+codebase and by the absence of any `.github/workflows` or CI
+definitions, plus a check of `infra/iam.tf`, which only manages the
+scoped `kbc-analyzer-deploy` user above.
 
 **Container registry (provisioned, S7-01):** two ECR repositories,
 `kbc-analyzer-web` and `kbc-analyzer-worker`, both with
