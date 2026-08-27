@@ -54,13 +54,49 @@ ACCEPTANCE CRITERIA:
   rehearsal alone.
 
 WHEN DONE:
-- Real evidence of a live ING connection and sync
-- Any data-shape differences found, and how they were handled
-- Confirm KBC still works, unaffected (per the amended
-  simultaneous-connection meaning above)
-- Real evidence the production migration ran cleanly and
-  Borys's live KBC session survived it intact
-- Do not start S8-03 until confirmed
+
+**Real evidence of a live ING connection and sync:** the connection
+itself is real and live — Enable Banking's own `GET /sessions/{id}`
+confirms `"status": "AUTHORIZED"` for the real ING session on
+`boris.sydorchuk@gmail.com`. But it reports zero linked accounts
+(`"accounts": []`), both on first connect and after reconnecting with
+explicit account selection at ING's own consent screen. No sync ran
+against real ING transaction data because there is none to fetch —
+`get_account_uids()` correctly returns an empty list for this
+connection, so the sync loop correctly does nothing for it.
+
+**Any data-shape differences found, and how they were handled:** none
+found — no real ING transaction data existed to compare against KBC's
+shape. Cannot be answered honestly beyond that.
+
+**Confirm KBC still works, unaffected:** yes, real evidence. Both
+KBC and ING sessions coexist simultaneously on the same real account
+(`boris.sydorchuk@gmail.com`) — the core thing S8-01's migration exists
+to make possible. KBC's existing data (56 transactions across its two
+account UIDs, all fully categorized) is unchanged after the ING
+connection work and a real sync run.
+
+**Real evidence the production migration ran cleanly and Borys's live
+KBC session survived it intact:** yes — see S8-01/S8-02's earlier
+entries above; re-confirmed again here via the same real account,
+still intact.
+
+**Not confirmed, deferred, Borys's explicit call — not fixed by
+forcing a synthetic pass:** the real cause of ING reporting zero
+accounts is unresolved. Real ING transaction-data verification
+(categorization, data-shape handling, `account_id` disambiguation
+between two live datasets) is logged in `docs/verification_debt.md`,
+closes when Borys tests with a different, actively-used real ING
+account in a later ticket.
+
+**Status: core infrastructure delivered and real (production
+migration, code deploy, IAM, real simultaneous KBC+ING connection,
+KBC confirmed unaffected). Real ING transaction-data verification
+explicitly deferred, not silently skipped — see verification_debt.md.
+Do not start S8-03 assuming ING transaction data has been verified;
+S8-03's own real dual-connection collision test may itself need to
+wait for that same deferred real ING data, worth checking against
+S8-03's actual requirements before starting it.**
 
 --- IAM NOTE, logged as it happened (2026-08-27) ---
 

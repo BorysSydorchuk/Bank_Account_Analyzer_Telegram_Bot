@@ -1372,6 +1372,32 @@ throwaway local test account (not Borys's real account), stopped before
 any real login credentials — this ticket needs no live bank connection,
 that's S8-02.
 
+**S8-02 — real live connections, KBC and ING simultaneously, on
+Borys's actual account (2026-08-28).** Confirmed via the
+migration-runner's real DB access: `boris.sydorchuk@gmail.com`
+(`e8cb5276-f82c-4e01-9fe1-7b26e472f8e3`, the account
+`ENABLE_BANKING_OWNER_EMAIL` names as the original real owner) holds
+two live `enable_banking_sessions` rows at once — `KBC` and `ING` —
+the exact scenario the S8-01 migration exists to make possible. A real
+sync afterward left KBC's existing data (56 transactions across two
+account UIDs, both fully categorized) completely unaffected.
+
+**Real, unresolved finding — Enable Banking reports zero accounts for
+a real, previously-active ING connection.** Not a parsing bug: queried
+Enable Banking's own `GET /sessions/{id}` directly for this session
+and it reports `"status": "AUTHORIZED", "accounts": []` itself — this
+app's code is correctly reflecting what the vendor returns. Borys
+reports the underlying real ING account had real transactions roughly
+six months ago, which argues against simple dormancy as the
+explanation; reconnecting and explicitly selecting the account during
+ING's own consent screen didn't change the result. Genuinely
+unresolved as of this session — no theory here should be treated as
+confirmed. **Real ING transaction-data verification (categorization,
+data-shape handling, `account_id` disambiguation between two live
+datasets) is deferred, Borys's explicit call** — he'll test with a
+different, actively-used ING account in a later ticket rather than
+force a synthetic pass now. Tracked in `docs/verification_debt.md`.
+
 **Deliberately not built this ticket, S8-03's job:**
 `transactions`' `UNIQUE (user_id, external_id)` dedup key still isn't
 scoped by institution. Enable Banking's own FAQ (quoted in

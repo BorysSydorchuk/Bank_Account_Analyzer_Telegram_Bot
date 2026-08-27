@@ -46,6 +46,31 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Real ING transaction-data verification — no data available from this test account (S8-02)
+
+- **What was deferred:** verifying the categorization/sync/insights
+  pipeline against real ING transaction data, per-institution
+  data-shape handling (description formats, currency, dates), and
+  `transactions.account_id`'s ability to disambiguate KBC-sourced from
+  ING-sourced rows with two live, real datasets.
+- **Why:** the real ING connection made on `boris.sydorchuk@gmail.com`
+  is genuinely valid — Enable Banking's own `GET /sessions/{id}`
+  confirms `"status": "AUTHORIZED"` — but reports zero linked accounts
+  (`"accounts": []`), both before and after reconnecting with explicit
+  account selection at ING's own consent screen. Borys reports this
+  real ING account had real transactions roughly six months ago,
+  which argues against simple account dormancy as the explanation.
+  The actual cause is unresolved as of this entry — not confirmed to
+  be an Enable Banking/ING quirk, not confirmed to be something this
+  app's code could fix, genuinely unknown. With zero accounts, there
+  is no real ING transaction data to verify any of the above against.
+- **What would close it:** Borys connects a different, actively-used
+  real ING account (his own or someone else's, with consent) in a
+  later ticket and a real sync is run against it — his explicit call,
+  not fixed here by forcing a synthetic pass.
+- **Status (2026-08-28, S8-02):** OPEN — closes whenever that real test
+  happens, ticket number not yet assigned.
+
 ### AWS account credit balance and expiration — not visible via CLI (S7-10)
 
 - **What was deferred:** confirming when the credit currently offsetting
