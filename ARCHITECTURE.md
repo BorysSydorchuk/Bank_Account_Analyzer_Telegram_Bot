@@ -1311,17 +1311,22 @@ running ECS tasks) uses `kbc-analyzer-deploy`. This supersedes the
 a description of what happened at that moment, not as the current
 state.
 
-**Live risk window, accepted deliberately, tracked in
-`docs/verification_debt.md` — not silently open.** Production's web/
-worker ECS services still run the pre-migration image (`0a438c0`) as
-of this migration; their `eb_session_store.py` targets `ON CONFLICT
-(user_id)` alone, which no longer matches any real constraint on this
-table. Any real user attempting to connect or reconnect a bank while
-old code is still deployed gets a hard database error (reads are
-unaffected — every user still has exactly one row today). Flagged to
-Borys the moment this was reasoned through; his explicit call was to
-accept the window rather than deploy new code ahead of the rest of
-S8-02's work. Closes when S8-02's web/worker redeploy ships.
+**Live risk window, accepted deliberately, closed same day.**
+Immediately after the migration, production's web/worker ECS services
+still ran the pre-migration image (`0a438c0`); their
+`eb_session_store.py` targeted `ON CONFLICT (user_id)` alone, no
+longer a valid constraint on this table — any real bank connect/
+reconnect attempt would have hard-failed. Flagged to Borys the moment
+this was reasoned through; his call was to accept the window rather
+than deploy new code ahead of the rest of S8-02's work, then to deploy
+anyway once it became clear the live-ING-connection work needed new
+code regardless. Closed same day: web/worker images built from
+current `master`, both ECS services rolled to `kbc-analyzer-web:11`/
+`kbc-analyzer-worker:10`, real `describe-services` confirmed
+`rolloutState: COMPLETED`, and a live unauthenticated request to
+`https://mymble.be/api/auth/enable-banking/status` returned the
+expected `401`. Full detail in `docs/verification_debt.md`'s CLOSED
+section.
 
 `app/eb_session_store.py`'s `DatabaseSessionStore` and
 `app/eb_service.py`'s `EnableBankingService` both now take `institution`
