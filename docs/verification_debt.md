@@ -46,6 +46,34 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### AWS account credit balance and expiration — not visible via CLI (S7-10)
+
+- **What was deferred:** confirming when the credit currently offsetting
+  this account's entire AWS bill runs out. Real Cost Explorer data (see
+  ARCHITECTURE.md's Sprint 7 close re-verification note) shows gross
+  infrastructure usage running ≈$151.87/mo, but `Credit` record-type
+  line items offset `Usage` almost exactly, service-by-service, every
+  day since production launch — net actual spend is ≈$0/mo, cross-
+  confirmed against the AWS Budget's own `ActualSpend` field.
+- **Why:** this doesn't look like the standard 12-month RDS/EC2 Free
+  Tier S7-01 originally found (that doesn't cover NAT Gateway, ALB, or
+  Fargate compute, all three of which are being offset here too) — it
+  reads more like a promotional/account credit balance. This account
+  has no paid AWS Support plan, so its remaining balance and expiration
+  date aren't visible through the CLI/API at all; only the Billing
+  Console's Credits page shows that directly.
+- **What would close it:** Borys checks the Billing Console's Credits
+  page directly and reports the remaining balance and expiration date.
+  Once known, the real monthly run-rate (gross ≈$151.87/mo, since that's
+  what applies once the credit is exhausted) should be compared against
+  the $150/mo budget alarm threshold — they're close enough that the
+  budget notification at 100% may fire close to when the credit itself
+  runs out, worth knowing in advance rather than discovering via a
+  billing surprise.
+- **Status (2026-08-27, S7-10):** OPEN — non-blocking (net spend is
+  currently $0, nothing is at risk today); closes once Borys reports the
+  credit balance/expiration from the Billing Console.
+
 ### SES still in sandbox mode — production access request pending (S7-08)
 
 - **What was deferred:** real users other than the one verified test
@@ -68,10 +96,13 @@ create it early rather than tracking by memory").
   `aws sesv2 put-account-details --production-access-enabled` call (or
   confirmation the approval already flipped `ProductionAccessEnabled`
   without one) to move the account out of sandbox for real.
-- **Status (2026-08-27, S7-08):** OPEN — non-blocking for S7-09, which
-  can build and test the verification/reset flows against the one
-  verified sandbox recipient in the meantime. Closes once AWS responds
-  and, if approved, `ProductionAccessEnabled` is confirmed `true`.
+- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN —
+  re-checked directly (`aws sesv2 get-account`): still
+  `ProductionAccessEnabled: false`, `ReviewDetails.Status: DENIED`,
+  unchanged since S7-08/S7-09. Non-blocking — S7-09's verification/reset
+  flows are already proven against the one verified sandbox recipient.
+  Carried forward into Sprint 8. Closes once AWS responds and, if
+  approved, `ProductionAccessEnabled` is confirmed `true`.
 
 ### GOOGLE_CLIENT_SECRET rotation — AWS-side confirmed, Google Console side not independently verifiable from this environment (S7-05)
 
@@ -91,9 +122,11 @@ create it early rather than tracking by memory").
 - **What would close it:** Borys confirms in Console that the secret
   currently in Secrets Manager corresponds to a freshly-generated value
   (not the exposed one), or regenerates it now if it doesn't.
-- **Status (2026-08-26, S7-05):** OPEN — closes on Borys's one-line
-  confirmation (or a fresh rotation if the confirmation comes back
-  negative).
+- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN — still
+  no Google Cloud Console API/CLI access exists in this environment;
+  nothing about this changed since S7-05. Carried forward into Sprint 8.
+  Closes on Borys's one-line confirmation (or a fresh rotation if the
+  confirmation comes back negative).
 
 ### Real received-email confirmation for email verification — pending a second SES-verified recipient (S7-09)
 
@@ -117,8 +150,13 @@ create it early rather than tracking by memory").
   or verifying a second recipient identity and having that person (or
   Borys, from a second test account) complete a real registration and
   click the real verification link.
-- **Status (2026-08-27, S7-09):** OPEN — non-blocking for S7-10 unless
-  that ticket depends on this specific confirmation; closes once a real
+- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN — this
+  ticket's own SES check (`aws sesv2 get-account`) confirms the blocker
+  is unchanged: still sandbox mode, still only one verified recipient
+  (`boris.sydorchuk@gmail.com`, already verified before this flow could
+  test against it). Non-blocking — everything up to real delivery is
+  proven at the API level (S7-09). Carried forward into Sprint 8, tied
+  to the SES production-access entry above. Closes once a real
   verification email is received and clicked through by a real person.
 
 ### Date-range validation regression tests — not built (S5-07)
@@ -258,11 +296,10 @@ create it early rather than tracking by memory").
   `infra/vpc.tf` for a self-managed NAT instance (EC2 t4g.nano/micro with
   IP forwarding + a route table update), and document the swap's own
   downtime/rollback plan before doing it on a live system.
-- **Status (opened 2026-08-24, S7-01):** OPEN — closure condition is time-
-  and stability-based, not a fixed sprint. Earliest realistic trigger is
-  Sprint 8 or later, once S7's deployment has been live for a month.
-  Revisit at the next sprint close even if the 4-week bar isn't met yet, to
-  confirm the condition still makes sense.
+- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN —
+  production has been live since S7-04 (2026-08-26), roughly one day as
+  of this close, nowhere near the 4-week stability bar. Closure condition
+  still makes sense as written — revisit again at the next sprint close.
 
 ---
 

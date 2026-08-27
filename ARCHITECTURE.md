@@ -43,6 +43,27 @@ in the moment — covered instead by the existing automated
 session-destruction tests. No drift found beyond what this file's own
 S6-07 entries already captured.
 
+**Sprint 7 close re-verification (2026-08-27, S7-10):** every claim in
+this file re-checked against the running system, live, not recalled — the
+first sprint-close pass against real production rather than local dev.
+Full regression sweep against `https://mymble.be` (registration, login,
+logout with real server-side session destruction confirmed via a 401 on
+`/api/auth/me` after logout, category/budget CRUD, provider switching,
+API-key test-connection round trip, Google OAuth redirect URI). Five
+stale forward-looking claims found and fixed in this pass (each marked
+inline where it was): the AWS section's "no application runs here yet"
+opening, the ALB/Redis "not yet" notes in Compute model, the Route 53
+zone's "not yet delegated" row, the session cookie's "not called by any
+route yet" note, and the Free Tier cost note (now real Cost Explorer
+data, not a guess). IDOR sweep re-run against real production with two
+real accounts — zero cross-user visibility on categories, budgets,
+settings, or Enable Banking status. CSRF defense (`SameSite=Lax` +
+`Secure` cookies, confirmed via a real `Set-Cookie` header from
+production) holds; a same-origin-vs-forged-Origin curl comparison isn't
+a valid CSRF test on its own since curl doesn't enforce `SameSite` the
+way a real browser does — noted here so a future reader doesn't repeat
+that mistake.
+
 ## Services & Ports
 
 | Service | Image/build | Port | Serves |
@@ -90,10 +111,12 @@ CLI flag already configures its own root logger.
 
 ## AWS Deployment Infrastructure
 
-**Foundation only — no application runs here yet.** The app itself still
-only runs via local Docker Compose (see Services & Ports above). This
-section describes the AWS account structure provisioned in S7-01, which
-later S7 tickets deploy the actual application onto.
+**Live in production since S7-04.** The app runs on the AWS infrastructure
+described below, reachable at `https://mymble.be` — not just local Docker
+Compose (see Services & Ports above, which still describes local dev
+accurately; production's own compute is the Web/worker ECS services & ALB
+section further down). This section describes the AWS account structure,
+provisioned incrementally from S7-01 through S7-08.
 
 **IaC:** Terraform, root at `infra/` in the monorepo. State is remote (not
 local): an S3 backend bucket `kbc-analyzer-terraform-state-<account-id>`
@@ -113,12 +136,12 @@ than the account default was a deliberate choice, not AWS's default.
 **Compute model (final, after three rounds of revision — see
 `docs/tickets/S7-01-aws-foundation.md`):** unified ECS Fargate, one
 cluster, two services — a web service (FastAPI + frontend, behind an ALB,
-not yet created) and a worker service (Celery, no ALB — it has no HTTP
+provisioned S7-04) and a worker service (Celery, no ALB — it has no HTTP
 listener to route to). App Runner was evaluated and rejected because its
 single-container HTTP-serving model doesn't cleanly host a non-HTTP
-background worker like Celery. Redis will be a self-hosted container in
-the same cluster, not ElastiCache — a deliberate cost saving at this
-traffic scale, not yet provisioned as of S7-01.
+background worker like Celery. Redis is a self-hosted container in the
+same cluster, not ElastiCache — a deliberate cost saving at this traffic
+scale, provisioned S7-03 (see RDS & Redis below).
 
 **Network (provisioned, S7-01 — resource IDs live-verified 2026-08-25.
 Raw `terraform output`/`terraform show` and raw `aws budgets
@@ -274,13 +297,40 @@ never a persistent service. Full real command output, including the
 migration chain, row-count verification, and decryption test, is in
 `docs/tickets/S7-03-rds-redis-migration.md`.
 
-**Free Tier discovered:** this AWS account is on AWS Free Tier — found
-empirically when RDS rejected a 7-day backup retention with
-`FreeTierRestrictionError` (reduced to 1 day). This likely means actual
-spend for the first 12 months is meaningfully lower than S7-01's ~$122/mo
-estimate, which didn't assume Free Tier eligibility. Not re-priced here —
-flagged for whoever next reviews the cost picture (S7-10 sprint close is
-the natural point).
+**Real cost data pulled (S7-10, 2026-08-27), not estimated.** AWS Cost
+Explorer's `RECORD_TYPE` dimension (`Usage` vs `Credit`) for 2026-08-26,
+the most representative full-stack day (all S7 infrastructure live and
+running that whole day), broken out by service:
+
+| Service | Gross usage (Usage record type) |
+|---|---|
+| EC2 - Other (NAT Gateway + data processing) | $1.2660 |
+| ECS (Fargate compute) | $1.2668 |
+| Elastic Load Balancing | $0.5946 |
+| RDS | $0.4763 |
+| Route 53 (hosted zone) | $1.0007 |
+| Secrets Manager | $0.0599 |
+| VPC | $0.3300 |
+| ECR, S3 | ~$0.0007 |
+| **Total** | **≈ $4.996/day → ≈ $151.87/month** |
+
+That is **~25% above** S7-01's original ~$122/mo estimate — Route 53
+(~$30/mo) and Secrets Manager (~$1.80/mo) were never in that original
+estimate, both added later (S7-04's domain, S7-05/S7-08's secrets).
+
+**Net actual spend is currently ≈ $0/mo**, not the gross figure above —
+cross-verified two independent ways: Cost Explorer's `Credit` record type
+offsets `Usage` almost exactly, service-by-service, every day since
+launch; the AWS Budget's own `CalculatedSpend.ActualSpend` independently
+reports `$0.0`. **This is not the RDS-side Free Tier discovered in
+S7-01** (`FreeTierRestrictionError` on backup retention was real, but
+standard 12-month Free Tier doesn't cover NAT Gateway, ALB, or Fargate —
+all three are being offset here too). It reads as a promotional/account
+credit balance instead. This account's CLI access (no paid Support plan)
+cannot see the credit's remaining balance or expiration date — **flagged
+for Borys to check the Billing Console's Credits page directly**; gross
+cost (~$152/mo) becomes real cost once that balance runs out. Tracked as
+its own ledger entry, see `docs/verification_debt.md`.
 
 **Web/worker ECS services & ALB (provisioned, S7-04 — product renamed
 "Mymble," domain `mymble.be`):** the app's actual compute finally exists.
@@ -296,7 +346,7 @@ Manager, not a stub), target group health `healthy`, worker service
 | ALB | `kbc-analyzer-alb`, DNS `kbc-analyzer-alb-537799089.eu-central-1.elb.amazonaws.com` |
 | ALB security group | `sg-0bd8965cccddf22bc` — the **one** legitimate `0.0.0.0/0` rule in this architecture (80/443 inbound); everything else stays locked to the `app` SG |
 | Web target group | `kbc-analyzer-web`, health check `GET /health`, matcher `200` only (a 503 correctly marks the target unhealthy, same as any other outage) |
-| Route 53 zone | `mymble.be` (`Z083187235H4ID5UIOWLI`) — **not yet delegated**; registered externally, needs NS delegation at the registrar (Borys's action, see below) |
+| Route 53 zone | `mymble.be` (`Z083187235H4ID5UIOWLI`) — delegated (S7-04); registered externally, NS delegation completed at the registrar (see DNS delegation below) |
 
 **Secrets (Secrets Manager, created directly via CLI — values never
 touch Terraform state):** `kbc-analyzer/settings-secret`,
@@ -816,7 +866,7 @@ a daily active user exactly as readily as an abandoned session, when the
 thing actually worth expiring is inactivity, not elapsed time.
 
 Cookie (`app/auth/session.py`'s `set_session_cookie`/`clear_session_cookie`,
-not called by any route yet): name `session_id`, `httpOnly` (never
+called by every login/register route and cleared by logout): name `session_id`, `httpOnly` (never
 readable by client-side JS — closes the main XSS session-theft path),
 `SameSite=Lax` (sent on top-level navigation, including the OAuth-callback
 redirect, but not cross-site subrequests — CSRF protection sufficient for
