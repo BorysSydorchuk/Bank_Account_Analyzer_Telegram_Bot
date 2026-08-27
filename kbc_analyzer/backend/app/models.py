@@ -181,11 +181,14 @@ class EnableBankingSession(Base):
     # S7-06: replaces the single global eb_session.json file (never durable
     # across an ECS redeploy, never visible to the worker task at all —
     # see the S7-06 ticket file's premise check) with one row per user.
-    # One connection per user, same real-world shape as before (a person
-    # links one bank account to their Mymble account) — a composite key
-    # for multiple simultaneous connections per user is a Sprint-later
-    # concern (multi-bank), not this ticket's.
+    # S8-01: widened to a composite (user_id, institution) primary key —
+    # S7-06's "one connection per user" shape didn't survive Sprint 8's
+    # multi-bank goal (a user holding a live KBC connection and a live ING
+    # connection at once); institution is a plain string tag ("KBC", "ING",
+    # matching Enable Banking's own ASPSP `name`), not a foreign key to a
+    # lookup table — see app/institutions.py for the supported list.
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
+    institution = Column(Text, primary_key=True)
     # Fernet-encrypted (app/crypto.py, same pattern as Setting's API keys)
     # — this is bank-session credential material, not a value ever safe to
     # store in plaintext at rest.

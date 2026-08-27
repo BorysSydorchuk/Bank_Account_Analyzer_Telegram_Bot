@@ -40,15 +40,20 @@ class FakeEnableBankingClient:
             return None
         return {"valid_until": self._valid_until.isoformat()}
 
-    def start_auth(self, state: str | None = None) -> str:
+    def start_auth(self, state: str | None = None, institution: str = "KBC") -> str:
         # S7-04: real EnableBankingClient.start_auth now takes state (the
         # CSRF value the caller compares on the way back) — matches that
         # signature so eb_service.get_reauthorize_url's call doesn't
         # TypeError against this fake. Recorded, not just accepted-and-
         # discarded, so a test can assert the real state actually reached
         # the client rather than a fixture-generated one.
+        #
+        # S8-01: also accepts institution, same reasoning — recorded so a
+        # test can assert which bank a reauthorize attempt was actually
+        # for, not just that some value was accepted.
         self.started_auth = True
         self.last_state = state
+        self.last_institution = institution
         return f"https://fake-eb.example/authorize?state={state or 'fake'}"
 
     def complete_auth_with_code(self, code: str) -> list[str]:

@@ -103,12 +103,19 @@ export interface StatisticsResponse {
   by_week: WeekStat[]
 }
 
-export interface EnableBankingStatusResponse {
+export interface EnableBankingStatus {
+  // S8-01: which bank this status describes — GET /status now returns one
+  // entry per bank Mymble supports, not a single overall status, since a
+  // user can have zero, one, or two connections live at once.
+  institution: string
   // S7-07: "not_connected" (no session has ever existed for this user) is
   // distinct from "expired" (one existed, then lapsed).
   status: "active" | "expired" | "not_connected"
   expires_at: string | null
 }
+
+// S8-01: GET /status now returns one entry per supported bank.
+export type EnableBankingStatusResponse = EnableBankingStatus[]
 
 export interface ReauthorizeResponse {
   auth_url: string

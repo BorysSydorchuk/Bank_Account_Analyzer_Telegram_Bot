@@ -48,7 +48,7 @@ def test_reauthorize_sets_state_cookie_matching_the_real_outgoing_state(
     user = _make_user(db_session, "eb-csrf-state@example.com")
     _login_as(client, user)
 
-    response = client.post("/api/auth/enable-banking/reauthorize")
+    response = client.post("/api/auth/enable-banking/reauthorize", json={"institution": "KBC"})
     assert response.status_code == 200, response.text
 
     cookie_state = response.cookies.get("eb_oauth_state")
@@ -110,7 +110,7 @@ def test_callback_rejects_a_valid_state_from_a_different_logged_in_user(
     user_b = _make_user(db_session, "eb-user-b@example.com")
 
     _login_as(client, user_a)
-    reauthorize_response = client.post("/api/auth/enable-banking/reauthorize")
+    reauthorize_response = client.post("/api/auth/enable-banking/reauthorize", json={"institution": "KBC"})
     state = reauthorize_response.cookies.get("eb_oauth_state")
     assert state is not None
 
@@ -141,7 +141,7 @@ def test_callback_with_matching_state_completes_reauthorization(
     user = _make_user(db_session, "eb-csrf-success@example.com")
     _login_as(client, user)
 
-    reauthorize_response = client.post("/api/auth/enable-banking/reauthorize")
+    reauthorize_response = client.post("/api/auth/enable-banking/reauthorize", json={"institution": "KBC"})
     assert reauthorize_response.status_code == 200
     state = reauthorize_response.cookies.get("eb_oauth_state")
     assert state is not None

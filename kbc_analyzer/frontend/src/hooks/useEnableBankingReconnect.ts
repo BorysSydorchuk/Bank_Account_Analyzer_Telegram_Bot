@@ -23,6 +23,11 @@ export function useEnableBankingReconnect() {
   const queryClient = useQueryClient()
   const [phase, setPhase] = useState<ReconnectPhase>("idle")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  // S8-01: which bank this reconnect attempt is for — the picker can have
+  // KBC and ING both rendered at once, so the state machine needs to know
+  // which row's status to watch for "active", not just that *something*
+  // reached it.
+  const [activeInstitution, setActiveInstitution] = useState<string | null>(null)
 
   const reauthorizeMutation = useMutation({
     mutationFn: reauthorizeEnableBanking,
@@ -48,13 +53,14 @@ export function useEnableBankingReconnect() {
   })
 
   useEffect(() => {
-    if (phase !== "waiting") return
-    if (statusQuery.data?.status === "active") {
+    if (phase !== "waiting" || !activeInstitution) return
+    const activeStatus = statusQuery.data?.find((s) => s.institution === activeInstitution)
+    if (activeStatus?.status === "active") {
       setPhase("success")
       queryClient.invalidateQueries({ queryKey: ["enableBankingStatus"] })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusQuery.data])
+  }, [statusQuery.data, activeInstitution])
 
   // Dedicated timer, not a data-change effect — same lesson as S3-04's job
   // polling: React Query reuses the same `data` reference across polls when
@@ -69,15 +75,17 @@ export function useEnableBankingReconnect() {
     return () => clearTimeout(timer)
   }, [phase])
 
-  function start() {
+  function start(institution: string) {
     setErrorMessage(null)
-    reauthorizeMutation.mutate()
+    setActiveInstitution(institution)
+    reauthorizeMutation.mutate(institution)
   }
 
   function cancel() {
     setPhase("idle")
     setErrorMessage(null)
+    setActiveInstitution(null)
   }
 
-  return { phase, errorMessage, start, cancel, isStarting: reauthorizeMutation.isPending }
+  return { phase, errorMessage, activeInstitution, start, cancel, isStarting: reauthorizeMutation.isPending }
 }

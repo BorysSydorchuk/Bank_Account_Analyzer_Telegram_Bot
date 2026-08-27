@@ -1225,6 +1225,83 @@ mistaken for the web app's connection path by a future reader; its
 is entirely local to whatever machine runs it, with no connection to
 `enable_banking_sessions`.
 
+**Multi-bank: KBC and ING, simultaneously per user (S8-01).** Discovered
+during this ticket's Part 1 premise check, not assumed: ING Belgium is a
+supported Enable Banking ASPSP, confirmed live against
+`GET /aspsps?country=BE` (not static docs) — `{"name": "ING", "country":
+"BE", "bic": "BBRUBEBB", "beta": false}`, same shape as KBC's entry.
+Discovery also surfaced a structural blocker S7-06 didn't anticipate:
+`enable_banking_sessions.user_id` was the table's sole primary key, so
+storage held exactly one bank connection per user — connecting a second
+institution overwrote the first's row via `ON CONFLICT (user_id) DO
+UPDATE` rather than adding to it. Widened (migration `d4a7e19c6b52`) to a
+composite `(user_id, institution)` primary key, same nullable → backfill
+→ `NOT NULL` → constraint-widen discipline as S6-02: every pre-existing
+row backfilled to `institution = 'KBC'` (the only bank this app has ever
+connected), verified against a real row before dropping the old
+single-column primary key. `institution` is a plain text tag ("KBC",
+"ING" — `app/institutions.py`'s `SUPPORTED_INSTITUTIONS`, the single
+source of truth both the picker and the backend read from), not a
+foreign key to a lookup table.
+
+`app/eb_session_store.py`'s `DatabaseSessionStore` and
+`app/eb_service.py`'s `EnableBankingService` both now take `institution`
+alongside `user_id` — one instance represents one `(user, bank)`
+connection. `EnableBankingService.connected_institutions(db, user_id)`
+(a thin passthrough to the session-store query) is how callers that need
+every bank a user has connected — the status endpoint, sync — find them,
+rather than assuming a single connection exists.
+`kbc_analyzer/enablebanking.py`'s `_find_kbc_aspsp` (substring match on
+"KBC") became `_find_aspsp(institution_name)` (exact match — the
+substring version would have also matched "KBC Brussels", a distinct
+ASPSP Enable Banking lists separately, a latent bug this generalization
+fixed as a side effect, same as S7-06's file-durability finding).
+
+`GET /api/auth/enable-banking/status` now returns a list, one
+`EnableBankingStatus` entry per bank in `SUPPORTED_INSTITUTIONS` —
+including `not_connected` ones — instead of a single overall status, so
+the frontend picker (`BankConnectionSection.tsx`, now genuinely a picker
+rather than a single KBC-only row) always has the full set to render.
+`POST /reauthorize` takes `{institution}` in its body; the CSRF cookie
+scheme (S7-04/S7-06) gained a third cookie, `eb_oauth_institution`,
+alongside `eb_oauth_state`/`eb_oauth_user_id` — `GET /callback` has no
+app-specific query param to read the target bank from (Enable Banking's
+own redirect only carries `code`/`state`), so which institution a
+reconnect attempt was for has to travel the same single-use-cookie way
+the CSRF state already does. `SessionBanner.tsx` no longer drives the
+reconnect flow inline — with two possible banks, "which one" is a picker
+decision, not a one-click one — it now aggregates across every
+connection and routes to Settings.
+
+`app/tasks/analysis.py`'s sync task fetches from every institution
+`connected_institutions()` returns for the syncing user, not one — a
+user with both KBC and ING connected gets both banks' transactions in
+one sync run.
+
+**Real request evidence (S8-01, not code review alone):** selecting KBC
+in the picker and starting a connection redirected to
+`idp.kbc.com/ASK/oauth/authorize/...` (KBC's real OAuth authorization
+server); selecting ING redirected to
+`myaccount.ing.com/authorize/v2/BE?...` (ING Belgium's real
+authorization server, itsme® login screen). Both confirmed via a
+throwaway local test account (not Borys's real account), stopped before
+any real login credentials — this ticket needs no live bank connection,
+that's S8-02.
+
+**Deliberately not built this ticket, S8-03's job:**
+`transactions`' `UNIQUE (user_id, external_id)` dedup key still isn't
+scoped by institution. Enable Banking's own FAQ (quoted in
+`docs/multi_user_migration_plan.md`, S6-02 Step 0) already establishes
+`entry_reference` collisions are possible *across different accounts* —
+under the old one-bank-per-user model this was safe in practice (same
+user implied same bank), but once a user can hold simultaneous KBC and
+ING connections, a real collision risk exists and needs verification,
+not assumption. Whatever fix S8-03 lands on must not key on Enable
+Banking's `account_id` (CLAUDE.md's EXTERNAL SYSTEM ASSUMPTIONS —
+`account_id` is not stable across reconnects, S3-08/S4-01) — if
+widening is needed, it widens on the stable `institution` dimension this
+ticket introduced.
+
 `GET /api/auth/me` — the frontend's route guard's one page-independent
 way to ask "does a valid session exist," rather than inferring it from
 whichever page-specific query happens to fire first. `AppShell`
@@ -1254,8 +1331,12 @@ belonging to completely different accounts."* `transactions`' unique
 constraint is `(user_id, external_id)`, not `external_id` alone, as of
 S6-02 — see Database Tables. The vendor's real scope is per-account, not
 per-user; a Sprint 7 watch-item in `docs/multi_user_migration_plan.md`
-flags that a user connecting more than one account (multi-bank, Sprint 7)
-could still collide under this constraint alone.
+flagged that a user connecting more than one account (multi-bank) could
+still collide under this constraint alone. **No longer hypothetical as
+of S8-01:** a user can now hold simultaneous KBC and ING connections
+(see the Multi-bank section above) — real verification of this exact
+collision risk, and a fix if one is confirmed, is S8-03's scope, not
+deferred further.
 
 **AI providers** — resolved via `agents/registry.py`, switching in
 Settings changes behavior everywhere at once. `get_provider()` caches one

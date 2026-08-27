@@ -174,6 +174,9 @@ class StatisticsResponse(BaseModel):
 
 
 class EnableBankingStatus(BaseModel):
+    # S8-01: which bank this status describes — added once a user could have
+    # more than one connection at a time (KBC and/or ING).
+    institution: str
     # S7-07: "not_connected" (no session has ever existed for this user)
     # is distinct from "expired" (one existed, then lapsed) — the two
     # need different copy in the frontend ("Connect your bank" vs
@@ -182,12 +185,17 @@ class EnableBankingStatus(BaseModel):
     expires_at: datetime | None
 
 
+class ReauthorizeRequest(BaseModel):
+    institution: str
+
+
 class ReauthorizeResponse(BaseModel):
     auth_url: str
 
 
 class CallbackRequest(BaseModel):
     code: str
+    institution: str
     # Accepted (the redirect URL always carries it) but not currently validated —
     # matches start_auth()'s own comment: required by the PSD2 spec, not checked by us.
     state: str | None = None

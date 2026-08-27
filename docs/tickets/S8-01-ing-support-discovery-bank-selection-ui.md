@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 
 ================================================================
 TICKET S8-01 — ING Support Discovery & Bank Selection UI
@@ -92,3 +92,58 @@ This ticket's own scope now additionally includes:
 - The bank picker UI and institution-threading work as
   originally scoped, now against the per-institution session
   model rather than the old single-row one
+
+================================================================
+WHEN DONE
+================================================================
+
+**Cite the actual Enable Banking documentation confirming ING support:**
+Live call to Enable Banking's own `/aspsps?country=BE` endpoint (using
+the app's real production credentials, not a static doc page — this is
+the authoritative source since it's the exact API this app talks to),
+2026-08-27: `{"name": "ING", "country": "BE", "bic": "BBRUBEBB", "beta":
+false, "psu_types": ["business", "personal"], "auth_methods": [...
+"REDIRECT" ...]}`. Same shape as KBC's own entry. No separate onboarding
+or approval needed.
+
+**Screenshot of the bank picker:** attached — Settings page's Bank
+Connection card showing both KBC and ING as independently selectable
+rows, each "not connected" with its own Connect button.
+
+**Show the correct institution parameter being sent for each bank
+choice (real request evidence, not code review alone):** clicked
+Connect for KBC in the picker — redirected to
+`idp.kbc.com/ASK/oauth/authorize/1?...` (KBC's real OAuth authorization
+server). Clicked Connect for ING — redirected to
+`myaccount.ing.com/authorize/v2/BE?...` (ING Belgium's real
+authorization server, itsme® login screen). Both via a throwaway local
+test account created for this check (not Borys's real account); stopped
+at each bank's real login page, no credentials entered, no live
+connection completed — that's S8-02.
+
+**Amendment during discovery, not part of the original ticket:** found
+`enable_banking_sessions.user_id` was the sole primary key (S7-06),
+meaning storage held one bank connection per user — connecting a second
+institution silently overwrote the first's row. Flagged to Borys before
+writing picker code; he decided true simultaneous connections (not a
+switch-only model), so this ticket's scope grew to include the
+composite-key migration (`d4a7e19c6b52`) — same nullable → backfill →
+enforce discipline as S6-02, verified against a real inserted row before
+applying to confirm the pre-existing row (production shape) survives
+intact. Full detail in ARCHITECTURE.md's new Multi-bank section and this
+file's amendment block above.
+
+**Verification:** full backend test suite (127 tests) passing, including
+a new test proving KBC and ING sessions coexist independently for the
+same user (`test_kbc_and_ing_sessions_coexist_for_the_same_user`) —
+the exact defect the migration fixes. Frontend `tsc -b` and `oxlint`
+both clean.
+
+**Not part of this ticket, explicitly deferred to the next ones (not a
+verification gap — these are the next tickets' own stated scope):**
+live ING connection completion and real ING transaction data (S8-02);
+real dual-connection collision testing on `transactions`' `UNIQUE
+(user_id, external_id)` constraint (S8-03, flagged as a live risk in
+ARCHITECTURE.md, not silently left open).
+
+Do not start S8-02 until confirmed.

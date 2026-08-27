@@ -49,11 +49,11 @@ def test_two_users_get_independent_encrypted_sessions(db_session, fake_eb_post):
     user_a = _make_user(db_session, "eb-iso-a@example.com")
     user_b = _make_user(db_session, "eb-iso-b@example.com")
 
-    EnableBankingService(db_session, user_a.id).complete_reauthorization("code-for-a")
-    EnableBankingService(db_session, user_b.id).complete_reauthorization("code-for-b")
+    EnableBankingService(db_session, user_a.id, "KBC").complete_reauthorization("code-for-a")
+    EnableBankingService(db_session, user_b.id, "KBC").complete_reauthorization("code-for-b")
 
-    row_a = db_session.get(EnableBankingSession, user_a.id)
-    row_b = db_session.get(EnableBankingSession, user_b.id)
+    row_a = db_session.get(EnableBankingSession, {"user_id": user_a.id, "institution": "KBC"})
+    row_b = db_session.get(EnableBankingSession, {"user_id": user_b.id, "institution": "KBC"})
     assert row_a is not None and row_b is not None
 
     # Encrypted at rest: the raw column never contains the plaintext
@@ -72,8 +72,8 @@ def test_two_users_get_independent_encrypted_sessions(db_session, fake_eb_post):
     # get_account_uids() goes through the real session_valid() check too,
     # not just a direct decrypt — proves the whole read path is correct,
     # not only storage.
-    assert EnableBankingService(db_session, user_a.id).get_account_uids() == ["acct-uid-for-code-for-a"]
-    assert EnableBankingService(db_session, user_b.id).get_account_uids() == ["acct-uid-for-code-for-b"]
+    assert EnableBankingService(db_session, user_a.id, "KBC").get_account_uids() == ["acct-uid-for-code-for-a"]
+    assert EnableBankingService(db_session, user_b.id, "KBC").get_account_uids() == ["acct-uid-for-code-for-b"]
 
 
 def test_sync_error_for_an_unconnected_user_never_mentions_the_cli(db_session):
@@ -85,7 +85,7 @@ def test_sync_error_for_an_unconnected_user_never_mentions_the_cli(db_session):
     user = _make_user(db_session, "eb-cli-message@example.com")
 
     with pytest.raises(EnableBankingAuthError) as exc_info:
-        EnableBankingService(db_session, user.id).get_account_uids()
+        EnableBankingService(db_session, user.id, "KBC").get_account_uids()
 
     message = str(exc_info.value)
     assert "kbc_analyzer.main" not in message
@@ -101,16 +101,16 @@ def test_a_second_users_reauthorization_never_touches_the_first_users_row(db_ses
     user_a = _make_user(db_session, "eb-noclobber-a@example.com")
     user_b = _make_user(db_session, "eb-noclobber-b@example.com")
 
-    EnableBankingService(db_session, user_a.id).complete_reauthorization("code-for-a")
-    row_a_before = db_session.get(EnableBankingSession, user_a.id)
+    EnableBankingService(db_session, user_a.id, "KBC").complete_reauthorization("code-for-a")
+    row_a_before = db_session.get(EnableBankingSession, {"user_id": user_a.id, "institution": "KBC"})
     session_id_before = row_a_before.session_id_encrypted
     account_uids_before = row_a_before.account_uids_encrypted
     valid_until_before = row_a_before.valid_until
 
-    EnableBankingService(db_session, user_b.id).complete_reauthorization("code-for-b")
+    EnableBankingService(db_session, user_b.id, "KBC").complete_reauthorization("code-for-b")
 
     db_session.expire_all()  # force a real re-read from Postgres, not the session's identity-map cache
-    row_a_after = db_session.get(EnableBankingSession, user_a.id)
+    row_a_after = db_session.get(EnableBankingSession, {"user_id": user_a.id, "institution": "KBC"})
     assert row_a_after.session_id_encrypted == session_id_before
     assert row_a_after.account_uids_encrypted == account_uids_before
     assert row_a_after.valid_until == valid_until_before
@@ -128,10 +128,10 @@ def test_never_connected_is_distinct_from_expired(db_session, fake_eb_post):
     # user_lapsed genuinely had a connection once — completed reauthorization
     # for real, then its session lapsed (set directly to a past date, same
     # as the existing expiry test above).
-    EnableBankingService(db_session, user_lapsed.id).complete_reauthorization("code-for-lapsed")
+    EnableBankingService(db_session, user_lapsed.id, "KBC").complete_reauthorization("code-for-lapsed")
     from datetime import datetime, timedelta
 
-    DatabaseSessionStore(db_session, user_lapsed.id).save(
+    DatabaseSessionStore(db_session, user_lapsed.id, "KBC").save(
         {
             "session_id": "lapsed-session",
             "account_uids": ["lapsed-acct"],
@@ -139,14 +139,38 @@ def test_never_connected_is_distinct_from_expired(db_session, fake_eb_post):
         }
     )
 
-    new_status = EnableBankingService(db_session, user_new.id).get_session_status()
-    lapsed_status = EnableBankingService(db_session, user_lapsed.id).get_session_status()
+    new_status = EnableBankingService(db_session, user_new.id, "KBC").get_session_status()
+    lapsed_status = EnableBankingService(db_session, user_lapsed.id, "KBC").get_session_status()
 
     assert new_status["status"] == "not_connected"
     assert lapsed_status["status"] == "expired"
     # Never a false positive in either direction.
     assert new_status["status"] != "expired"
     assert lapsed_status["status"] != "not_connected"
+
+
+def test_kbc_and_ing_sessions_coexist_for_the_same_user(db_session, fake_eb_post):
+    """S8-01 — the actual defect this ticket's migration fixes: before the
+    composite (user_id, institution) primary key, completing a second
+    institution's authorization for the same user overwrote the first's
+    row via ON CONFLICT (user_id) DO UPDATE instead of adding a new one.
+    This proves both rows now exist independently and neither's data
+    leaks into the other's."""
+    user = _make_user(db_session, "eb-multi-bank@example.com")
+
+    EnableBankingService(db_session, user.id, "KBC").complete_reauthorization("code-for-kbc")
+    EnableBankingService(db_session, user.id, "ING").complete_reauthorization("code-for-ing")
+
+    kbc_row = db_session.get(EnableBankingSession, {"user_id": user.id, "institution": "KBC"})
+    ing_row = db_session.get(EnableBankingSession, {"user_id": user.id, "institution": "ING"})
+    assert kbc_row is not None and ing_row is not None
+    assert decrypt(kbc_row.session_id_encrypted) == "real-session-for-code-for-kbc"
+    assert decrypt(ing_row.session_id_encrypted) == "real-session-for-code-for-ing"
+
+    assert EnableBankingService(db_session, user.id, "KBC").get_account_uids() == ["acct-uid-for-code-for-kbc"]
+    assert EnableBankingService(db_session, user.id, "ING").get_account_uids() == ["acct-uid-for-code-for-ing"]
+
+    assert sorted(EnableBankingService.connected_institutions(db_session, user.id)) == ["ING", "KBC"]
 
 
 def test_expiry_status_is_independent_per_user(db_session):
@@ -161,14 +185,14 @@ def test_expiry_status_is_independent_per_user(db_session):
     user_fresh = _make_user(db_session, "eb-expiry-fresh@example.com")
     user_expired = _make_user(db_session, "eb-expiry-expired@example.com")
 
-    DatabaseSessionStore(db_session, user_fresh.id).save(
+    DatabaseSessionStore(db_session, user_fresh.id, "KBC").save(
         {
             "session_id": "fresh-session",
             "account_uids": ["fresh-acct"],
             "valid_until": (datetime.now() + timedelta(days=60)).isoformat(),
         }
     )
-    DatabaseSessionStore(db_session, user_expired.id).save(
+    DatabaseSessionStore(db_session, user_expired.id, "KBC").save(
         {
             "session_id": "expired-session",
             "account_uids": ["expired-acct"],
@@ -176,8 +200,8 @@ def test_expiry_status_is_independent_per_user(db_session):
         }
     )
 
-    fresh_status = EnableBankingService(db_session, user_fresh.id).get_session_status()
-    expired_status = EnableBankingService(db_session, user_expired.id).get_session_status()
+    fresh_status = EnableBankingService(db_session, user_fresh.id, "KBC").get_session_status()
+    expired_status = EnableBankingService(db_session, user_expired.id, "KBC").get_session_status()
 
     assert fresh_status["status"] == "active"
     assert expired_status["status"] == "expired"

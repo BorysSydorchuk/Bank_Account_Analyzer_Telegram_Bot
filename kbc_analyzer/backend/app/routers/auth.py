@@ -23,7 +23,7 @@ and ARCHITECTURE.md's Auth section).
 import secrets
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 
@@ -31,8 +31,9 @@ from ..auth.dependency import require_verified_email
 from ..auth.session import COOKIE_SECURE
 from ..db import get_db
 from ..eb_service import EnableBankingError, EnableBankingService
+from ..institutions import SUPPORTED_INSTITUTIONS, is_supported_institution
 from ..models import User
-from ..schemas import CallbackRequest, EnableBankingStatus, ReauthorizeResponse
+from ..schemas import CallbackRequest, EnableBankingStatus, ReauthorizeRequest, ReauthorizeResponse
 
 router = APIRouter(prefix="/api/auth/enable-banking", tags=["auth"])
 
@@ -59,23 +60,42 @@ _EB_STATE_COOKIE_TTL_SECONDS = 10 * 60  # generous for a human to complete the b
 # their bank connection to the wrong user.
 _EB_USER_COOKIE_NAME = "eb_oauth_user_id"
 
+# S8-01: which bank a /reauthorize call was for — GET /callback (the real
+# redirect target) receives only {code, state} from Enable Banking itself,
+# nothing app-specific, so the institution has to travel the same way
+# state/user_id already do: a short-lived cookie set when /reauthorize
+# starts, read back and cleared when the callback completes.
+_EB_INSTITUTION_COOKIE_NAME = "eb_oauth_institution"
 
-def get_eb_service(db: Session = Depends(get_db), current_user: User = Depends(require_verified_email)) -> EnableBankingService:
-    return EnableBankingService(db, current_user.id)
+
+def _require_supported_institution(institution: str) -> None:
+    if not is_supported_institution(institution):
+        raise HTTPException(status_code=400, detail=f"'{institution}' is not a bank Mymble currently supports.")
 
 
-@router.get("/status", response_model=EnableBankingStatus)
+@router.get("/status", response_model=list[EnableBankingStatus])
 def get_status(
-    eb: EnableBankingService = Depends(get_eb_service),
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_verified_email),
-) -> EnableBankingStatus:
-    return EnableBankingStatus(**eb.get_session_status())
+) -> list[EnableBankingStatus]:
+    """S8-01: one entry per supported bank, not one overall status — a user
+    can now have zero, one, or two connections live at once, and the bank
+    picker needs to show all of them, including the ones never connected.
+    """
+    return [
+        EnableBankingStatus(
+            institution=institution["id"],
+            **EnableBankingService(db, current_user.id, institution["id"]).get_session_status(),
+        )
+        for institution in SUPPORTED_INSTITUTIONS
+    ]
 
 
 @router.post("/reauthorize", response_model=ReauthorizeResponse)
 def reauthorize(
+    body: ReauthorizeRequest,
     response: Response,
-    eb: EnableBankingService = Depends(get_eb_service),
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_verified_email),
 ) -> ReauthorizeResponse:
     # S7-04: Enable Banking's redirect now lands directly on GET /callback
@@ -89,6 +109,8 @@ def reauthorize(
     # this endpoint returns auth_url for the frontend to open in a new tab
     # rather than redirecting itself, so the cookie has to be set here,
     # unlike user_auth.py's server-side-redirect equivalent.
+    _require_supported_institution(body.institution)
+    eb = EnableBankingService(db, current_user.id, body.institution)
     state = secrets.token_urlsafe(24)
     auth_url = eb.get_reauthorize_url(state)
     response.set_cookie(
@@ -109,21 +131,36 @@ def reauthorize(
         secure=COOKIE_SECURE,
         samesite="lax",
     )
+    # S8-01: binds this attempt to the bank it was started for — see the
+    # module-level comment on _EB_INSTITUTION_COOKIE_NAME above.
+    response.set_cookie(
+        key=_EB_INSTITUTION_COOKIE_NAME,
+        value=body.institution,
+        max_age=_EB_STATE_COOKIE_TTL_SECONDS,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+    )
     return ReauthorizeResponse(auth_url=auth_url)
 
 
 @router.post("/callback", response_model=EnableBankingStatus)
 def callback(
     body: CallbackRequest,
-    eb: EnableBankingService = Depends(get_eb_service),
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_verified_email),
 ):
     """Manual fallback (S2-02) — no longer called by the frontend now that
     reconnecting catches the redirect automatically (S3-07 Item 2), but kept
-    as a working escape hatch in case that ever needs bypassing.
+    as a working escape hatch in case that ever needs bypassing. institution
+    is required in the body (S8-01) rather than read from a cookie, since
+    this endpoint is meant to work standalone, without a preceding
+    /reauthorize call having set one.
     """
+    _require_supported_institution(body.institution)
+    eb = EnableBankingService(db, current_user.id, body.institution)
     try:
-        return EnableBankingStatus(**eb.complete_reauthorization(body.code))
+        return EnableBankingStatus(institution=body.institution, **eb.complete_reauthorization(body.code))
     except EnableBankingError:
         # The generic EnableBankingError handler (main.py) surfaces Enable Banking's
         # raw error JSON, which is fine for a background sync failure but not for a
@@ -215,7 +252,7 @@ def callback_redirect(
     response: Response,
     code: str | None = None,
     state: str | None = None,
-    eb: EnableBankingService = Depends(get_eb_service),
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_verified_email),
 ) -> HTMLResponse:
     """S7-04: the real production redirect target — Enable Banking's own
@@ -231,9 +268,11 @@ def callback_redirect(
     """
     response.delete_cookie(_EB_STATE_COOKIE_NAME)  # single-use, same as user_auth.py's oauth_state
     response.delete_cookie(_EB_USER_COOKIE_NAME)  # S7-06, same single-use reasoning
+    response.delete_cookie(_EB_INSTITUTION_COOKIE_NAME)  # S8-01, same single-use reasoning
 
     expected_state = request.cookies.get(_EB_STATE_COOKIE_NAME)
     expected_user_id = request.cookies.get(_EB_USER_COOKIE_NAME)
+    expected_institution = request.cookies.get(_EB_INSTITUTION_COOKIE_NAME)
     state_ok = bool(state) and bool(expected_state) and state == expected_state
     # S7-06: the callback must be completing for the same user who started
     # it (see _EB_USER_COOKIE_NAME's module-level comment) — current_user
@@ -241,7 +280,11 @@ def callback_redirect(
     # to a different account than the one that clicked Reconnect if the
     # browser switched accounts mid-flow.
     user_ok = bool(expected_user_id) and UUID(expected_user_id) == current_user.id
-    if not state_ok or not user_ok:
+    # S8-01: no institution cookie means there's no way to know which bank
+    # this callback is for — same failure class as a missing/mismatched
+    # state (a stale or forged link), not a separate error message.
+    institution_ok = bool(expected_institution) and is_supported_institution(expected_institution)
+    if not state_ok or not user_ok or not institution_ok:
         # Missing/mismatched state, or a session that no longer belongs to
         # the user who started this reauthorization: either a forged
         # callback (CSRF — see the module docstring above the cookie
@@ -268,6 +311,7 @@ def callback_redirect(
             ),
             status_code=400,
         )
+    eb = EnableBankingService(db, current_user.id, expected_institution)
     try:
         eb.complete_reauthorization(code)
     except EnableBankingError:

@@ -169,20 +169,28 @@ class EnableBankingClient:
             raise EnableBankingError(f"POST {path} failed: {resp.status_code} {resp.text}")
         return resp.json()
 
-    def _find_kbc_aspsp(self) -> dict:
-        """Look up KBC Belgium in the list of supported banks (ASPSPs = Account Servicing Payment
-        Service Providers — the official PSD2 term for banks).
+    def _find_aspsp(self, institution_name: str = "KBC", country: str = "BE") -> dict:
+        """Look up a bank in Enable Banking's list of supported ASPSPs (Account Servicing
+        Payment Service Providers — the official PSD2 term for banks).
+
+        S8-01: generalized from the original _find_kbc_aspsp — was a hardcoded
+        "KBC" substring match, since this app only ever connected one bank.
+        Now matches on an exact institution name (Enable Banking's own ASPSP
+        `name` field, e.g. "KBC" or "ING" — see app/institutions.py for the
+        list this app currently offers), since a substring match risked
+        ambiguity once more than one bank name is in play (e.g. "KBC" is also
+        a substring of "KBC Brussels", a distinct ASPSP entry).
         """
-        # Fetch all Belgian banks registered on Enable Banking
-        data = self._get("/aspsps", country="BE")
+        # Fetch all banks registered on Enable Banking for this country
+        data = self._get("/aspsps", country=country)
         items = data if isinstance(data, list) else data.get("aspsps", [])
 
-        # Find the first entry whose name contains "KBC" (case-insensitive)
-        kbc = next((a for a in items if "KBC" in a.get("name", "").upper()), None)
-        if not kbc:
+        # Exact, case-insensitive match on the ASPSP name
+        match = next((a for a in items if a.get("name", "").upper() == institution_name.upper()), None)
+        if not match:
             names = [a.get("name") for a in items[:10]]
-            raise EnableBankingError(f"KBC not found in Belgian ASPSPs. Available: {names}")
-        return kbc
+            raise EnableBankingError(f"{institution_name} not found in {country} ASPSPs. Available: {names}")
+        return match
 
     # ── Session helpers ────────────────────────────────────────────────────────
 
@@ -216,9 +224,9 @@ class EnableBankingClient:
 
     # ── Non-interactive auth (used by the Telegram bot) ────────────────────────
 
-    def start_auth(self, state: str | None = None) -> str:
+    def start_auth(self, state: str | None = None, institution: str = "KBC") -> str:
         """Step 1 of the OAuth flow: request a new authorization session and return the URL
-        the user must open in their browser to grant us access to their KBC account.
+        the user must open in their browser to grant us access to their bank account.
 
         state: the CSRF-protection value the caller will later compare against what
         Enable Banking's redirect echoes back (S7-04's callback route does this). The
@@ -226,16 +234,20 @@ class EnableBankingClient:
         so it's optional there and a fresh one is generated internally if omitted —
         matching this method's pre-S7-04 behavior.
 
+        institution: which bank to request access to (S8-01) — defaults to "KBC" so
+        the terminal/bot flow's existing callers (start_auth() with no arguments)
+        keep working unchanged; the web flow's bank picker passes this explicitly.
+
         The Enable Banking OAuth flow:
           1. We POST /auth → get back a URL
-          2. User opens URL, logs in to KBC, grants consent
-          3. KBC redirects to REDIRECT_URL?code=...
+          2. User opens URL, logs in to their bank, grants consent
+          3. The bank redirects to REDIRECT_URL?code=...
           4. Something completes the exchange from that code — the web flow's local
              catcher server does this automatically (S3-07 Item 2); the terminal flow
              below still asks the user to paste the URL by hand.
           5. We call complete_auth() to exchange the code for a session
         """
-        kbc = self._find_kbc_aspsp()
+        aspsp = self._find_aspsp(institution)
 
         # Request 90 days of access starting from now
         valid_until = (datetime.utcnow() + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -247,8 +259,8 @@ class EnableBankingClient:
                 "transactions": True,   # permission to read transactions
             },
             "aspsp": {
-                "name": kbc["name"],
-                "country": kbc.get("country", "BE"),
+                "name": aspsp["name"],
+                "country": aspsp.get("country", "BE"),
             },
             # S7-04: was a throwaway value here ("not checked by us but required by
             # the spec") — a real CSRF gap once this flow's callback lives on a
@@ -324,7 +336,7 @@ class EnableBankingClient:
         """Interactive terminal auth: print the authorization URL and prompt the user to paste
         back the redirect URL. Completes the OAuth flow and returns account UIDs.
         """
-        kbc = self._find_kbc_aspsp()
+        kbc = self._find_aspsp()
         console.print(f"[cyan]Connecting to: {kbc['name']}[/cyan]")
 
         url = self.start_auth()  # get the URL to open in the browser

@@ -51,7 +51,7 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
                 "status": "processing",
                 "stage": "fetching",
                 "progress": 0,
-                "message": "Fetching transactions from KBC...",
+                "message": "Fetching transactions from your bank...",
             },
         )
 
@@ -61,15 +61,29 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
         # that to once the fetch happens here instead — the job's own `error`
         # field is now what carries the same message the exception handlers
         # used to (S4-02's "auth errors surface through job status" requirement).
-        eb = EnableBankingService(db, user_id)
+        #
+        # S8-01: a user can now have more than one bank connected (KBC and/or
+        # ING) — sync fetches from every institution they've ever connected,
+        # not just one. connected_institutions() returning [] (never
+        # connected anything) hits the same "no active bank connection"
+        # error path as before, via the explicit check below rather than
+        # relying on a single get_account_uids() call to raise it.
         try:
-            account_uids = eb.get_account_uids()
+            institutions = EnableBankingService.connected_institutions(db, user_id)
+            if not institutions:
+                raise EnableBankingAuthError(
+                    "No active bank connection (or it has expired). Connect your "
+                    "bank in Settings, then try again."
+                )
             fetched_by_account: list[tuple[str, list[dict]]] = []
             fetched = 0
-            for account_uid in account_uids:
-                txs = eb.fetch_transactions(account_uid, date_from, date_to)
-                fetched += len(txs)
-                fetched_by_account.append((account_uid, txs))
+            for institution in institutions:
+                eb = EnableBankingService(db, user_id, institution)
+                account_uids = eb.get_account_uids()
+                for account_uid in account_uids:
+                    txs = eb.fetch_transactions(account_uid, date_from, date_to)
+                    fetched += len(txs)
+                    fetched_by_account.append((account_uid, txs))
         except (EnableBankingAuthError, EnableBankingError) as exc:
             job_store.set_job(
                 job_id,

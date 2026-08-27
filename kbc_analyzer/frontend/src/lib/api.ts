@@ -6,6 +6,7 @@ import type {
   ChatHistoryEntry,
   ChatUsage,
   ComparisonResponse,
+  EnableBankingStatus,
   EnableBankingStatusResponse,
   JobStatus,
   PatchSettingsResponse,
@@ -149,14 +150,17 @@ export function getEnableBankingStatus() {
   return request<EnableBankingStatusResponse>("/api/auth/enable-banking/status")
 }
 
-export function reauthorizeEnableBanking() {
-  return request<ReauthorizeResponse>("/api/auth/enable-banking/reauthorize", { method: "POST" })
+export function reauthorizeEnableBanking(institution: string) {
+  return request<ReauthorizeResponse>("/api/auth/enable-banking/reauthorize", {
+    method: "POST",
+    body: JSON.stringify({ institution }),
+  })
 }
 
-export function completeEnableBankingCallback(code: string, state: string | null) {
-  return request<EnableBankingStatusResponse>("/api/auth/enable-banking/callback", {
+export function completeEnableBankingCallback(code: string, institution: string, state: string | null) {
+  return request<EnableBankingStatus>("/api/auth/enable-banking/callback", {
     method: "POST",
-    body: JSON.stringify({ code, state }),
+    body: JSON.stringify({ code, institution, state }),
   })
 }
 

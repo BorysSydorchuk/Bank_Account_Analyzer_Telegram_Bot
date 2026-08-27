@@ -82,6 +82,31 @@ def _raw_tx(external_id: str, amount: str = "-12.34", description: str = "Delhai
     return {"id": external_id, "date": "2026-08-05", "amount": amount, "description": description}
 
 
+@pytest.fixture
+def connected_kbc_session(raw_db, raw_db_user, mock_enable_banking_client):
+    """S8-01: _run() now looks up which institutions a user has actually
+    connected via EnableBankingService.connected_institutions — a real
+    enable_banking_sessions query — before fetching from any of them, so
+    the fake client's always-valid session alone (mock_enable_banking_client)
+    is no longer enough to make _run() proceed past 'fetching'. Writes a
+    real row directly (Fernet-encrypt + insert, no HTTP call) rather than
+    going through the real OAuth exchange, keeping TESTER.md's "no live
+    bank calls, ever" intact.
+    """
+    from datetime import datetime, timedelta
+
+    from app.eb_session_store import DatabaseSessionStore
+
+    DatabaseSessionStore(raw_db, raw_db_user.id, "KBC").save(
+        {
+            "session_id": "test-kbc-session",
+            "account_uids": ["test-kbc-account-uid"],
+            "valid_until": (datetime.now() + timedelta(days=90)).isoformat(),
+        }
+    )
+    return mock_enable_banking_client
+
+
 def _stage_sequence(monkeypatch) -> list[str]:
     """Records every stage `_run()` reports, in order, by wrapping the real
     job_store.set_job — the only way to observe the transition sequence
@@ -99,7 +124,7 @@ def _stage_sequence(monkeypatch) -> list[str]:
 
 @pytest.mark.asyncio
 async def test_happy_path_transitions_through_every_stage_in_order(
-    raw_db, raw_db_user, mock_enable_banking_client, monkeypatch
+    raw_db, raw_db_user, mock_enable_banking_client, connected_kbc_session, monkeypatch
 ):
     mock_enable_banking_client.set_transactions([_raw_tx("ext-job-001")])
     job_id = str(uuid.uuid4())
@@ -127,7 +152,7 @@ async def test_happy_path_transitions_through_every_stage_in_order(
 
 @pytest.mark.asyncio
 async def test_categorization_result_is_actually_written(
-    raw_db, raw_db_user, mock_enable_banking_client, monkeypatch
+    raw_db, raw_db_user, mock_enable_banking_client, connected_kbc_session, monkeypatch
 ):
     """Pre-seeds a transaction directly (equivalent to what a prior sync
     already stored) rather than round-tripping it through this run's own
@@ -171,7 +196,7 @@ async def test_fetching_stage_failure_reports_failed_status_naming_that_stage(
 
 @pytest.mark.asyncio
 async def test_storing_stage_failure_reports_failed_status_naming_that_stage(
-    raw_db, raw_db_user, mock_enable_banking_client, monkeypatch
+    raw_db, raw_db_user, mock_enable_banking_client, connected_kbc_session, monkeypatch
 ):
     mock_enable_banking_client.set_transactions([_raw_tx("ext-job-003")])
     job_id = str(uuid.uuid4())
@@ -192,7 +217,7 @@ async def test_storing_stage_failure_reports_failed_status_naming_that_stage(
 
 @pytest.mark.asyncio
 async def test_categorizing_stage_failure_when_no_provider_configured_reports_failed_status(
-    raw_db, raw_db_user, mock_enable_banking_client
+    raw_db, raw_db_user, mock_enable_banking_client, connected_kbc_session
 ):
     """No monkeypatch of get_provider here — the point is the real,
     unconfigured-by-default state (no API key ever saved in the test
@@ -210,7 +235,7 @@ async def test_categorizing_stage_failure_when_no_provider_configured_reports_fa
 
 @pytest.mark.asyncio
 async def test_generating_insights_stage_failure_reports_failed_status_naming_that_stage(
-    raw_db, raw_db_user, mock_enable_banking_client, monkeypatch
+    raw_db, raw_db_user, mock_enable_banking_client, connected_kbc_session, monkeypatch
 ):
     mock_enable_banking_client.set_transactions([])  # nothing to categorize -> categorizing succeeds trivially
     provider = _OrchestrationFakeProvider({})

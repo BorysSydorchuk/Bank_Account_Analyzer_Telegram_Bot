@@ -29,11 +29,11 @@ __all__ = ["EnableBankingService", "EnableBankingAuthError", "EnableBankingError
 
 
 class EnableBankingAuthError(Exception):
-    """No valid cached KBC session is available for the API to use."""
+    """No valid cached bank session is available for the API to use."""
 
 
 class EnableBankingService:
-    def __init__(self, db: Session, user_id: UUID) -> None:
+    def __init__(self, db: Session, user_id: UUID, institution: str) -> None:
         # S7-06: one EnableBankingClient per request, scoped to whichever
         # user's session is being read or written — replaces the old
         # no-argument constructor that always pointed at the single shared
@@ -41,11 +41,28 @@ class EnableBankingService:
         # tasks/analysis.py) now passes the authenticated/owning user_id
         # explicitly, the same pattern S6-06 already established for every
         # other per-user query in this codebase.
+        #
+        # S8-01: also scoped to institution — one service instance now
+        # represents one (user, bank) connection, following
+        # enable_banking_sessions' composite-key migration. Callers that
+        # need to know which banks a user has connected at all (the status
+        # endpoint, sync) use connected_institutions() below rather than
+        # this constructor.
+        self.institution = institution
         self._client = EnableBankingClient(
             app_id=os.getenv("ENABLEBANKING_APP_ID"),
             private_key_path=os.getenv("ENABLEBANKING_PRIVATE_KEY_PATH"),
-            session_store=DatabaseSessionStore(db, user_id),
+            session_store=DatabaseSessionStore(db, user_id, institution),
         )
+
+    @staticmethod
+    def connected_institutions(db: Session, user_id: UUID) -> list[str]:
+        """Every institution this user has ever connected — see
+        DatabaseSessionStore.connected_institutions. A thin passthrough so
+        callers only need to import EnableBankingService, not the storage
+        layer underneath it.
+        """
+        return DatabaseSessionStore.connected_institutions(db, user_id)
 
     def get_account_uids(self) -> list[str]:
         if not self._client.session_valid():
@@ -76,7 +93,7 @@ class EnableBankingService:
     # once they paste back the code — no step here ever blocks waiting on user input.
 
     def get_session_status(self) -> dict:
-        """Report whether a usable KBC session exists, and when it expires.
+        """Report whether a usable session exists for this institution, and when it expires.
 
         Deliberately doesn't use session_valid()'s 1-day safety buffer — that buffer
         exists to stop *sync* from using a nearly-dead session, whereas this reports
@@ -106,7 +123,7 @@ class EnableBankingService:
         state: passed straight through to the Enable Banking request (S7-04) so the
         caller can later verify the callback's state matches what it set here.
         """
-        return self._client.start_auth(state)
+        return self._client.start_auth(state, institution=self.institution)
 
     def complete_reauthorization(self, code: str) -> dict:
         """Exchange the authorization code (pasted back from the redirect URL) for a new
