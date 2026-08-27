@@ -95,25 +95,31 @@ create it early rather than tracking by memory").
   confirmation (or a fresh rotation if the confirmation comes back
   negative).
 
-### Real received-email confirmation for verification/reset — pending Borys (S7-09)
+### Real received-email confirmation for email verification — pending a second SES-verified recipient (S7-09)
 
-- **What was deferred:** the actual acceptance evidence for both new
-  flows — an actual verification email and an actual reset email,
-  received in a real inbox and clicked through for real. Everything up
-  to that point is built and proven at the API level (see below), but
-  a real received-email screenshot is a categorically different kind of
-  proof, per this sprint's own standard (S7-08's "an actual email sent
-  and received... not a 'send succeeded' log line alone").
-- **Why:** SES is still sandbox-only (see the still-OPEN entry below),
-  so only the one verified recipient can receive real mail right now —
-  same reasoning as every other credential/email-touching step this
-  sprint, this needs Borys personally.
-- **What would close it:** Borys registers (or requests a reset) using
-  his verified sandbox address, receives the real email, clicks the
-  real link, confirms the result.
+- **What was deferred:** an actual verification email, received in a
+  real inbox and clicked through for real. Everything up to that
+  point is built and proven at the API level (see the closed entry
+  below), but a real received-email screenshot is a categorically
+  different kind of proof, per this sprint's own standard (S7-08's "an
+  actual email sent and received... not a 'send succeeded' log line
+  alone").
+- **Why:** genuinely narrower than it first looked — password reset
+  (below) was fully confirmed using Borys's own existing account, but
+  that same account is *already verified* (backfilled true by S7-09's
+  migration), so there's nothing left for it to verify. SES sandbox
+  mode only sends to individually-verified recipients, and
+  `boris.sydorchuk@gmail.com` is the only one that exists — a fresh
+  test account can't receive real mail until either SES production
+  access lands (see the still-OPEN entry above) or a second recipient
+  identity is verified.
+- **What would close it:** either SES production access being granted,
+  or verifying a second recipient identity and having that person (or
+  Borys, from a second test account) complete a real registration and
+  click the real verification link.
 - **Status (2026-08-27, S7-09):** OPEN — non-blocking for S7-10 unless
-  that ticket depends on this specific confirmation; closes once Borys
-  completes both real round trips.
+  that ticket depends on this specific confirmation; closes once a real
+  verification email is received and clicked through by a real person.
 
 ### Date-range validation regression tests — not built (S5-07)
 
@@ -261,6 +267,18 @@ create it early rather than tracking by memory").
 ---
 
 ## CLOSED (recent)
+
+### Real received-email confirmation for password reset (closed 2026-08-27, S7-09)
+
+Was tracked alongside email verification as one combined "needs a real
+received email" item. Closed for real: `POST
+/api/auth/request-password-reset` called against production for
+Borys's real, existing account (`boris.sydorchuk@gmail.com`) — a real
+email arrived, he clicked the real link, set a new password, and
+confirmed directly ("Checked - everything works"). Email verification
+stays open separately (see above) — that same account is already
+verified from S7-09's backfill migration, so it couldn't exercise that
+specific flow.
 
 ### Email verification — built, real API round-trip proven (closed 2026-08-27, S7-09)
 

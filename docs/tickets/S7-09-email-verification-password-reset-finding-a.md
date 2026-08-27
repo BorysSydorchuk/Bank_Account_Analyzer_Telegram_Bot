@@ -245,13 +245,30 @@ $ curl .../api/auth/me
 Run successfully multiple times against the local stack, independent
 of the browser-automation artifact above.
 
-### What's still needed for full confirmation
+### Deployed and confirmed (2026-08-27)
 
-Everything is built, tested, deployed-pending, and proven correct at
-the API level. Per this ticket's own framing (SES sandbox, build
-against the verified sandbox recipient), the real acceptance evidence —
-an actual received verification email and an actual received reset
-email, in a real inbox — needs Borys, the same pattern as every
-credential/email-touching ticket this sprint.
+Migration run for real against production RDS
+(`a3f6c8e2b704 -> b8e4f2a9c317`), confirmed via direct query — all 3
+existing real users backfilled `email_verified: true`. Both images
+built/pushed/deployed via `terraform apply`; services confirmed stable,
+new bundle live.
+
+**Real password reset, confirmed by Borys directly:**
+```
+$ curl -X POST https://mymble.be/api/auth/request-password-reset -d '{"email":"boris.sydorchuk@gmail.com"}'
+{"message":"If an account exists for that email, we've sent a password reset link."}
+```
+Borys: *"Checked - everything works"* — real email received, real
+link clicked, real new password set and confirmed working.
+`docs/verification_debt.md` updated: closed for password reset.
+
+**Real email verification, still genuinely open — not glossed over.**
+Borys's account was the only realistic real-inbox test available, and
+it was already `email_verified: true` from this ticket's own backfill
+migration, so there's nothing left for that flow to prove against it.
+Closing this for real needs either SES production access (still
+pending AWS, S7-08's ledger entry) or a second verified recipient
+identity — logged as its own, narrower OPEN entry, not conflated with
+the password-reset item that's now genuinely closed.
 
 Do not start S7-10 until confirmed.
