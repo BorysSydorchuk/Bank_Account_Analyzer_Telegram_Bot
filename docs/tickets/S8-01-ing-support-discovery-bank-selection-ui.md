@@ -93,6 +93,27 @@ This ticket's own scope now additionally includes:
   originally scoped, now against the per-institution session
   model rather than the old single-row one
 
+**Production migration deliberately deferred to S8-02, not run
+here (confirmed intentional, 2026-08-27).** Migration
+`d4a7e19c6b52` is committed and verified against local dev only.
+Production migrations here are never automatic —
+`infra/migration_runner.tf` documents a manual, one-off ECS Exec
+process (`aws ecs run-task`, shell in via `execute-command`, run
+`alembic upgrade head`, stop the task), unlike local dev's
+`backend` container, which runs `alembic upgrade head`
+automatically on every start (`docker-compose.yml`). Nobody ran
+that production process for this migration as part of S8-01, and
+this ticket's own acceptance criteria explicitly excluded live
+connections — running the production migration today, before
+S8-02 needs it for a real ING connection, would be a redundant
+deploy. Production's `enable_banking_sessions` table is therefore
+still on the old `user_id`-only primary key until S8-02's deploy —
+expected, not a gap. S8-02 must include the real production
+migration as part of its own scope, same nullable → backfill →
+verify care as every prior real-data migration here (S6-02, and
+this ticket's own local verification), since Borys's actual live
+KBC session has to survive it.
+
 ================================================================
 WHEN DONE
 ================================================================

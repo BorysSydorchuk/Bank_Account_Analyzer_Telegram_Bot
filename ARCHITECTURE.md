@@ -1244,6 +1244,22 @@ single-column primary key. `institution` is a plain text tag ("KBC",
 source of truth both the picker and the backend read from), not a
 foreign key to a lookup table.
 
+**Not yet live in production (deliberately, confirmed 2026-08-27) —
+committed and verified against local dev only.** Production migrations
+here are never automatic (see Environment/URLs section on the
+migration-runner ECS Exec pattern, S7-03) — `docker-compose.yml`'s
+`backend` service runs `alembic upgrade head` on every local start;
+production requires someone to manually run a one-off
+`migration-runner` ECS task and shell in. Nobody has, for this
+migration, as of S8-01's close. Production's `enable_banking_sessions`
+is therefore still on the old `user_id`-only primary key — one
+connection per user, same as before this ticket — until S8-02 runs the
+real migration there as part of its own scope (needed before a real
+ING connection can coexist with Borys's real live KBC session).
+Running it earlier, before S8-02 needs it, would have been a redundant
+deploy — this ticket's own acceptance criteria explicitly excluded
+live connections.
+
 `app/eb_session_store.py`'s `DatabaseSessionStore` and
 `app/eb_service.py`'s `EnableBankingService` both now take `institution`
 alongside `user_id` — one instance represents one `(user, bank)`
