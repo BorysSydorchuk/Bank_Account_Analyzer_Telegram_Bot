@@ -166,12 +166,17 @@ resource "aws_iam_policy" "deploy_migration_runner" {
         # option; DescribeTaskDefinition is included here rather than
         # deploy_infra_read's broader ecs:Describe* to keep this file's
         # write-adjacent grants grouped together with what they enable.
+        # ecs:TagResource: real gap found applying this for real
+        # (2026-08-27) — this provider's default_tags block auto-tags
+        # every new resource, so RegisterTaskDefinition needs it too, not
+        # just an explicit `tags {}` block would have.
         Sid    = "ManageMigrationRunnerTaskDefinition"
         Effect = "Allow"
         Action = [
           "ecs:RegisterTaskDefinition",
           "ecs:DeregisterTaskDefinition",
-          "ecs:DescribeTaskDefinition"
+          "ecs:DescribeTaskDefinition",
+          "ecs:TagResource"
         ]
         Resource = "*"
       },
