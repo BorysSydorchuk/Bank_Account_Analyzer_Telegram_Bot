@@ -45,6 +45,22 @@ resource "aws_ecs_task_definition" "migration_runner" {
           name      = "DB_PASSWORD"
           valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:password::"
         },
+        # S8-02: real gap found running this task for real —
+        # app/migrations/env.py reads DATABASE_URL directly (the same
+        # single source of truth web.tf/worker.tf already inject via
+        # this exact secret, see ecs.tf's comment above
+        # data.aws_secretsmanager_secret.database_url), not the
+        # DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD pieces below —
+        # this task definition set those but never actually assembled or
+        # injected DATABASE_URL, so `alembic current`/`upgrade` failed
+        # with "option values must be strings" (None reaching
+        # configparser). The execution role already has read access to
+        # this secret (ecs_task_execution_read_app_secrets, ecs.tf) —
+        # only this container definition was missing the entry.
+        {
+          name      = "DATABASE_URL"
+          valueFrom = data.aws_secretsmanager_secret.database_url.arn
+        },
         # S7-06: added once this task actually needed to decrypt a real
         # Fernet-encrypted value (enable_banking_sessions) or make a real
         # Enable Banking API call to verify a real sync — DB_PASSWORD alone
