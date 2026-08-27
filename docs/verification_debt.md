@@ -175,14 +175,29 @@ create it early rather than tracking by memory").
   or verifying a second recipient identity and having that person (or
   Borys, from a second test account) complete a real registration and
   click the real verification link.
-- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN — this
-  ticket's own SES check (`aws sesv2 get-account`) confirms the blocker
-  is unchanged: still sandbox mode, still only one verified recipient
-  (`boris.sydorchuk@gmail.com`, already verified before this flow could
-  test against it). Non-blocking — everything up to real delivery is
-  proven at the API level (S7-09). Carried forward into Sprint 8, tied
-  to the SES production-access entry above. Closes once a real
-  verification email is received and clicked through by a real person.
+- **Status (re-confirmed 2026-08-28, mid S8-02):** OPEN — no longer
+  "only one verified recipient," that's now factually stale. A second
+  SES identity, `liyaberry27@gmail.com`, exists and is genuinely
+  verified (`aws sesv2 get-email-identity`:
+  `VerifiedForSendingStatus: true`, confirmed directly) — created
+  after that account's real registration (2026-08-27) never received
+  its verification email, traced to this exact blocker. **But the
+  actual round-trip this entry needs still hasn't run**: checked the
+  real database directly — `liyaberry27@gmail.com`'s row still shows
+  `email_verified: false`, `created_at` unchanged since the original
+  registration, meaning no new registration or resend has happened
+  since the identity became verified. The precondition (a second
+  verified recipient) is met; the proof itself (a real send, received,
+  clicked) is not. Non-blocking — everything up to real delivery
+  remains proven at the API level (S7-09). No resend-verification-email
+  endpoint exists (flagged separately in `routers/user_auth.py`), and
+  `liyaberry27@gmail.com`'s account row already exists with
+  `email_verified: false`, so a same-email re-registration would just
+  fail on the uniqueness constraint — closing this needs either a
+  fresh registration against a different, newly-verified recipient
+  address, or that existing account's row deleted first so the same
+  address can register again for real. Closes once whichever path
+  actually delivers a real email that's received and clicked through.
 
 ### Date-range validation regression tests — not built (S5-07)
 
