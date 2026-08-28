@@ -47,3 +47,10 @@ async def test_categorization_pre_write_filter_excludes_unknown_categories_befor
     assert row.category is None
     assert result["categorized"] == 0
     assert result["failed"] == 1
+    # S8-09: every result rejected as an unknown category is now a real,
+    # surfaced error — not silently None (which used to make
+    # tasks/analysis.py fall back to a misleading "AI provider may be
+    # temporarily unavailable" message for what's actually a missing-
+    # categories problem, not a provider problem).
+    assert result["error_message"] is not None
+    assert hallucinated_category in result["error_message"]

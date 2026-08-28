@@ -9,6 +9,8 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from .agents.categorization import CATEGORIES
+from .colors import BACKUP_PALETTE
 from .models import BetaInvite, Budget, Category, Insight, Setting, Transaction, User
 
 
@@ -73,6 +75,8 @@ def create_user_from_google(db: Session, google_id: str, email: str, display_nam
     friction with no security benefit."""
     user = User(google_id=google_id, email=email, display_name=display_name, email_verified=True)
     db.add(user)
+    db.flush()  # populates user.id (server-generated) without ending the transaction
+    seed_default_categories(db, user.id)
     db.commit()
     db.refresh(user)
     return user
@@ -120,6 +124,8 @@ def create_user_from_password(db: Session, email: str, password_hash: str) -> Us
     S7-09's verification email is what closes that gap."""
     user = User(email=email, password_hash=password_hash)
     db.add(user)
+    db.flush()  # populates user.id (server-generated) without ending the transaction
+    seed_default_categories(db, user.id)
     db.commit()
     db.refresh(user)
     return user
@@ -407,6 +413,31 @@ def list_all_categories(db: Session) -> list[Category]:
     only (scripts/smoke_test_color_validation.py), never a router. Not a
     default any live endpoint could accidentally fall back to."""
     return list(db.execute(select(Category).order_by(Category.name)).scalars())
+
+
+def seed_default_categories(db: Session, user_id: UUID) -> None:
+    """Adds user_id's initial `categories` rows to the session — does NOT
+    commit. Callers (create_user_from_password/create_user_from_google)
+    add these to the same session as the new User row and commit once,
+    so a new account and its default categories are created atomically:
+    either both land or neither does, never a user with no categories.
+
+    S8-09: found post-S8-08 that nothing had ever done this for a
+    multi-user account — the original fbde2dbcc78d migration seeded 7
+    global rows once, before per-user categories (S6-02) existed, and
+    every account created since then got zero. `agents.categorization
+    .CATEGORIES` is the exact fixed list the categorization agent is
+    told to classify into — reusing it here (not a separately
+    maintained list) is what guarantees a fresh account's category
+    table can actually accept what the LLM sends back. Colors come from
+    colors.BACKUP_PALETTE, not the original migration's own hex values
+    — those predate colors.validate_color() and fail it outright (found
+    while building this fix); BACKUP_PALETTE's 8 entries were built
+    specifically to pass validation, and 7 of them cover this list with
+    one to spare.
+    """
+    for name, color in zip(CATEGORIES, BACKUP_PALETTE):
+        db.add(Category(user_id=user_id, name=name, color=color, is_custom=False, source="seed"))
 
 
 def list_seeded_category_names(db: Session, user_id: UUID) -> list[str]:

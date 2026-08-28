@@ -6,7 +6,7 @@ import pytest
 
 from app import crud
 from app.auth.session import SESSION_COOKIE_NAME, create_session, get_session
-from app.models import BetaInvite, User
+from app.models import BetaInvite, Category, User
 from app.rate_limit import limiter
 
 
@@ -86,7 +86,13 @@ def test_register_consumes_the_invite_so_it_cannot_be_reused(client, db_session)
     # Deleting the account (simulating a fresh signup attempt against the
     # same, already-consumed invite) rather than reusing the same email
     # while it's taken — isolates "was the invite itself burned" from the
-    # already-covered duplicate-email case above.
+    # already-covered duplicate-email case above. Categories deleted first
+    # (S8-09: registration now seeds real rows referencing this user, and
+    # categories.user_id has no ON DELETE CASCADE, same as every other
+    # user_id FK in this schema) — a real "delete this account" feature
+    # would need the same ordering; there isn't one yet.
+    user = db_session.query(User).filter(User.email == "onetime@example.com").one()
+    db_session.query(Category).filter(Category.user_id == user.id).delete()
     db_session.query(User).filter(User.email == "onetime@example.com").delete()
     db_session.flush()
 

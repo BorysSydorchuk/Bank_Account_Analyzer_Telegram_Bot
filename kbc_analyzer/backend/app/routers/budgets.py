@@ -43,6 +43,14 @@ def create_budget(
     if body.amount <= 0:
         raise HTTPException(status_code=400, detail="Budget amount must be greater than zero.")
 
+    # S8-09: category is FK'd to categories(user_id, name) — without this
+    # check, a name that doesn't exist for this user (found live: every
+    # account except the original bootstrap one had zero categories) hit
+    # an unhandled IntegrityError, a raw 500 rather than a clean error.
+    known_category_names = {c.name for c in crud.list_categories(db, current_user.id)}
+    if body.category not in known_category_names:
+        raise HTTPException(status_code=400, detail=f"'{body.category}' isn't a known category.")
+
     existing = crud.get_budget(db, current_user.id, body.category)
     if existing is not None:
         raise HTTPException(status_code=409, detail=f"A budget for '{body.category}' already exists.")

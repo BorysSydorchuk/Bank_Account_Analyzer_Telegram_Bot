@@ -137,9 +137,10 @@ async def _run(job_id: str, date_from: date, date_to: date, user_id: UUID) -> No
             db, user_id, date_from, date_to, on_batch_complete=on_batch_complete
         )
 
-        # error_message is only set when categorization couldn't run at all
-        # (no API key configured) — analysis_service already crafts this as a
-        # safe, user-facing message, so it's fine to surface directly.
+        # error_message is set for two hard-stop cases (no API key configured,
+        # or S8-09's every-result-rejected-as-unknown-category case) —
+        # analysis_service already crafts each as a safe, user-facing
+        # message, so it's fine to surface directly.
         #
         # A batch that raises (a quota-exhausted or momentarily-overloaded
         # LLM, say) is logged and skipped rather than raised further, by

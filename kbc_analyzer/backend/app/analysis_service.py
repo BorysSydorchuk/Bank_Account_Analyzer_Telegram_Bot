@@ -32,10 +32,13 @@ async def categorize_transactions(
     on_batch_complete: Callable[[int, int], None] | None = None,
 ) -> dict:
     """Returns {categorized, skipped_already_categorized, failed, provider,
-    error_message}. error_message is only set when nothing could run at all
-    (no API key configured) — a per-batch LLM failure instead shows up as a
-    nonzero `failed` count with error_message left as None, since sync should
-    still report success in that case.
+    error_message}. error_message is set for two distinct hard-stop cases:
+    no API key configured, or every returned classification rejected because
+    none of the categories the LLM used exist in this account yet (S8-09) —
+    a real, actionable cause, not a transient provider issue. A genuine
+    per-batch LLM failure (the call itself raised) instead shows up as a
+    nonzero `failed` count with error_message left as None, since sync
+    should still report success in that case.
 
     on_batch_complete: forwarded to CategorizationAgent.run() — S3-04's
     background job passes this to report real per-batch progress; the
@@ -86,6 +89,7 @@ async def categorize_transactions(
         }
 
     results: list[dict] = []
+    unknown_category_names: set[str] = set()
     if uncategorized:
         payloads = [
             {
@@ -98,9 +102,9 @@ async def categorize_transactions(
         ]
 
         agent = CategorizationAgent(provider)
-        results = await agent.run(payloads, on_batch_complete=on_batch_complete)
+        raw_results = await agent.run(payloads, on_batch_complete=on_batch_complete)
 
-        if results:
+        if raw_results:
             # S5-02: transactions.category is now FK'd to categories.name, so a
             # category the LLM invents (drifts off the fixed CATEGORIES list, a
             # typo, a provider hallucination) can no longer be written at all —
@@ -110,15 +114,16 @@ async def categorize_transactions(
             # other per-transaction categorization failure (counted in `failed`
             # below), not a reason to fail the run.
             known_category_names = {c.name for c in crud.list_categories(db, user_id)}
-            unknown = [r for r in results if r.get("category") not in known_category_names]
+            unknown = [r for r in raw_results if r.get("category") not in known_category_names]
             if unknown:
+                unknown_category_names = {r.get("category") for r in unknown}
                 logger.warning(
                     "Categorization agent returned %d unknown category name(s) not in "
                     "categories table, skipping: %s",
                     len(unknown),
-                    sorted({r.get("category") for r in unknown}),
+                    sorted(unknown_category_names),
                 )
-            results = [r for r in results if r.get("category") in known_category_names]
+            results = [r for r in raw_results if r.get("category") in known_category_names]
 
         if results:
             crud.update_transaction_categories(db, user_id, results)
@@ -126,12 +131,32 @@ async def categorize_transactions(
     if seeded_category_names:
         await assign_ai_colors(db, user_id, provider, seeded_category_names)
 
+    error_message = None
+    if unknown_category_names and not results:
+        # S8-09: found live — the LLM can answer correctly (real 200s, real
+        # valid category names) while this account's own categories table
+        # is the actual gap, and the S5-02 filter above silently discarded
+        # every result as a result. That used to leave error_message None
+        # here, so tasks/analysis.py's generic "AI provider may be
+        # temporarily unavailable" fallback fired instead — technically
+        # not silent, but actively wrong: retrying does nothing, since the
+        # cause isn't the provider. Distinguished from a genuine LLM/
+        # provider failure (raw_results itself empty, unknown_category_names
+        # never populated) by construction — this branch only reaches when
+        # the agent's calls succeeded and the app's own data was the block.
+        error_message = (
+            "The AI suggested categories that don't exist in your account yet "
+            f"({', '.join(sorted(unknown_category_names))}). This usually means "
+            "your account is missing its default categories — please contact "
+            "support."
+        )
+
     return {
         "categorized": len(results),
         "skipped_already_categorized": skipped,
         "failed": len(uncategorized) - len(results),
         "provider": provider_name,
-        "error_message": None,
+        "error_message": error_message,
     }
 
 

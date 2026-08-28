@@ -1003,6 +1003,51 @@ S6-06) is the complete, code-verified inventory this closed out.
 `insights` delete-and-replace is a deliberate decision (S4-04), not an
 oversight — see Invariants below.
 
+## Category Seeding (S8-09)
+
+Both `POST /api/auth/register` and a first-time `GET
+/api/auth/google/callback` sign-in seed a new user's `categories` table
+with the same 7 names `agents.categorization.CATEGORIES` classifies into
+(Restaurants and Cafes, Groceries, Traveling, Rent/Housing, Income,
+Transfers, Other), `source='seed'`, colors from `colors.BACKUP_PALETTE`
+(7 of its 8 validated entries). `crud.seed_default_categories` adds
+these to the same session as the new `User` row, before that function's
+one `db.commit()` — atomic with account creation by construction, not a
+follow-up step, via `db.flush()` to get the server-generated `user.id`
+without ending the transaction.
+
+**Real gap this closes, found post-S8-08:** nothing had ever done this
+for a real multi-user account before S8-09. The only category-creation
+paths were the one-time `fbde2dbcc78d` migration (seeded 7 global rows
+before per-user categories existed) and a user manually adding one —
+every account created since S6-02's per-user migration got zero
+categories, permanently blocking categorization (S5-02's safety filter
+correctly rejects any category name not already in the caller's own
+table; with zero rows, every valid LLM classification got silently
+discarded). Confirmed live: every real account except
+`boris.sydorchuk@gmail.com` (bootstrap-era leftover data) had zero
+categories. Backfilled for existing accounts via
+`backend/ops/backfill_default_categories.py` (idempotent — only touches
+a user with zero existing rows).
+
+**`POST /api/budgets` now validates the category exists for this user
+before writing**, returning a clean `400` instead of letting an unknown
+name hit `budgets.category`'s FK to `categories(user_id, name)` as an
+unhandled `IntegrityError` — a real, previously-unhandled gap this same
+investigation found (CLAUDE.md's error-handling rule: never a raw
+traceback to the API consumer).
+
+**`analysis_service.categorize_transactions`'s `error_message` now
+distinguishes two hard-stop causes**, not one: no API key configured
+(as before), or every returned classification rejected as an unknown
+category — the exact failure mode above. Previously this second case
+left `error_message` as `None`, which made `tasks/analysis.py`'s
+`every_batch_failed` fallback fire a generic, actively wrong message
+("the AI provider may be temporarily unavailable... try again
+shortly") for a cause retrying could never fix. The frontend needed no
+changes — `useDashboard.ts` already renders whatever `job.error`
+contains as-is.
+
 ## Public Route Enumeration (S8-08)
 
 Every route this API exposes, by auth requirement — compiled by reading
