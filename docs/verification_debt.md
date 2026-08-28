@@ -46,6 +46,57 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### New registrations get zero categories — categorization silently discards every result for every non-bootstrap user (found post-S8-08)
+
+- **What was deferred:** nothing creates a `categories` row for a new
+  user at registration. The only category-creation paths are the
+  one-time `fbde2dbcc78d` migration (seeded 7 categories for the
+  single bootstrap user, before multi-user existed) and
+  `crud.create_category` (a user manually adding one). Confirmed live
+  for every real account: `boris.sydorchuk@gmail.com` has 10
+  categories (bootstrap-era leftover data); every other real account —
+  `bathsters@gmail.com`, `boryssydorchuk@gmail.com`,
+  `secta022024@gmail.com`, `lifeliyaberry27@gmail.com`,
+  `Liyaberry27@gmail.com` — has 0.
+- **Real, live-reproduced failure mode:** `analysis_service
+  .categorize_transactions`'s S5-02 safety filter rejects any
+  category name the LLM returns that isn't already in the caller's
+  own `categories` table (correct behavior — it's what stops an LLM
+  hallucination from violating the `categories` FK). With zero
+  categories on file, every valid classification gets rejected as
+  "unknown" and silently discarded — `categorized: 0`,
+  `error_message: None` (the function only sets `error_message` for
+  "no API key configured," not per-batch rejections, so the sync UI
+  shows no error at all). Reproduced by calling
+  `analysis_service.categorize_transactions` directly against
+  `bathsters@gmail.com`'s real 107 uncategorized transactions with
+  their real, valid Claude API key: three real `200 OK` responses
+  from Anthropic's API, each with correct category names, followed by
+  `WARNING:app.analysis_service:Categorization agent returned 107
+  unknown category name(s) not in categories table, skipping:
+  ['Groceries', 'Income', 'Other', 'Restaurants and Cafes',
+  'Transfers', 'Traveling']`. Not a usage-cap issue (2 real
+  `categorize` usage events recorded, cap is 10/day) and not a missing
+  API key (a real, working `anthropic_api_key` was configured).
+- **Why this is severe, not cosmetic:** categorization is completely
+  non-functional for every real user except the one bootstrap account
+  — which is every beta user Sprint 9 plans to recruit. Budgets are
+  also FK'd to `(user_id, category)` (S6-02), so this likely blocks
+  creating budgets for a new user too, not investigated further here.
+- **What would close it:** seed each new user's `categories` table at
+  registration (both the password and Google first-time-signup paths)
+  with the same 7 default categories `fbde2dbcc78d` originally seeded
+  globally — a real decision on exactly where that seeding call
+  belongs (in `crud.register`-adjacent code, or a shared helper both
+  register paths call) and whether existing broken accounts get
+  backfilled too, not made here. Needs a real test proving a fresh
+  registration can categorize a real transaction end-to-end
+  afterward.
+- **Status (found 2026-08-29, investigating a real Borys-reported
+  regression — not tied to a ticket number yet):** OPEN. Not fixed
+  here — diagnosis only, per scope discipline; flagged to Borys for a
+  decision on urgency/ticket assignment given severity.
+
 ### `account_uids_encrypted` stale-decryption — stored snapshot doesn't match real account state (found S8-08)
 
 - **What was deferred:** the `enable_banking_sessions` row for
