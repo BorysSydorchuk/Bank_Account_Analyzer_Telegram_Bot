@@ -140,32 +140,6 @@ create it early rather than tracking by memory").
   Closes on Borys's one-line confirmation (or a fresh rotation if the
   confirmation comes back negative).
 
-### Real received-email confirmation for email verification (closed 2026-08-28, S8-05)
-
-- **What was deferred:** an actual verification email, received in a
-  real inbox and clicked through for real, by someone other than
-  Borys's own already-verified account. Everything up to that point
-  was built and proven at the API level since S7-09; SES sandbox mode
-  (see the now-closed AWS-side entry that used to sit above this one)
-  blocked any real recipient other than pre-verified test identities
-  from ever completing the round-trip.
-- **How it actually closed:** not via SES at all — S8-05 switched the
-  app's transactional email provider to Resend after SES's production
-  access request was denied and became unresolvable from this
-  environment (full history in ARCHITECTURE.md's Transactional Email
-  section). Once `mymble.be` was verified on Resend and deployed to
-  production, `liyaberry27@gmail.com`'s existing unverified row
-  (`email_verified: false`, from the earlier SES-blocked attempt) was
-  deleted so the same address could register fresh. That real
-  registration went through Resend for real: direct database query
-  confirms `email_verified: true`, `created_at: 2026-08-28 11:40:35` —
-  a genuinely new registration, real send, real receipt, real click,
-  not a re-check of stale state.
-- **Status:** CLOSED. The proof this entry existed to get — a real
-  stranger receiving and using a real verification email — now
-  exists, via a different provider than originally planned but
-  satisfying the exact same standard.
-
 ### Date-range validation regression tests — not built (S5-07)
 
 - **What was deferred:** Automated tests for the S5-07 date-range fix
@@ -284,6 +258,86 @@ create it early rather than tracking by memory").
 ---
 
 ## CLOSED (recent)
+
+### SES still in sandbox mode — production access request pending (S7-08, closed 2026-08-28, S8-05)
+
+- **What was deferred:** real users other than the one verified test
+  recipient (`boris.sydorchuk@gmail.com`) could not receive email from
+  Mymble — SES sandbox mode only sends to individually-verified
+  recipient identities. Sandbox-mode sending itself was confirmed
+  working (real email, real receipt, S7-08).
+- **Why it stayed open so long:** `aws sesv2 put-account-details` came
+  back `ReviewDetails.Status: DENIED` almost immediately — not a final
+  rejection, but AWS's automated first pass asking for more detail
+  (sending frequency, recipient-list handling, bounce/complaint/
+  unsubscribe handling, example emails). A full reply with real,
+  verified account facts was submitted via AWS Support Center (Case
+  `178778410400368`) — this account has no paid AWS Support plan, so
+  there was no API visibility into the review reasoning or a way to
+  poll case status/communications programmatically; only the console
+  showed it, and only a human could act on it. Re-confirmed
+  2026-08-28 (S8-05): still `ProductionAccessEnabled: false`,
+  `ReviewDetails.Status: DENIED`, unchanged since S7-08/S7-10, more
+  than 24 hours past the point AWS said it would give an initial
+  response. Two real registration attempts failed for exactly this
+  reason in the meantime — `liyaberry27@gmail.com` and
+  `secta022024@gmail.com`, both confirmed unverified, with real
+  `AccessDenied` tracebacks in CloudWatch Logs naming the *recipient's*
+  identity ARN specifically (sandbox mode's IAM check for
+  `ses:SendEmail` authorizes both sender and recipient ARNs, not just
+  the sender — a real, non-obvious finding, not documented anywhere
+  else once `infra/ses.tf` stops being the live path). A fresh
+  `put-account-details` resubmission with a stronger use-case
+  description was rejected outright (`ConflictException`) — no
+  API-only path was left. The account's Support Case was entirely
+  unreachable via API (Basic support tier,
+  `SubscriptionRequiredException` confirmed on both `describe-cases`
+  and `describe-severity-levels`) — only the AWS Console could read or
+  post to it, and this environment has CLI credentials only, never
+  console access. Per this ticket's own instruction ("if AWS doesn't
+  respond within a short, explicit window, escalate to Borys directly
+  rather than silently waiting"), that window passed and the blocker
+  was escalated directly rather than left for a further quiet
+  re-check.
+- **How it actually closed:** not via AWS ever responding — Borys
+  checked the Support Center console directly and confirmed AWS had
+  genuinely gone silent (Basic support carries no committed SLA at
+  all), then chose to adopt a provider switch rather than wait
+  unbounded. S8-05 switched the app's transactional email path from
+  SES to Resend (real DNS verification on `mymble.be`, real production
+  deploy, full detail in ARCHITECTURE.md's Transactional Email
+  section) — this blocker is closed because the underlying problem
+  ("real strangers can't receive email from Mymble") is resolved, not
+  because AWS's case ever resolved. Case `178778410400368` may still
+  be sitting open and unanswered in the Support Center for all this
+  environment can tell; that no longer matters to this project.
+- **Status:** CLOSED. Kept here rather than trimmed, per this file's
+  own convention, because the recipient-ARN IAM quirk and the
+  Basic-support-tier dead end are real diagnostic content not fully
+  preserved anywhere else in the ledger, and were the actual reason
+  Resend was adopted.
+
+### Real received-email confirmation for email verification (S7-09, closed 2026-08-28, S8-05)
+
+- **What was deferred:** an actual verification email, received in a
+  real inbox and clicked through for real, by someone other than
+  Borys's own already-verified account. Everything up to that point
+  was built and proven at the API level since S7-09; SES sandbox mode
+  (see the entry above) blocked any real recipient other than
+  pre-verified test identities from ever completing the round-trip.
+- **How it actually closed:** not via SES at all — once `mymble.be`
+  was verified on Resend and deployed to production,
+  `liyaberry27@gmail.com`'s existing unverified row
+  (`email_verified: false`, from the earlier SES-blocked attempt) was
+  deleted so the same address could register fresh. That real
+  registration went through Resend for real: direct database query
+  confirms `email_verified: true`, `created_at: 2026-08-28 11:40:35` —
+  a genuinely new registration, real send, real receipt, real click,
+  not a re-check of stale state.
+- **Status:** CLOSED. The proof this entry existed to get — a real
+  stranger receiving and using a real verification email — now
+  exists, via a different provider than originally planned but
+  satisfying the exact same standard.
 
 ### Old production code + new DB schema risk window — closed same day (S8-02, closed 2026-08-27)
 
