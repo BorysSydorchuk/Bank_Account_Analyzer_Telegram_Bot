@@ -853,10 +853,58 @@ password reset entries.** Both were OPEN pending real
 transactional-email delivery to a genuine stranger; that proof now
 exists (`lifeliyaberry27@gmail.com`, above).
 
+## Beta Invite Mechanism (S8-06)
+
+Registration is closed-beta gated: both new-account paths — password
+`POST /api/auth/register` and a first-time `GET /api/auth/google/callback`
+sign-in — require a matching, unused row in `beta_invites` before a new
+`users` row is created. An existing account (returning login, an existing
+email adding Google as a second sign-in method) is never gated; the check
+only fires on the specific branch that's about to create a brand-new
+account. Google sign-in needed its own gate, not just `/register`'s —
+without it, "Sign in with Google" would be a standing bypass of the whole
+mechanism for any address never seen before.
+
+**Operating model: a one-command CLI, not an admin UI or role system.**
+`scripts/grant_beta_invite.py`, run inside a real container via ECS Exec
+(`python -m scripts.grant_beta_invite <email>` — must run as a module
+from `/app`, not a bare script path, for the same `sys.path[0]` reason
+documented in this sprint's migration/diagnostic scripts), is Borys's
+entire operating surface: one email in, one `beta_invites` row out. This
+app has no admin-role concept at all — deliberately not building one for
+10-20 manual grants, consistent with CLAUDE.md's multi-user-readiness
+rules explicitly deferring general-purpose admin infrastructure. ECS Exec
+is already this project's established pattern for every other one-off
+production operation this sprint (migrations, DB inspection, the S8-06
+pre-check itself) — this is the same operating model, not a new one.
+
+**Case sensitivity, deliberately handled here even though `users.email`
+isn't.** `beta_invites.email` is always stored and matched lowercased
+(`crud.create_beta_invite`/`get_unused_beta_invite_by_email`) — found
+necessary during this ticket's own pre-check, which produced two
+separate `users` rows for one real person (`liyaberry27@gmail.com` and
+`Liyaberry27@gmail.com`) because `users.email` has no such normalization.
+That gap is flagged, not fixed, here (out of scope for S8-06 — a future
+auth-hardening ticket's job) — but the invite table doesn't inherit it,
+since an invite silently failing to match a differently-cased real
+address would defeat the point of a manual, human-operated allowlist.
+
+**Invite lifecycle:** granted (`used_at IS NULL`) → consumed on the
+successful account creation it gates (`used_at`, `used_by_user_id` set,
+`crud.mark_beta_invite_used`) → never matches again, so one invite
+grants exactly one account. Consumption happens only after the account
+actually exists (not, e.g., on a password-strength rejection mid-register)
+so a failed registration attempt never burns a real invite.
+`used_by_user_id`'s FK is `ON DELETE SET NULL`, not the default
+`RESTRICT` — this table is an audit trail, and deleting a user account
+must never be blocked by, or cascade into deleting, their own invite
+history.
+
 ## Database Tables
 
 | Table | Purpose | Key constraints |
 |---|---|---|
+| `beta_invites` | Closed-beta registration allowlist (S8-06) | `email` UNIQUE, always stored lowercased; `used_at`/`used_by_user_id` both nullable — unset means the invite is still live; `used_by_user_id` FK → `users(id)` `ON DELETE SET NULL` |
 | `users` | Sprint 6 (S6-01) — real accounts | `id` UUID PK; `email` UNIQUE; `password_hash`/`google_id` both nullable, `CHECK (password_hash IS NOT NULL OR google_id IS NOT NULL)`; `email_verified` boolean (S7-09), `true` at creation for Google signups, `false` by default for password signups, backfilled `true` for every pre-S7-09 row |
 | `transactions` | One row per bank transaction | `user_id` UUID FK → `users(id)`, NOT NULL (S6-02); `UNIQUE (user_id, external_id)` — **not** `external_id` alone: Enable Banking's own docs confirm `entry_reference` is not globally unique (S6-02 Step 0, see `docs/multi_user_migration_plan.md`); `manually_edited` boolean, default `false`; `category` FK → `categories(user_id, name)` `ON UPDATE CASCADE ON DELETE SET NULL`, composite since S6-02 |
 | `settings` | Per-user key/value store (LLM provider + encrypted API keys) | `(user_id, key)` composite PK (S6-02 — was a flat global store through Sprint 5); `user_id` FK → `users(id)` |

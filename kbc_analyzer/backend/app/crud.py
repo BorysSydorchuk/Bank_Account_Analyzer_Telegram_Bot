@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .models import Budget, Category, Insight, Setting, Transaction, User
+from .models import BetaInvite, Budget, Category, Insight, Setting, Transaction, User
 
 
 def get_user_by_google_id(db: Session, google_id: str) -> User | None:
@@ -25,6 +25,43 @@ def get_user_by_email(db: Session, email: str) -> User | None:
     signing in via Google for the first time), and by S6-04's
     register/login endpoints to check whether an email is already taken."""
     return db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+
+
+def get_unused_beta_invite_by_email(db: Session, email: str) -> BetaInvite | None:
+    """S8-06. Looks up an unused invite by email, lowercased on the way in
+    so this table doesn't inherit users.email's case-sensitivity gap
+    (flagged separately, docs/verification_debt.md). Both registration
+    paths (password and Google) call this before creating a new account —
+    an already-used invite (used_at is not None) never matches again, so
+    one invite grants exactly one account."""
+    return db.execute(
+        select(BetaInvite).where(BetaInvite.email == email.lower(), BetaInvite.used_at.is_(None))
+    ).scalar_one_or_none()
+
+
+def create_beta_invite(db: Session, email: str) -> BetaInvite:
+    """S8-06. The one write scripts/grant_beta_invite.py performs — Borys's
+    entire operating surface for granting beta access. Raises on a
+    duplicate email via the table's own unique constraint rather than
+    checking first, so a second grant attempt for the same address fails
+    loudly instead of silently creating a second row."""
+    invite = BetaInvite(email=email.lower())
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite
+
+
+def mark_beta_invite_used(db: Session, invite: BetaInvite, user: User) -> BetaInvite:
+    """S8-06. Called once, immediately after the account an invite gates
+    is actually created — never before, so a registration that fails
+    partway through (e.g. password-strength rejection) never burns the
+    invite."""
+    invite.used_at = func.now()
+    invite.used_by_user_id = user.id
+    db.commit()
+    db.refresh(invite)
+    return invite
 
 
 def create_user_from_google(db: Session, google_id: str, email: str, display_name: str | None) -> User:

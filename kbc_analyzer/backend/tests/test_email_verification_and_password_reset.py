@@ -12,7 +12,7 @@ import re
 import pytest
 
 from app.auth.session import SESSION_COOKIE_NAME, create_session
-from app.models import User
+from app.models import BetaInvite, User
 from app.rate_limit import limiter
 
 
@@ -41,7 +41,11 @@ def _extract_token(sent_calls: list[dict], link_prefix: str) -> str:
 # ── Email verification ──────────────────────────────────────────────────────
 
 
-def test_registration_sends_a_verification_email_and_the_real_link_verifies_the_account(client, _fake_resend_client):
+def test_registration_sends_a_verification_email_and_the_real_link_verifies_the_account(
+    client, db_session, _fake_resend_client
+):
+    db_session.add(BetaInvite(email="verify-me@example.com"))
+    db_session.flush()
     register_response = client.post(
         "/api/auth/register", json={"email": "verify-me@example.com", "password": "a-real-password-123"}
     )
@@ -63,7 +67,9 @@ def test_verify_email_rejects_an_invalid_token(client):
     assert "invalid or has expired" in response.text
 
 
-def test_verify_email_token_is_single_use(client, _fake_resend_client):
+def test_verify_email_token_is_single_use(client, db_session, _fake_resend_client):
+    db_session.add(BetaInvite(email="single-use@example.com"))
+    db_session.flush()
     client.post("/api/auth/register", json={"email": "single-use@example.com", "password": "a-real-password-123"})
     token = _extract_token(_fake_resend_client.sent, "http://localhost:5173/verify-email")
 

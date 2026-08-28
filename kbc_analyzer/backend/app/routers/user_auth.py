@@ -303,7 +303,21 @@ def google_callback(
     if user is None:
         existing = crud.get_user_by_email(db, email)
         if existing is None:
+            # S8-06: closed beta — a first-time Google sign-in is a new
+            # account exactly like /register, so it needs the same gate.
+            # Without this, "Sign in with Google" would be a standing
+            # bypass of the whole invite mechanism for any address never
+            # seen before.
+            invite = crud.get_unused_beta_invite_by_email(db, email)
+            if invite is None:
+                return _clear_oauth_cookies(
+                    RedirectResponse(
+                        f"{_frontend_origin()}/login?error=beta_invite_required",
+                        status_code=HTTP_303_SEE_OTHER,
+                    )
+                )
             user = crud.create_user_from_google(db, google_id, email, display_name)
+            crud.mark_beta_invite_used(db, invite, user)
         else:
             # An account with this email already exists and has no
             # google_id linked yet. Before S6-07 finding 1, this branch
@@ -360,12 +374,25 @@ def register(request: Request, body: RegisterRequest, response: Response, db: Se
         # (a standard, expected behavior every sign-up form has).
         raise HTTPException(status_code=400, detail="An account with that email already exists.")
 
+    # S8-06: closed beta — checked after the duplicate-account check above
+    # (an already-registered email that reused its now-consumed invite
+    # should still get "account already exists," not a confusing "not
+    # invited" error) and before password validation, so an uninvited
+    # attempt never even reaches the create step.
+    invite = crud.get_unused_beta_invite_by_email(db, body.email)
+    if invite is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Mymble is currently invite-only. Ask for an invite if you don't have one yet.",
+        )
+
     try:
         validate_password_strength(body.password)
     except PasswordTooWeakError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     user = crud.create_user_from_password(db, body.email, hash_password(body.password))
+    crud.mark_beta_invite_used(db, invite, user)
     _send_verification_email(user)
     session_id = create_session(user.id)
     set_session_cookie(response, session_id)

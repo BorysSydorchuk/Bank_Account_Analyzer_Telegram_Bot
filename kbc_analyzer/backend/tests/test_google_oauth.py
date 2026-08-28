@@ -9,7 +9,7 @@ import pytest
 
 from app import crud
 from app.auth.session import SESSION_COOKIE_NAME, get_session
-from app.models import User
+from app.models import BetaInvite, User
 
 
 def _fake_google_profile(monkeypatch, *, google_id: str, email: str, name: str = "Test User"):
@@ -46,6 +46,8 @@ def _complete_google_sign_in(client, monkeypatch, *, google_id: str, email: str)
 
 
 def test_new_google_sign_in_creates_a_user_and_session(client, db_session, monkeypatch):
+    db_session.add(BetaInvite(email="newuser@example.com"))
+    db_session.flush()
     response = _complete_google_sign_in(client, monkeypatch, google_id="google-sub-new", email="newuser@example.com")
 
     assert response.status_code == 303
@@ -241,6 +243,8 @@ def test_link_google_id_directly_succeeds_for_a_genuinely_new_link(db_session):
 
 
 def test_returning_google_user_reuses_their_existing_row(client, db_session, monkeypatch):
+    db_session.add(BetaInvite(email="repeat@example.com"))
+    db_session.flush()
     first = _complete_google_sign_in(client, monkeypatch, google_id="google-sub-repeat", email="repeat@example.com")
     first_user_id = get_session(first.cookies[SESSION_COOKIE_NAME])
 
@@ -249,6 +253,21 @@ def test_returning_google_user_reuses_their_existing_row(client, db_session, mon
 
     assert first_user_id == second_user_id
     assert db_session.query(User).filter(User.google_id == "google-sub-repeat").count() == 1
+
+
+def test_new_google_sign_in_without_an_invite_is_rejected(client, db_session, monkeypatch):
+    """S8-06: a first-time Google sign-in is a new-account path exactly
+    like /register, so it needs the same closed-beta gate — without this
+    check, "Sign in with Google" would be a standing bypass of the whole
+    invite mechanism for any address never seen before."""
+    response = _complete_google_sign_in(
+        client, monkeypatch, google_id="google-sub-uninvited", email="uninvited@example.com"
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "http://localhost:5173/login?error=beta_invite_required"
+    assert SESSION_COOKIE_NAME not in response.cookies
+    assert db_session.query(User).filter(User.email == "uninvited@example.com").one_or_none() is None
 
 
 def test_callback_with_wrong_state_rejects_without_creating_a_session(client, monkeypatch):

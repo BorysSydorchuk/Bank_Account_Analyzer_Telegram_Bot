@@ -6,7 +6,7 @@ import pytest
 
 from app import crud
 from app.auth.session import SESSION_COOKIE_NAME, create_session, get_session
-from app.models import User
+from app.models import BetaInvite, User
 from app.rate_limit import limiter
 
 
@@ -24,7 +24,17 @@ def _reset_rate_limiter():
     yield
 
 
+def _invite(db_session, email: str) -> None:
+    """S8-06: register now requires an unused beta invite. Every test
+    below that exercises a real /api/auth/register call needs one seeded
+    first — this stays a plain helper, not a fixture, so each test's
+    invited email is visible right at its own call site."""
+    db_session.add(BetaInvite(email=email.lower()))
+    db_session.flush()
+
+
 def test_register_creates_user_and_session(client, db_session):
+    _invite(db_session, "newuser@example.com")
     response = client.post("/api/auth/register", json={"email": "newuser@example.com", "password": "correct-horse"})
 
     assert response.status_code == 201
@@ -48,14 +58,44 @@ def test_register_rejects_duplicate_email(client, db_session):
 
 
 @pytest.mark.parametrize("password", ["short", "1234567"])
-def test_register_rejects_a_password_under_the_minimum_length(client, password):
+def test_register_rejects_a_password_under_the_minimum_length(client, db_session, password):
+    _invite(db_session, "weak@example.com")
     response = client.post("/api/auth/register", json={"email": "weak@example.com", "password": password})
 
     assert response.status_code == 400
     assert "8 characters" in response.json()["detail"]
 
 
+def test_register_rejects_an_uninvited_email(client, db_session):
+    response = client.post(
+        "/api/auth/register", json={"email": "never-invited@example.com", "password": "correct-horse-battery"}
+    )
+
+    assert response.status_code == 403
+    assert "invite-only" in response.json()["detail"]
+    assert SESSION_COOKIE_NAME not in response.cookies
+    assert db_session.query(User).filter(User.email == "never-invited@example.com").one_or_none() is None
+
+
+def test_register_consumes_the_invite_so_it_cannot_be_reused(client, db_session):
+    _invite(db_session, "onetime@example.com")
+
+    first = client.post("/api/auth/register", json={"email": "onetime@example.com", "password": "correct-horse-1"})
+    assert first.status_code == 201
+
+    # Deleting the account (simulating a fresh signup attempt against the
+    # same, already-consumed invite) rather than reusing the same email
+    # while it's taken — isolates "was the invite itself burned" from the
+    # already-covered duplicate-email case above.
+    db_session.query(User).filter(User.email == "onetime@example.com").delete()
+    db_session.flush()
+
+    second = client.post("/api/auth/register", json={"email": "onetime@example.com", "password": "correct-horse-2"})
+    assert second.status_code == 403
+
+
 def test_register_and_login_round_trip(client, db_session):
+    _invite(db_session, "roundtrip@example.com")
     register_response = client.post(
         "/api/auth/register", json={"email": "roundtrip@example.com", "password": "correct-horse-battery"}
     )
@@ -73,6 +113,7 @@ def test_register_and_login_round_trip(client, db_session):
 
 
 def test_login_fails_with_wrong_password(client, db_session):
+    _invite(db_session, "realaccount@example.com")
     client.post("/api/auth/register", json={"email": "realaccount@example.com", "password": "the-real-password"})
 
     response = client.post("/api/auth/login", json={"email": "realaccount@example.com", "password": "wrong-guess"})
@@ -129,6 +170,7 @@ def test_set_password_lets_a_google_only_account_add_password_sign_in(client, db
 
 
 def test_login_rate_limit_returns_429_after_too_many_attempts(client, db_session):
+    _invite(db_session, "ratelimited@example.com")
     client.post("/api/auth/register", json={"email": "ratelimited@example.com", "password": "the-real-password"})
 
     responses = [

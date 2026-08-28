@@ -51,6 +51,21 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class BetaInvite(Base):
+    __tablename__ = "beta_invites"
+    # S8-06: closed-beta gate. email is always stored lowercased (see
+    # crud.py's beta-invite helpers) — deliberately not relying on the
+    # same case-sensitive matching users.email has, since that gap is
+    # exactly what produced two accounts for one real person during this
+    # ticket's own pre-check (docs/verification_debt.md).
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    email = Column(Text, nullable=False, unique=True)
+    invited_at = Column(DateTime(timezone=True), server_default=func.now())
+    used_at = Column(DateTime(timezone=True))
+    used_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
     # Declared here too (not just in the migration) so `alembic revision

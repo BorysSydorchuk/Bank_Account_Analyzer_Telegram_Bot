@@ -30,6 +30,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   // session.
   google_email_already_registered:
     "An account with this email already exists. Log in with your password, then connect Google from Settings.",
+  // S8-06: a first-time Google sign-in is a new-account path exactly
+  // like /register, so it's gated by the same closed-beta invite check.
+  beta_invite_required: "Mymble is currently invite-only. Ask for an invite if you don't have one yet.",
 }
 
 const INPUT_CLASSES =
