@@ -799,10 +799,14 @@ immediately, no further deploy action needed. Both services confirmed
 `https://mymble.be/` returns 200.
 
 **Real end-to-end proof, not just a test send:** a genuinely new,
-never-before-seen address (`liyaberry27@gmail.com`) completed real
-registration and real email verification against production — direct
-database query confirms `email_verified: true`, registered
-2026-08-28 11:40:35. This is the actual condition S8-05 existed to
+never-before-seen address (`lifeliyaberry27@gmail.com` — distinct from
+`liyaberry27@gmail.com`, the address SES had blocked; that row was
+never deleted, still sits `email_verified: false` from the original
+SES-era attempt, corrected 2026-08-28 during S8-06's pre-check)
+completed real registration and real email verification against
+production — direct database query confirms `email_verified: true`,
+registered 2026-08-28 11:40:35. This is the actual condition S8-05
+existed to
 satisfy: a real stranger, not `boris.sydorchuk@gmail.com` or any
 other pre-verified address, receiving and using a real verification
 email.
@@ -847,7 +851,7 @@ one).
 **Closes `docs/verification_debt.md`'s email verification and
 password reset entries.** Both were OPEN pending real
 transactional-email delivery to a genuine stranger; that proof now
-exists (`liyaberry27@gmail.com`, above).
+exists (`lifeliyaberry27@gmail.com`, above).
 
 ## Database Tables
 

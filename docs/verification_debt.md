@@ -325,15 +325,20 @@ create it early rather than tracking by memory").
   was built and proven at the API level since S7-09; SES sandbox mode
   (see the entry above) blocked any real recipient other than
   pre-verified test identities from ever completing the round-trip.
-- **How it actually closed:** not via SES at all — once `mymble.be`
-  was verified on Resend and deployed to production,
-  `liyaberry27@gmail.com`'s existing unverified row
-  (`email_verified: false`, from the earlier SES-blocked attempt) was
-  deleted so the same address could register fresh. That real
-  registration went through Resend for real: direct database query
-  confirms `email_verified: true`, `created_at: 2026-08-28 11:40:35` —
-  a genuinely new registration, real send, real receipt, real click,
-  not a re-check of stale state.
+- **How it actually closed:** not via SES at all, and not by deleting
+  and re-registering the same address — **correction (found during
+  S8-06's pre-check, 2026-08-28): a direct database query shows two
+  separate rows, not one.** `liyaberry27@gmail.com` still exists
+  exactly as it did during the SES-blocked attempt
+  (`email_verified: false`, `created_at: 2026-08-27 22:00:23`,
+  untouched since) — it was never deleted, contrary to what this entry
+  originally said. The real Resend proof used a genuinely different
+  address, `lifeliyaberry27@gmail.com`: `email_verified: true`,
+  `created_at: 2026-08-28 11:40:35`. Once `mymble.be` was verified on
+  Resend and deployed to production, that address completed a real,
+  first-time registration through Resend — real send, real receipt,
+  real click, not a re-check of stale state, and not the same address
+  as the one SES had blocked.
 - **Status:** CLOSED. The proof this entry existed to get — a real
   stranger receiving and using a real verification email — now
   exists, via a different provider than originally planned but

@@ -254,13 +254,19 @@ committed but never applied, causing the web service to stick
 profile, service self-healed immediately. Both services confirmed
 `rolloutState: COMPLETED`, ALB healthy, `https://mymble.be/` returns 200.
 
-**Real end-to-end proof:** `liyaberry27@gmail.com`'s stale unverified row
-(from the earlier SES-blocked attempt) was deleted so the address could
-register fresh. That registration completed for real through Resend:
-direct database query confirms `email_verified: true`,
+**Real end-to-end proof:** **correction (found during S8-06's
+pre-check, 2026-08-28): the original write-up here was wrong.**
+`liyaberry27@gmail.com`'s row was never deleted — a direct database
+query shows it still exists exactly as it did during the SES-blocked
+attempt (`email_verified: false`, `created_at: 2026-08-27 22:00:23`,
+untouched). The real proof used a genuinely different address,
+`lifeliyaberry27@gmail.com`, registering for the first time through
+Resend: direct database query confirms `email_verified: true`,
 `created_at: 2026-08-28 11:40:35` — a genuinely new stranger completing
 real registration and real email verification against production, the
-exact proof this ticket's acceptance criteria required.
+exact proof this ticket's acceptance criteria required (just via a
+different address than originally recorded, not via the deletion
+narrative this entry used to describe).
 
 **ACCEPTANCE CRITERIA — final status:**
 - Root cause confirmed with real evidence — YES (CloudWatch traceback,
@@ -276,7 +282,7 @@ exact proof this ticket's acceptance criteria required.
   resolved, not deferred
 - A genuinely new, never-verified address completes real registration
   and receives a real verification email — YES,
-  `liyaberry27@gmail.com`, 2026-08-28 11:40:35
+  `lifeliyaberry27@gmail.com`, 2026-08-28 11:40:35
 
 `docs/verification_debt.md`'s SES entry and the "real received-email
 confirmation for email verification" entry are both closed in this same
