@@ -133,3 +133,12 @@ Do not start S8-06 (Beta Invite Mechanism) until this is either
 resolved, or a contingency is confirmed sufficient to unblock real
 beta registration some other way — status remains blocked on Borys's
 decision.
+
+--- ESCALATION OUTCOME (2026-08-28) ---
+
+Presented the AWS-console-vs-switch-provider choice directly. Borys's
+call: he checks the AWS Support Center console himself (case
+`178778410400368`) — the one channel this environment structurally
+cannot reach. Paused here pending his real findings; not proceeding
+with a provider switch investigation unless the console shows the
+case genuinely can't be resolved through AWS.
