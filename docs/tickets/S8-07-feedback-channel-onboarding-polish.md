@@ -99,10 +99,14 @@ ticket's instruction not to rebuild scaffolding for this.
    Full root-cause narrowing and fix in `docs/verification_debt.md`'s
    CLOSED entry (same day). Fixed by replacing `useMutation` with plain
    `useState`/`useEffect` async state in `VerifyEmailPage.tsx`.
-2. **FIXED — inconsistent product name.** Sidebar and the mobile-
-   fallback screen both still said "KBC Analyzer" while every auth page
-   already said "Mymble" (`Sidebar.tsx`, `App.tsx`). Both now say
-   "Mymble."
+2. **FIXED — inconsistent product name.** Three in-repo instances still
+   said "KBC Analyzer" while every auth page already said "Mymble":
+   the sidebar and the mobile-fallback screen (`Sidebar.tsx`, `App.tsx`)
+   — both found by the real browser walkthrough — and the FastAPI app
+   title (`main.py`, `FastAPI(title=...)`), which renders on the public,
+   unauthenticated `/docs` page at `https://mymble.be/docs` but isn't
+   reachable by clicking through the actual app, so the walkthrough
+   missed it — caught in review instead. All three now say "Mymble".
 3. **DEFERRED — Enable Banking's real consent screen says "KBC Personal
    Tracker."** A third stale product name, on an external page this
    repo doesn't control (Enable Banking's own developer portal). Ledger

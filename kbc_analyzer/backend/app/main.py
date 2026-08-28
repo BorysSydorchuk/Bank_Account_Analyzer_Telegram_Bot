@@ -46,7 +46,7 @@ from .sync_lock import SyncAlreadyRunningError
 # safe to leave on in production.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
-app = FastAPI(title="KBC Analyzer API")
+app = FastAPI(title="Mymble API")
 app.state.limiter = limiter
 
 # The Vite dev server runs on a different origin (port) than the API, so the

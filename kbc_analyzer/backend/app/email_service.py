@@ -58,6 +58,7 @@ def _render_password_reset(link: str) -> tuple[str, str, str]:
 
 
 def _render_feedback(sender_email: str, message: str) -> tuple[str, str, str]:
+    """Render the feedback email Borys receives from a beta tester's message."""
     # message is a beta tester's own free-text input (schemas.FeedbackRequest)
     # landing in the html body of a real email — html.escape() so a message
     # containing "<" or "&" renders as literal text in Borys's inbox instead
