@@ -1,4 +1,8 @@
-Status: in-progress
+Status: done (status header corrected S8-08 sprint close — this
+ticket's real work was completed and confirmed with real evidence on
+2026-08-27, but the header was never updated from in-progress; the
+ticket's own named caveat, real ING transaction data being
+unverified, closed separately via S8-08 — see docs/verification_debt.md)
 
 ================================================================
 TICKET S8-02 — ING Live Connection & Per-Institution Handling

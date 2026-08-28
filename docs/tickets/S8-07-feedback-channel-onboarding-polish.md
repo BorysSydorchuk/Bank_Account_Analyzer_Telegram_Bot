@@ -1,4 +1,5 @@
-Status: in-progress
+Status: done — Borys confirmed real receipt of the test feedback
+email 2026-08-29, closing the one item this ticket was held open for
 
 ================================================================
 TICKET S8-07 — Feedback Channel & Onboarding Polish

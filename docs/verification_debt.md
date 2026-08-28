@@ -63,10 +63,11 @@ create it early rather than tracking by memory").
 - **What would close it:** Borys logs into the Enable Banking developer
   portal and renames the registered application from "KBC Personal
   Tracker" to "Mymble" (or whatever name he prefers now).
-- **Status (2026-08-28, found during S8-07):** OPEN. Cosmetic — doesn't
-  block or break the bank-connection flow — but real: a fresh user sees
-  three different product names across one onboarding session until this
-  closes. No ticket number assigned yet.
+- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN,
+  unchanged — still needs Borys's own Enable Banking developer portal
+  login, which this environment has never had. Cosmetic — doesn't block
+  or break the bank-connection flow — but real. No ticket number
+  assigned yet.
 
 ### `users.email` case sensitivity — not enforced or normalized (found S8-06)
 
@@ -97,52 +98,12 @@ create it early rather than tracking by memory").
   functional index) without altering stored casing. Either approach
   needs a real test proving two differently-cased submissions of the
   same address are treated as one account.
-- **Status (2026-08-28, found during S8-06):** OPEN. No ticket number
+- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN,
+  unchanged — no one picked this up this sprint. No ticket number
   assigned yet. Non-blocking for the current closed-beta sprint (10-20
   manually-granted people, low collision odds) but real — this exact
   bug already produced a duplicate-account incident, not a
   hypothetical one.
-
-### Real ING transaction-data verification — no data available from this test account (S8-02, narrowed S8-03)
-
-- **What was deferred:** verifying the categorization/sync/insights
-  pipeline against real ING transaction data, per-institution
-  data-shape handling (description formats, currency, dates), and
-  `transactions.account_id`'s ability to disambiguate KBC-sourced from
-  ING-sourced rows with two live, real datasets.
-  **Narrowed by S8-03 (2026-08-28):** the `external_id` collision
-  question this entry originally also covered is now separately
-  resolved — S8-03 verified the core `UNIQUE (user_id, external_id)`
-  mechanism for real using two distinct real KBC accounts (Enable
-  Banking's collision risk is scoped per-account, not
-  per-institution, so this is the same mechanism a KBC+ING test would
-  exercise). Zero collisions found across 343 real transactions
-  (ARCHITECTURE.md's Invariants section). What remains open here is
-  narrower: categorization/data-shape verification against real ING
-  content, and the specifically cross-institution (KBC+ING) variant of
-  the collision test — not the collision mechanism itself, which no
-  longer needs ING data to be considered verified.
-- **Why:** the real ING connection made on `boris.sydorchuk@gmail.com`
-  is genuinely valid — Enable Banking's own `GET /sessions/{id}`
-  confirms `"status": "AUTHORIZED"` — but reports zero linked accounts
-  (`"accounts": []`), both before and after reconnecting with explicit
-  account selection at ING's own consent screen. Borys reports this
-  real ING account had real transactions roughly six months ago,
-  which argues against simple account dormancy as the explanation.
-  The actual cause is unresolved as of this entry — not confirmed to
-  be an Enable Banking/ING quirk, not confirmed to be something this
-  app's code could fix, genuinely unknown. With zero accounts, there
-  is no real ING transaction data to verify any of the above against.
-- **What would close it:** Borys connects a different, actively-used
-  real ING account (his own or someone else's, with consent) in a
-  later ticket and a real sync is run against it — his explicit call,
-  not fixed here by forcing a synthetic pass.
-- **Status (re-confirmed 2026-08-28, S8-03):** OPEN, narrowed — the
-  collision-risk portion this entry used to cover is closed (see
-  ARCHITECTURE.md's Invariants section); what's left is
-  categorization/data-shape verification against real ING content and
-  the cross-institution collision variant specifically. Closes
-  whenever that real test happens, ticket number not yet assigned.
 
 ### AWS account credit balance and expiration — not visible via CLI (S7-10)
 
@@ -168,9 +129,10 @@ create it early rather than tracking by memory").
   budget notification at 100% may fire close to when the credit itself
   runs out, worth knowing in advance rather than discovering via a
   billing surprise.
-- **Status (2026-08-27, S7-10):** OPEN — non-blocking (net spend is
-  currently $0, nothing is at risk today); closes once Borys reports the
-  credit balance/expiration from the Billing Console.
+- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN,
+  unchanged — non-blocking (net spend is currently $0, nothing is at
+  risk today); closes once Borys reports the credit balance/expiration
+  from the Billing Console.
 
 
 ### GOOGLE_CLIENT_SECRET rotation — AWS-side confirmed, Google Console side not independently verifiable from this environment (S7-05)
@@ -191,11 +153,11 @@ create it early rather than tracking by memory").
 - **What would close it:** Borys confirms in Console that the secret
   currently in Secrets Manager corresponds to a freshly-generated value
   (not the exposed one), or regenerates it now if it doesn't.
-- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN — still
+- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN — still
   no Google Cloud Console API/CLI access exists in this environment;
-  nothing about this changed since S7-05. Carried forward into Sprint 8.
-  Closes on Borys's one-line confirmation (or a fresh rotation if the
-  confirmation comes back negative).
+  nothing about this changed since S7-05/S7-10. Carried forward into
+  Sprint 9. Closes on Borys's one-line confirmation (or a fresh rotation
+  if the confirmation comes back negative).
 
 ### Date-range validation regression tests — not built (S5-07)
 
@@ -213,7 +175,7 @@ create it early rather than tracking by memory").
   most naturally alongside `test_error_contracts.py` or a new
   `test_date_range.py` — each just needs a live TestClient call with a
   backwards or >365-day range and an assertion on the 400 body.
-- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN — content
+- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN — content
   unchanged since S6-08; no target session assigned yet, still belongs to
   the Tester's S5-04 follow-on work, same as the sync-lock entry below.
 
@@ -252,7 +214,7 @@ create it early rather than tracking by memory").
   also assert `sync_lock.get_holder()` is `None` after the run, not just
   that `job_store` reports `status: "failed"`. This is Tester-agent scope
   (S5-04's follow-on suite), not something to build here.
-- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN — content
+- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN — content
   unchanged since S6-08; no target session assigned yet, still belongs to
   the Tester's S5-04 follow-on work.
 
@@ -280,7 +242,7 @@ create it early rather than tracking by memory").
   banner, one asserting a stalled poll still times out on identical
   payloads, one asserting the api client surfaces an error message from
   either JSON shape.
-- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN —
+- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN —
   `kbc_analyzer/frontend/package.json` still has no `test` script and no
   vitest/jest dependency; nothing has changed since S5-04. Flagged to PM
   for a frontend-test-infrastructure ticket; no target sprint assigned yet.
@@ -307,14 +269,59 @@ create it early rather than tracking by memory").
   `infra/vpc.tf` for a self-managed NAT instance (EC2 t4g.nano/micro with
   IP forwarding + a route table update), and document the swap's own
   downtime/rollback plan before doing it on a live system.
-- **Status (re-confirmed 2026-08-27, S7-10 sprint close):** OPEN —
-  production has been live since S7-04 (2026-08-26), roughly one day as
-  of this close, nowhere near the 4-week stability bar. Closure condition
-  still makes sense as written — revisit again at the next sprint close.
+- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN —
+  production has been live since S7-04 (2026-08-26), 3 days as of this
+  close, nowhere near the 4-week stability bar. Closure condition still
+  makes sense as written — revisit again at the next sprint close.
 
 ---
 
 ## CLOSED (recent)
+
+### Real ING transaction-data verification — closed with real data (S8-02, narrowed S8-03, closed S8-08)
+
+- **What was deferred:** verifying the categorization/sync/insights
+  pipeline against real ING transaction data, and the cross-institution
+  (KBC+ING) variant of the `external_id` collision test — see history
+  below.
+- **Why it stayed open through S8-03:** the real ING connection on
+  `boris.sydorchuk@gmail.com` was genuinely valid (Enable Banking's own
+  `GET /sessions/{id}` confirmed `"status": "AUTHORIZED"`) but reported
+  zero linked accounts (`"accounts": []"`), both before and after
+  reconnecting with explicit account selection at ING's own consent
+  screen, cause unresolved at the time.
+- **How it actually closed (2026-08-29 — S8-08 sprint close):** the
+  same real ING connection now reports real linked accounts — a real
+  sync run during this sprint-close regression pulled transactions from
+  6 real account UIDs beyond the two already-verified real KBC
+  accounts, for a combined 425 real transactions across both
+  institutions. **Zero `external_id` collisions**: 425 total rows, 425
+  distinct `external_id` values, confirmed via direct database query —
+  the cross-institution variant of the collision test this entry was
+  waiting on. Categorization and insight generation both ran
+  successfully against the full mixed dataset in the same sync.
+  Cause of the earlier "zero accounts" state still isn't confirmed (not
+  reproduced, not investigated further, no longer blocking) — Enable
+  Banking's own account list for this session may simply have changed
+  since S8-02/S8-03, or the earlier zero-accounts response may have
+  been transient. Not treated as urgent to root-cause now that real
+  data flows correctly.
+- **Real gap found alongside this, not blocking:** the `enable_banking_sessions`
+  row's stored `account_uids_encrypted` snapshot for this ING
+  connection still decrypts to an empty list, even though the sync
+  above demonstrably fetched from 6 real ING accounts — the stored
+  snapshot appears to be a stale, write-once value from initial
+  connection rather than something refreshed per sync. Transactions are
+  fetched correctly regardless (the sync path doesn't appear to depend
+  on this stored value being current), so this is cosmetic/informational
+  drift, not a functional bug — flagged here rather than a separate
+  entry since it surfaced as a side effect of closing this one, not
+  independently investigated. Worth a look in a future ticket if anyone
+  is ever confused by `account_uids_encrypted` not matching reality.
+- **Status:** CLOSED (S8-08, 2026-08-29). Real ING data now exists and
+  both open questions this entry tracked (categorization/data-shape
+  handling, cross-institution collision) are answered with real
+  evidence from a real sync.
 
 ### `VerifyEmailPage` hung forever on a real, successful verification (found and closed same-day, S8-07)
 

@@ -1003,6 +1003,44 @@ S6-06) is the complete, code-verified inventory this closed out.
 `insights` delete-and-replace is a deliberate decision (S4-04), not an
 oversight — see Invariants below.
 
+## Public Route Enumeration (S8-08)
+
+Every route this API exposes, by auth requirement — compiled by reading
+every router's dependencies directly, not inferred, as part of S8-08's
+sprint-close security spot-check. `get_current_user` requires a valid
+session; `require_verified_email` additionally requires
+`email_verified = true` (S7-09, used for both Enable Banking endpoints
+and `POST /api/transactions/sync` — the two places letting an
+unverified account reach a real bank connection or a real sync would
+matter).
+
+**Genuinely public — no session required:**
+
+| Route | Notes |
+|---|---|
+| `GET /health` | Liveness + DB connectivity check |
+| `POST /api/auth/register` | Gated by `beta_invites`, not auth (S8-06) — can't require a session to create the first one |
+| `POST /api/auth/login` | |
+| `POST /api/auth/logout` | Clears whatever session cookie is present; a no-op if there wasn't one |
+| `GET /api/auth/google/login` | Starts the OAuth redirect |
+| `GET /api/auth/google/callback` | OAuth callback; new-account creation gated by `beta_invites` (S8-06), same as `/register` |
+| `POST /api/auth/verify-email` | Single-use token is the credential, not a session (S7-09) |
+| `POST /api/auth/request-password-reset` | Always the same generic response regardless of whether the email exists (enumeration-avoidance, S6-04/S7-09) |
+| `POST /api/auth/reset-password` | Single-use token is the credential |
+
+**Authenticated (`get_current_user`) — every other route**, spanning
+`budgets.py`, `categories.py`, `chat.py`, `feedback.py`, `insights.py`,
+`jobs.py`, `settings.py`, `statistics.py`, and the rest of
+`transactions.py`/`user_auth.py` (`/me`, `/set-password`,
+`/google/link`). All scoped to `current_user.id` per S6-06's full
+sweep — see Invariants below for the IDOR-shaped guarantee this
+implies and S8-08's live re-confirmation of it.
+
+**Authenticated + email-verified (`require_verified_email`)** — the
+narrower gate: `GET/POST /api/auth/enable-banking/status`,
+`/reauthorize`, `/callback` (both the POST body-based and GET
+redirect-based variants), and `POST /api/transactions/sync`.
+
 ## Auth
 
 **S6-01 built the session/cookie infrastructure; S6-03 (Google) and S6-04
@@ -1550,6 +1588,11 @@ data-shape handling, `account_id` disambiguation between two live
 datasets) is deferred, Borys's explicit call** — he'll test with a
 different, actively-used ING account in a later ticket rather than
 force a synthetic pass now. Tracked in `docs/verification_debt.md`.
+**Update, S8-08 (2026-08-29): this same ING connection now reports
+real linked accounts** — see the Invariants section below for the
+real cross-institution sync that closed this out. Cause of the
+zero-accounts state above was never root-caused, just superseded by
+reality.
 
 **Deliberately not built this ticket, S8-03's job:**
 `transactions`' `UNIQUE (user_id, external_id)` dedup key still isn't
@@ -1617,12 +1660,18 @@ evidence for this real dataset, not a mathematical proof the FAQ's
 collision is ever actually observed, same as any external-system
 assumption.
 
-**Cross-institution (KBC+ING) variant of this same test remains
-genuinely open** — the real ING connection has zero linked accounts
-(Enable Banking confirms this itself, cause unresolved, S8-02), so
-there is no real ING data to test a KBC/ING collision against yet.
-Tracked in `docs/verification_debt.md`, not silently assumed covered
-by the two-account result above.
+**Cross-institution (KBC+ING) variant confirmed for real, S8-08
+(2026-08-29).** The real ING connection that reported zero linked
+accounts through S8-02/S8-03 now has real ones — a real sync run
+during the S8-08 sprint-close regression pulled transactions from 6
+real ING account UIDs alongside the two already-verified KBC accounts:
+425 real transactions total, 425 distinct `external_id` values, zero
+collisions, confirmed via direct database query. Categorization and
+insight generation both ran successfully against the full mixed
+dataset in the same sync. Closes `docs/verification_debt.md`'s ING
+entry. Cause of the earlier zero-accounts state was never
+root-caused — not reproduced, not investigated further, no longer
+blocking now that real data flows correctly.
 
 **AI providers** — resolved via `agents/registry.py`, switching in
 Settings changes behavior everywhere at once. `get_provider()` caches one
