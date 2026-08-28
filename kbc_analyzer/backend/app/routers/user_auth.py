@@ -127,14 +127,16 @@ def _send_verification_email(user: User) -> None:
     restriction in effect); the user can be resent a link later even
     though no resend endpoint exists yet (flagged in
     docs/verification_debt.md, not built here — out of this ticket's
-    named scope). Deliberately catches Exception, not just
-    ClientError/BotoCoreError — a real gap found while testing locally:
-    local dev has no AWS_REGION set at all, which raises a bare KeyError
-    from inside email_service.py, not a botocore exception a narrower
-    catch would have covered. This is the one place in the app a broad
-    except is the correct choice, not carelessness: email delivery is a
-    best-effort side effect of registration, never something that should
-    be able to fail the primary action for any reason.
+    named scope). Deliberately catches Exception, not a narrower
+    provider-specific exception type — a real gap found while testing
+    locally, back when this used SES: local dev had no AWS_REGION set at
+    all, which raised a bare KeyError from inside email_service.py, not a
+    botocore exception a narrower catch would have covered. Kept broad
+    after the S8-05 switch to Resend for the same reason: this is the one
+    place in the app a broad except is the correct choice, not
+    carelessness — email delivery is a best-effort side effect of
+    registration, never something that should be able to fail the
+    primary action for any reason, regardless of provider.
     """
     token = create_email_verify_token(user.id)
     link = f"{_frontend_origin()}/verify-email?token={token}"

@@ -87,13 +87,14 @@ os.environ.setdefault("ENABLEBANKING_PRIVATE_KEY_PATH", str(Path(__file__).paren
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
 os.environ.setdefault("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback")
-# SES (S7-08/S7-09): never a real send. app/email_service.py's
-# send_templated_email() reads these directly at call time — the autouse
-# _fake_ses_client fixture (fixtures/fake_ses.py) replaces the boto3
-# client itself, but these still need to be syntactically present so the
-# call doesn't KeyError before ever reaching that fake client.
-os.environ.setdefault("AWS_REGION", "eu-central-1")
-os.environ.setdefault("SES_SENDER_EMAIL", "no-reply@mymble.be")
+# Email (S7-08/S7-09, provider switched to Resend at S8-05): never a real
+# send. app/email_service.py's send_templated_email() reads
+# EMAIL_SENDER_ADDRESS directly at call time — the autouse
+# _fake_resend_client fixture (fixtures/fake_resend.py) replaces
+# resend.Emails.send itself, but this still needs to be syntactically
+# present so the call doesn't KeyError before ever reaching the fake.
+os.environ.setdefault("EMAIL_SENDER_ADDRESS", "no-reply@mymble.be")
+os.environ.setdefault("RESEND_API_KEY", "test-resend-api-key")
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402
@@ -106,7 +107,7 @@ pytest_plugins = [
     "tests.fixtures.factories",
     "tests.fixtures.fake_llm_provider",
     "tests.fixtures.fake_enable_banking",
-    "tests.fixtures.fake_ses",
+    "tests.fixtures.fake_resend",
 ]
 
 

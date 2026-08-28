@@ -48,15 +48,16 @@ resource "aws_ecs_task_definition" "web" {
         { name = "EB_REDIRECT_URL", value = "https://mymble.be/api/auth/enable-banking/callback" },
         { name = "ENABLEBANKING_APP_ID", value = var.enablebanking_app_id },
         { name = "ENABLEBANKING_PRIVATE_KEY_PATH", value = "/tmp/private.pem" },
-        # S7-08: boto3 needs an explicit region for SES calls — not
-        # something this project has relied on ECS auto-injecting
-        # elsewhere, so set it the same way every other config value here
-        # is set, explicitly.
-        { name = "AWS_REGION", value = var.aws_region },
-        { name = "SES_SENDER_EMAIL", value = "no-reply@mymble.be" },
+        { name = "EMAIL_SENDER_ADDRESS", value = "no-reply@mymble.be" },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = data.aws_secretsmanager_secret.database_url.arn },
+        # S8-05: switched email delivery from SES (IAM role auth, zero
+        # stored credentials) to Resend, after SES production access was
+        # denied and the follow-up Support Case went unanswered past its
+        # own stated window (see ARCHITECTURE.md's Auth section). Resend
+        # needs a real API key, unlike SES.
+        { name = "RESEND_API_KEY", valueFrom = data.aws_secretsmanager_secret.resend_api_key.arn },
         { name = "SETTINGS_SECRET", valueFrom = data.aws_secretsmanager_secret.settings_secret.arn },
         { name = "GOOGLE_CLIENT_SECRET", valueFrom = data.aws_secretsmanager_secret.google_client_secret.arn },
         { name = "EB_PRIVATE_KEY_CONTENT", valueFrom = data.aws_secretsmanager_secret.eb_private_key.arn },

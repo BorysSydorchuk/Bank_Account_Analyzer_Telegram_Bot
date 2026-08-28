@@ -1,11 +1,11 @@
 """S7-09 — email verification and password reset, real round trips through
-the actual HTTP routes. The SES client is faked (conftest.py's autouse
-_fake_ses_client), but everything else is real: real token generation
-(auth/tokens.py, real Redis), real template rendering, and the token used
-to complete each flow is extracted from the actual email body the fake
-client recorded — not generated separately in the test, which would only
-prove the test's own token works, not that the real one sent to the user
-does.
+the actual HTTP routes. The email client is faked (conftest.py's autouse
+_fake_resend_client, provider switched to Resend at S8-05), but everything
+else is real: real token generation (auth/tokens.py, real Redis), real
+template rendering, and the token used to complete each flow is extracted
+from the actual email body the fake client recorded — not generated
+separately in the test, which would only prove the test's own token works,
+not that the real one sent to the user does.
 """
 import re
 
@@ -28,11 +28,11 @@ def _reset_rate_limiter():
 
 
 def _extract_token(sent_calls: list[dict], link_prefix: str) -> str:
-    """Pulls the real token out of the real email body the fake SES
+    """Pulls the real token out of the real email body the fake Resend
     client recorded, the same way a real user copying a real link out of
     a real inbox would end up with it."""
     assert len(sent_calls) == 1, f"expected exactly one email sent, got {len(sent_calls)}"
-    text_body = sent_calls[0]["Message"]["Body"]["Text"]["Data"]
+    text_body = sent_calls[0]["text"]
     match = re.search(rf"{re.escape(link_prefix)}\?token=(\S+)", text_body)
     assert match is not None, f"no {link_prefix}?token=... link found in the real email body: {text_body!r}"
     return match.group(1)
@@ -41,14 +41,14 @@ def _extract_token(sent_calls: list[dict], link_prefix: str) -> str:
 # ── Email verification ──────────────────────────────────────────────────────
 
 
-def test_registration_sends_a_verification_email_and_the_real_link_verifies_the_account(client, _fake_ses_client):
+def test_registration_sends_a_verification_email_and_the_real_link_verifies_the_account(client, _fake_resend_client):
     register_response = client.post(
         "/api/auth/register", json={"email": "verify-me@example.com", "password": "a-real-password-123"}
     )
     assert register_response.status_code == 201, register_response.text
     assert register_response.json()["email_verified"] is False
 
-    token = _extract_token(_fake_ses_client.sent, "http://localhost:5173/verify-email")
+    token = _extract_token(_fake_resend_client.sent, "http://localhost:5173/verify-email")
 
     verify_response = client.post("/api/auth/verify-email", json={"token": token})
     assert verify_response.status_code == 204, verify_response.text
@@ -63,9 +63,9 @@ def test_verify_email_rejects_an_invalid_token(client):
     assert "invalid or has expired" in response.text
 
 
-def test_verify_email_token_is_single_use(client, _fake_ses_client):
+def test_verify_email_token_is_single_use(client, _fake_resend_client):
     client.post("/api/auth/register", json={"email": "single-use@example.com", "password": "a-real-password-123"})
-    token = _extract_token(_fake_ses_client.sent, "http://localhost:5173/verify-email")
+    token = _extract_token(_fake_resend_client.sent, "http://localhost:5173/verify-email")
 
     first = client.post("/api/auth/verify-email", json={"token": token})
     assert first.status_code == 204
@@ -85,7 +85,7 @@ def _make_user_with_password(db_session, email: str, password_hash: str) -> User
 
 
 def test_password_reset_sends_a_real_email_and_the_real_link_sets_a_working_new_password(
-    client, db_session, _fake_ses_client
+    client, db_session, _fake_resend_client
 ):
     from app.auth.password import hash_password
 
@@ -95,7 +95,7 @@ def test_password_reset_sends_a_real_email_and_the_real_link_sets_a_working_new_
     assert request_response.status_code == 200
     assert "we've sent a password reset link" in request_response.json()["message"]
 
-    token = _extract_token(_fake_ses_client.sent, "http://localhost:5173/reset-password")
+    token = _extract_token(_fake_resend_client.sent, "http://localhost:5173/reset-password")
 
     reset_response = client.post("/api/auth/reset-password", json={"token": token, "password": "a-brand-new-password-456"})
     assert reset_response.status_code == 204, reset_response.text
@@ -114,7 +114,7 @@ def test_password_reset_sends_a_real_email_and_the_real_link_sets_a_working_new_
 
 
 def test_request_password_reset_returns_the_same_generic_response_whether_or_not_the_email_exists(
-    client, db_session, _fake_ses_client
+    client, db_session, _fake_resend_client
 ):
     """S6-04's own decided shape for this endpoint (verification_debt.md) —
     never lets the response reveal which emails have accounts."""
@@ -127,8 +127,8 @@ def test_request_password_reset_returns_the_same_generic_response_whether_or_not
     assert real_response.json() == fake_response.json()
     # Only the real account actually got an email — the identical response
     # doesn't mean identical side effects, just an identical observable one.
-    assert len(_fake_ses_client.sent) == 1
-    assert _fake_ses_client.sent[0]["Destination"] == {"ToAddresses": ["real-account@example.com"]}
+    assert len(_fake_resend_client.sent) == 1
+    assert _fake_resend_client.sent[0]["to"] == ["real-account@example.com"]
 
 
 def test_reset_password_rejects_an_invalid_token(client):
@@ -137,13 +137,13 @@ def test_reset_password_rejects_an_invalid_token(client):
     assert "invalid or has expired" in response.text
 
 
-def test_reset_password_validates_strength_before_consuming_the_token(client, db_session, _fake_ses_client):
+def test_reset_password_validates_strength_before_consuming_the_token(client, db_session, _fake_resend_client):
     """A rejected request must never burn a valid, still-usable token —
     same discipline S5-07 already established for sync_lock (validate
     before acquiring)."""
     _make_user_with_password(db_session, "weak-password-test@example.com", "irrelevant-hash")
     client.post("/api/auth/request-password-reset", json={"email": "weak-password-test@example.com"})
-    token = _extract_token(_fake_ses_client.sent, "http://localhost:5173/reset-password")
+    token = _extract_token(_fake_resend_client.sent, "http://localhost:5173/reset-password")
 
     weak_response = client.post("/api/auth/reset-password", json={"token": token, "password": "short"})
     assert weak_response.status_code == 400

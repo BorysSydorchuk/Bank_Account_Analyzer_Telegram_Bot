@@ -76,6 +76,13 @@ data "aws_secretsmanager_secret" "database_url" {
   name = "kbc-analyzer/database-url"
 }
 
+# S8-05: same pattern as the four above — created directly via
+# `aws secretsmanager create-secret`, not Terraform, so the real API key
+# value never touches Terraform state.
+data "aws_secretsmanager_secret" "resend_api_key" {
+  name = "kbc-analyzer/resend-api-key"
+}
+
 resource "aws_iam_role_policy" "ecs_task_execution_read_app_secrets" {
   name = "${var.project_name}-execution-read-app-secrets"
   role = aws_iam_role.ecs_task_execution.id
@@ -91,6 +98,7 @@ resource "aws_iam_role_policy" "ecs_task_execution_read_app_secrets" {
         data.aws_secretsmanager_secret.google_client_secret.arn,
         data.aws_secretsmanager_secret.eb_private_key.arn,
         data.aws_secretsmanager_secret.database_url.arn,
+        data.aws_secretsmanager_secret.resend_api_key.arn,
       ]
     }]
   })
