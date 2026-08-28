@@ -171,6 +171,33 @@ attempt still returns `The mymble.be domain is not verified` as of
 this check. Re-check in a few hours rather than polling every few
 minutes — no reason to believe anything is actually broken.
 
+--- DOMAIN VERIFIED, DEPLOYED, REAL GAP FOUND AND FIXED (2026-08-28) ---
+
+Domain verified on Resend's side within the timeframe its own UI
+stated; confirmed with a real send (not just the dashboard) —
+`resend.Emails.send(...)` returned a real message id
+(`ecee145c-9b4a-4fd1-a9cc-edfbf884d3d7`), delivered to
+`boris.sydorchuk@gmail.com`.
+
+Built and pushed new web/worker images (commit `d74e056`), applied the
+new task definitions, rolled both ECS services. Worker converged
+immediately; **web got stuck `IN_PROGRESS`** — real ECS service events
+showed why: `AccessDeniedException` on
+`secretsmanager:GetSecretValue` for the Resend secret, from the
+`kbc-analyzer-ecs-task-execution` role. Real gap, not anticipated:
+`infra/ecs.tf`'s grant for this secret was written and committed
+earlier in this ticket (alongside creating the secret itself), but
+never actually applied to production — only the *deploy user's* IAM
+changes had been applied via the admin bootstrap pattern; this
+particular resource (the ECS *execution role's* policy) was missed.
+Applied it for real (`aws_iam_role_policy.ecs_task_execution_read_app_secrets`,
+via the admin profile — modifying another role's policy needs
+`iam:PutRolePolicy`, which `kbc-analyzer-deploy` doesn't have) — the
+stuck task self-healed immediately after, no further deploy action
+needed. Both services confirmed `rolloutState: COMPLETED` on the
+correct revisions (`kbc-analyzer-web:12`, `kbc-analyzer-worker:11`),
+ALB target health `healthy`, real `https://mymble.be/` returns 200.
+
 --- CONTINGENCY RESEARCH, real current data (2026-08-28) ---
 
 Researched Postmark, Resend, and SendGrid — real 2026 pricing, domain
