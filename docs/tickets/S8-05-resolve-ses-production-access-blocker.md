@@ -149,3 +149,43 @@ not a new finding changing the diagnosis, just confirmation the wait
 continues. No further escalation trigger has fired yet (that already
 fired once, above); this is Borys reporting back on the escalation, not
 a new stale-ledger cycle.
+
+Flagged plainly: AWS's stated "24-hour response" was never a real
+guaranteed SLA on Basic support (no paid tier means no committed
+response time at all) — the wait has no real end date. Borys's call:
+start real research into the provider-switch contingency now, in
+parallel with the still-open AWS case, rather than wait unbounded.
+
+--- CONTINGENCY RESEARCH, real current data (2026-08-28) ---
+
+Researched Postmark, Resend, and SendGrid — real 2026 pricing, domain
+verification requirements, new-account sending gates, and Python
+integration shape, against this app's actual real usage (two
+transactional email types, <100/day, mymble.be domain,
+`app/email_service.py` currently a direct `boto3` SES v2 call with
+zero stored credentials — IAM role auth).
+
+| | Resend | Postmark | SendGrid |
+|---|---|---|---|
+| Free tier | 3,000/mo, 100/day — covers real stated volume | 100/mo only — too low for real use | Ambiguous in current sources (100/day permanent vs. 60-day trial only, depending on source) |
+| New-account gate | None found for transactional domain-verified sending | Yes — new accounts need approval, ~1 business day | Yes — vetting review, reported up to a few hours |
+| Domain verification | SPF + single DKIM record, often verified within ~15 min | DKIM + Return-Path record, DKIM shown verified within 48h | SPF+DKIM via Domain Authentication, timing not specified |
+| Python integration | Official `resend` SDK — small, clean diff from the current `boto3` call | Official SDK/REST API, token-based | Official `sendgrid` SDK, key-based |
+| Credential model | New: API key needs Secrets Manager storage | Same — API token to store | Same — API key to store |
+
+**Recommendation: Resend**, if a contingency is actually adopted — free
+tier alone covers real stated volume indefinitely, no new-account
+approval gate found (vs. Postmark's ~1 business day and SendGrid's
+hours-long vetting — both real but bounded, unlike AWS's open-ended
+silence), fastest domain verification, cleanest code diff. Real
+tradeoff worth stating plainly: this trades away SES's zero-credential
+IAM-role auth for a real (small) API key that needs storing in Secrets
+Manager and rotating — a new, if minor, secret-management surface this
+app doesn't currently have for email.
+
+Sources checked directly, not assumed: [Resend domain docs](https://resend.com/docs/add-a-domain),
+[Resend Python send docs](https://resend.com/docs/send-with-python),
+[Postmark domain verification](https://postmarkapp.com/support/article/how-do-i-verify-a-domain),
+[Postmark getting started](https://postmarkapp.com/support/article/1002-getting-started-with-postmark),
+[SendGrid account review](https://support.sendgrid.com/hc/en-us/articles/360041790293-Account-Under-Review),
+[SendGrid sender identity](https://www.twilio.com/docs/sendgrid/for-developers/sending-email/sender-identity).
