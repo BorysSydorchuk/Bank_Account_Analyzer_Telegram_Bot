@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { label: "Dashboard", to: "/" },
   { label: "Chat", to: "/chat" },
   { label: "Transactions", to: "/transactions" },
+  { label: "Feedback", to: "/feedback" },
   { label: "Settings", to: "/settings" },
 ]
 
@@ -32,7 +33,7 @@ export function Sidebar({ user }: { user: UserOut }) {
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-card">
       <div className="px-6 py-5">
-        <span className="text-lg font-semibold text-primary">KBC Analyzer</span>
+        <span className="text-lg font-semibold text-primary">Mymble</span>
       </div>
       <nav className="flex flex-1 flex-col gap-1 px-3">
         {NAV_ITEMS.map((item) => (

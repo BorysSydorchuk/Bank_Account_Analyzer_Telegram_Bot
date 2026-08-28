@@ -141,6 +141,13 @@ export function resetPassword(token: string, password: string) {
   })
 }
 
+export function sendFeedback(message: string) {
+  return request<void>("/api/feedback", {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  })
+}
+
 export function getStatistics(dateFrom: string, dateTo: string) {
   const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo })
   return request<StatisticsResponse>(`/api/statistics?${params.toString()}`)

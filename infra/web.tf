@@ -49,6 +49,9 @@ resource "aws_ecs_task_definition" "web" {
         { name = "ENABLEBANKING_APP_ID", value = var.enablebanking_app_id },
         { name = "ENABLEBANKING_PRIVATE_KEY_PATH", value = "/tmp/private.pem" },
         { name = "EMAIL_SENDER_ADDRESS", value = "no-reply@mymble.be" },
+        # S8-07: feedback form's recipient. Plain value, not a secret —
+        # same reasoning as EMAIL_SENDER_ADDRESS above, just an address.
+        { name = "FEEDBACK_RECIPIENT_EMAIL", value = "boris.sydorchuk@gmail.com" },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = data.aws_secretsmanager_secret.database_url.arn },

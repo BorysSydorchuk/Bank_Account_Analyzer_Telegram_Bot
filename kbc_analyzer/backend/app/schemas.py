@@ -386,6 +386,13 @@ class ResetPasswordRequest(BaseModel):
     password: str = Field(max_length=128)
 
 
+class FeedbackRequest(BaseModel):
+    # 5000 chars is generous for a beta-tester bug report while still
+    # bounding what ends up in a single email — matches the password
+    # fields' pattern of an explicit cap rather than an unbounded str.
+    message: str = Field(min_length=1, max_length=5000)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

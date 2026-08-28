@@ -95,6 +95,9 @@ os.environ.setdefault("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/goo
 # present so the call doesn't KeyError before ever reaching the fake.
 os.environ.setdefault("EMAIL_SENDER_ADDRESS", "no-reply@mymble.be")
 os.environ.setdefault("RESEND_API_KEY", "test-resend-api-key")
+# S8-07: routers/feedback.py reads this directly at call time, same
+# syntactically-present-for-the-fake reasoning as the two above.
+os.environ.setdefault("FEEDBACK_RECIPIENT_EMAIL", "borys-test@example.com")
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402

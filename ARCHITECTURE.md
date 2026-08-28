@@ -908,6 +908,69 @@ so a failed registration attempt never burns a real invite.
 must never be blocked by, or cascade into deleting, their own invite
 history.
 
+## Feedback Channel (S8-07)
+
+`POST /api/feedback` (`routers/feedback.py`), authenticated (`get_current_user`)
+— emails the current user's free-text message to `FEEDBACK_RECIPIENT_EMAIL`
+(Borys's real inbox) via the same Resend infrastructure S7-09/S8-05 already
+built (`email_service.py`'s third template, `feedback`). Chosen over a
+`mailto:` link: Resend was already wired up and battle-tested for this exact
+"send an email from the backend" job, so a fourth line in `_TEMPLATES` plus
+one route was strictly less work than getting a `mailto:` link's behavior
+consistent across every beta tester's OS/mail-client setup, and it doesn't
+depend on the tester having a configured desktop mail client at all — most
+plausible for a web app used from a browser. No database table — this is a
+one-shot notification for 10-20 people, not a persisted-and-triaged support
+queue; the record of the message is Borys's inbox once sent, same "don't
+over-build" reasoning as S8-06's invite CLI over a full admin system.
+
+Unlike `_send_verification_email`/`_send_password_reset_email` (best-effort,
+failure never surfaces to the caller — the account already exists either
+way), a feedback send failing IS the whole outcome of this request: nothing
+else records the message if the send fails. So `send_feedback` returns a
+clean `502` on any exception instead of swallowing it, telling the sender to
+retry rather than believing it went through.
+
+## Onboarding Walkthrough (S8-07)
+
+A real, fresh-eyes walkthrough (browser automation, real local registration
+through the actual invite gate, not a description) of invite → register →
+verify → connect-bank found and fixed two real issues, and found one it
+couldn't fix:
+
+**Fixed — `VerifyEmailPage` hung forever on "Verifying your email…".**
+Clicking a real, valid verification link left the UI stuck indefinitely,
+even though the backend genuinely completed the request (confirmed via
+direct DB query — `email_verified` flipped `true` — and via the backend's
+own access log showing a clean `204`). Isolated by testing each layer
+directly in a live browser console: a raw `fetch()` to the same endpoint
+resolved in ~11ms, and calling `api.ts`'s own `verifyEmail()` resolved in
+~16ms — both fine. Wrapping that identical call in TanStack Query's
+`useMutation().mutate()` inside the page's mount effect never settled:
+no `onSuccess`, no `onError`, ever, across multiple repro attempts in
+fresh, uninstrumented tabs. Root cause not fully identified (a genuine
+interaction between `useMutation` and a fire-once-in-`useEffect` call
+pattern, reproducible but not traced further given this ticket's polish
+scope) — fixed by replacing `useMutation` with plain `useState`/`useEffect`
+async state instead, which resolved cleanly on every retest. This is a
+legitimate simplification regardless of root cause: this action fires
+exactly once per page load with no retry/cache value to gain from
+`useMutation`'s machinery.
+
+**Fixed — inconsistent product name.** The sidebar and the mobile-fallback
+screen both still said "KBC Analyzer" (`components/layout/Sidebar.tsx`,
+`App.tsx`) while every auth page already said "Mymble" (the S7-04 rename).
+Both now say "Mymble."
+
+**Found, not fixed — Enable Banking's consent screen says "KBC Personal
+Tracker."** Clicking "Connect" for KBC redirects to a real
+`tilisy.enablebanking.com` page reading "Authentication is initiated by
+**KBC Personal Tracker**" — a third stale name, on an external page this
+codebase doesn't control. That string lives in the Enable Banking developer
+portal's own app registration, not in any file here — flagged in
+`docs/verification_debt.md`, not fixed in this ticket, since fixing it
+needs Borys's own portal login, not a code change.
+
 ## Database Tables
 
 | Table | Purpose | Key constraints |

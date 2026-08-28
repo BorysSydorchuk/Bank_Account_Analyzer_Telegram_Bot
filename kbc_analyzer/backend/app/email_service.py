@@ -15,10 +15,11 @@ Secrets Manager the same way every other app-level secret here already is
 (GOOGLE_CLIENT_SECRET, the Enable Banking private key) — a genuine tradeoff,
 not free.
 
-Two templates only, matching what S7-09 needs — plain HTML + a text
-fallback, no templating engine dependency for two static strings with one
-substitution each.
+Three templates, matching what S7-09 and S8-07 need — plain HTML + a text
+fallback, no templating engine dependency for three short strings with a
+handful of substitutions each.
 """
+import html
 import os
 
 import resend
@@ -56,12 +57,25 @@ def _render_password_reset(link: str) -> tuple[str, str, str]:
     return subject, html, text
 
 
+def _render_feedback(sender_email: str, message: str) -> tuple[str, str, str]:
+    # message is a beta tester's own free-text input (schemas.FeedbackRequest)
+    # landing in the html body of a real email — html.escape() so a message
+    # containing "<" or "&" renders as literal text in Borys's inbox instead
+    # of being interpreted as markup by his mail client.
+    subject = f"Mymble feedback from {sender_email}"
+    escaped_message = html.escape(message)
+    html_body = f"<p><strong>From:</strong> {html.escape(sender_email)}</p><p>{escaped_message}</p>"
+    text_body = f"From: {sender_email}\n\n{message}"
+    return subject, html_body, text_body
+
+
 # S7-09 will add real token-generation call sites; this map is the whole
 # "template registry" — deliberately not a class hierarchy or a file-based
 # template loader for two entries.
 _TEMPLATES = {
     "verify_email": _render_verify_email,
     "password_reset": _render_password_reset,
+    "feedback": _render_feedback,
 }
 
 

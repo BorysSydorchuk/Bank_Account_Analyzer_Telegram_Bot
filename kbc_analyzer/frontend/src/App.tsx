@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar"
 import { useCurrentUser } from "@/hooks/useCurrentUser"
 import { ChatPage } from "@/pages/ChatPage"
 import { DashboardPage } from "@/pages/DashboardPage"
+import { FeedbackPage } from "@/pages/FeedbackPage"
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage"
 import { LoginPage } from "@/pages/LoginPage"
 import { RegisterPage } from "@/pages/RegisterPage"
@@ -50,8 +51,8 @@ function AppShell() {
       <div className="flex h-screen items-center justify-center bg-background p-6 text-center lg:hidden">
         <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-border bg-card p-8 shadow-sm">
           <Monitor className="size-8 text-primary" />
-          <span className="text-lg font-semibold text-primary">KBC Analyzer</span>
-          <p className="text-sm text-text-secondary">KBC Analyzer is best viewed on a larger screen.</p>
+          <span className="text-lg font-semibold text-primary">Mymble</span>
+          <p className="text-sm text-text-secondary">Mymble is best viewed on a larger screen.</p>
         </div>
       </div>
     </>
@@ -71,6 +72,7 @@ function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/transactions" element={<TransactionsPage />} />
+          <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>

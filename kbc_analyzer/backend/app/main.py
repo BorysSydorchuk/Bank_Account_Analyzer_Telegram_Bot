@@ -25,6 +25,7 @@ from .routers import (
     budgets,
     categories,
     chat,
+    feedback,
     insights,
     jobs,
     settings,
@@ -76,6 +77,7 @@ app.include_router(jobs.router)
 app.include_router(insights.router)
 app.include_router(budgets.router)
 app.include_router(chat.router)
+app.include_router(feedback.router)
 
 
 # Currently unreachable — S4-02 moved the Enable Banking fetch into the background

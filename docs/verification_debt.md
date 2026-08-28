@@ -46,6 +46,28 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Enable Banking consent screen shows stale app name "KBC Personal Tracker" (found S8-07)
+
+- **What was deferred:** the real Enable Banking authorization page
+  (`tilisy.enablebanking.com`, reached from Settings → Bank Connection →
+  Connect) reads "Authentication is initiated by **KBC Personal Tracker**"
+  — the app's name before the S7-04 rename to Mymble. Confirmed live during
+  S8-07's onboarding walkthrough: clicking "Connect" for KBC and inspecting
+  the real redirected page, not inferred from documentation.
+- **Why deferred:** this string is configured in the Enable Banking
+  developer portal's own application registration — nothing in this
+  repository sets it, so there is no file to edit. S8-07 already fixed the
+  two in-repo instances of the same stale name (`Sidebar.tsx`, `App.tsx`'s
+  mobile-fallback screen, both now say "Mymble") — this is the one
+  remaining instance, and it needs a human with real portal credentials.
+- **What would close it:** Borys logs into the Enable Banking developer
+  portal and renames the registered application from "KBC Personal
+  Tracker" to "Mymble" (or whatever name he prefers now).
+- **Status (2026-08-28, found during S8-07):** OPEN. Cosmetic — doesn't
+  block or break the bank-connection flow — but real: a fresh user sees
+  three different product names across one onboarding session until this
+  closes. No ticket number assigned yet.
+
 ### `users.email` case sensitivity — not enforced or normalized (found S8-06)
 
 - **What was deferred:** `users.email` has no case normalization or
@@ -293,6 +315,39 @@ create it early rather than tracking by memory").
 ---
 
 ## CLOSED (recent)
+
+### `VerifyEmailPage` hung forever on a real, successful verification (found and closed same-day, S8-07)
+
+- **What was found:** during S8-07's real onboarding walkthrough, clicking
+  a real, valid `/verify-email?token=...` link left the page frozen on
+  "Verifying your email…" indefinitely — reproduced repeatedly, including
+  in fresh, uninstrumented browser tabs, ruling out a testing artifact.
+  The backend genuinely completed the request every time (a real `204`
+  in its own access log; `users.email_verified` confirmed `true` via
+  direct database query afterward) — this was a frontend-only bug, not a
+  backend failure the UI was correctly reporting.
+- **Root cause:** narrowed, not fully identified. Isolated layer by layer
+  in a live browser console: a raw `fetch()` to `POST /api/auth/verify-email`
+  resolved in ~11ms; calling `lib/api.ts`'s own `verifyEmail()` directly
+  resolved in ~16ms. Both fine. Wrapping the identical call in TanStack
+  Query's `useMutation().mutate()`, called once from the page's mount
+  effect (the app's existing pattern, guarded by a ref against React
+  Strict Mode's double-invoke), never settled — no `onSuccess`, no
+  `onError`, across every repro attempt. The exact interaction between
+  `useMutation` and a fire-once-on-mount call inside `useEffect` was not
+  traced further than that — this ticket's scope was onboarding polish,
+  not a TanStack Query internals investigation.
+- **How it closed:** replaced `useMutation` with plain `useState`/
+  `useEffect` async state in `VerifyEmailPage.tsx` — resolved cleanly on
+  every retest afterward (real link, real fresh tab, real success state
+  rendered). Defensible as a simplification independent of the exact root
+  cause: this is a fire-exactly-once side effect with no retry/cache
+  value `useMutation` was buying here.
+- **Status:** CLOSED same day. Kept here, not trimmed, because the
+  root-cause narrowing (three isolated layers, two working, one not) is
+  real diagnostic content that would otherwise be lost — worth revisiting
+  if the same "useMutation .mutate() in a mount effect never settles"
+  symptom ever reappears elsewhere in this codebase.
 
 ### SES still in sandbox mode — production access request pending (S7-08, closed 2026-08-28, S8-05)
 
