@@ -258,3 +258,25 @@ resource "aws_iam_user_policy_attachment" "deploy_migration_runner" {
   user       = aws_iam_user.deploy.name
   policy_arn = aws_iam_policy.deploy_migration_runner.arn
 }
+
+# S8-05: DNS write, scoped to exactly the one hosted zone this project
+# owns (mymble.be) — needed for real Resend domain-verification records
+# (infra/resend.tf), following the same "add write only when a real
+# ticket needs it" philosophy as every other grant in this file. Kept
+# separate from deploy_infra_read's read-only route53:Get*/List* — this
+# is the one place that identity can actually change something, not just
+# observe it.
+resource "aws_iam_user_policy" "deploy_dns" {
+  name = "${var.project_name}-deploy-dns"
+  user = aws_iam_user.deploy.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "ChangeMymbleZoneRecords"
+      Effect   = "Allow"
+      Action   = "route53:ChangeResourceRecordSets"
+      Resource = aws_route53_zone.mymble.arn
+    }]
+  })
+}
