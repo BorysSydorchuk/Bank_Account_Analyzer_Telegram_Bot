@@ -156,6 +156,21 @@ response time at all) — the wait has no real end date. Borys's call:
 start real research into the provider-switch contingency now, in
 parallel with the still-open AWS case, rather than wait unbounded.
 
+--- IMPLEMENTATION: DNS live, Resend's own verification pending (2026-08-28) ---
+
+Domain added to Resend (Borys); real DNS records (DKIM TXT, two SPF
+CNAMEs, DMARC TXT — infra/resend.tf) applied to Route53, confirmed
+resolving correctly via a direct public lookup (`8.8.8.8`) immediately
+after apply — independent of Resend's own check. Resend's dashboard
+shows `Checking DNS` → `Verifying domain`, DKIM record status
+`Pending`, with its own UI stating this "may take a few hours
+depending on Amazon Route 53's propagation time" — real Route53
+propagation is not the actual bottleneck here (already confirmed live
+independently); this is Resend's own polling cadence. A real send
+attempt still returns `The mymble.be domain is not verified` as of
+this check. Re-check in a few hours rather than polling every few
+minutes — no reason to believe anything is actually broken.
+
 --- CONTINGENCY RESEARCH, real current data (2026-08-28) ---
 
 Researched Postmark, Resend, and SendGrid — real 2026 pricing, domain
