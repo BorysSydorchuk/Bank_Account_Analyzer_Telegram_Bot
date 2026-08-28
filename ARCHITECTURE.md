@@ -1029,12 +1029,14 @@ matter).
 | `POST /api/auth/reset-password` | Single-use token is the credential |
 
 **Authenticated (`get_current_user`) — every other route**, spanning
-`budgets.py`, `categories.py`, `chat.py`, `feedback.py`, `insights.py`,
-`jobs.py`, `settings.py`, `statistics.py`, and the rest of
-`transactions.py`/`user_auth.py` (`/me`, `/set-password`,
-`/google/link`). All scoped to `current_user.id` per S6-06's full
-sweep — see Invariants below for the IDOR-shaped guarantee this
-implies and S8-08's live re-confirmation of it.
+`analysis.py` (`POST /api/analysis/categorize`,
+`POST /api/analysis/insights`), `budgets.py`, `categories.py`,
+`chat.py`, `feedback.py`, `insights.py`, `jobs.py`, `settings.py`,
+`statistics.py`, and the rest of `transactions.py`/`user_auth.py`
+(`/me`, `/set-password`, `/google/link`). All scoped to
+`current_user.id` per S6-06's full sweep — see Invariants below for
+the IDOR-shaped guarantee this implies and S8-08's live
+re-confirmation of it.
 
 **Authenticated + email-verified (`require_verified_email`)** — the
 narrower gate: `GET/POST /api/auth/enable-banking/status`,

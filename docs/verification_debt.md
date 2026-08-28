@@ -46,6 +46,41 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### `account_uids_encrypted` stale-decryption — stored snapshot doesn't match real account state (found S8-08)
+
+- **What was deferred:** the `enable_banking_sessions` row for
+  `boris.sydorchuk@gmail.com`'s ING connection stores an encrypted
+  `account_uids_encrypted` snapshot that decrypts to an empty list
+  (`[]`) — but a real sync run during S8-08's sprint-close regression
+  demonstrably fetched transactions from 6 real ING account UIDs
+  against this exact connection (425 real transactions total across
+  both institutions, confirmed via direct database query — see
+  `docs/verification_debt.md`'s CLOSED "Real ING transaction-data
+  verification" entry). The stored snapshot and the real, live account
+  state genuinely disagree.
+- **Why non-blocking:** transactions are fetched correctly regardless
+  of what this stored value says — the sync path that actually pulls
+  account UIDs during a real sync doesn't appear to depend on
+  `account_uids_encrypted` being current (real evidence: the sync
+  above worked despite the stale snapshot). The stored value appears
+  to be a stale, write-once snapshot from initial connection rather
+  than something refreshed on every sync — not confirmed by reading
+  the code, only inferred from this one real observation. Purely
+  cosmetic/informational drift as far as anyone has verified so far,
+  not a functional bug.
+- **What would close it:** read `kbc_analyzer.enablebanking
+  .EnableBankingClient`'s `get_cached_uids()` and whatever writes
+  `account_uids_encrypted` (`DatabaseSessionStore`, per
+  `eb_service.py`) to confirm directly whether/when that field is
+  ever refreshed after initial connection, and either refresh it on
+  every sync (if something does eventually read it expecting current
+  data) or document plainly that it's a connection-time snapshot only
+  and callers should never treat it as live account state.
+- **Status (2026-08-29, found during S8-08):** OPEN. No ticket number
+  assigned yet. Non-blocking — flag for whoever next touches
+  `eb_service.py`/`DatabaseSessionStore` rather than a dedicated fix
+  ticket on its own, unless it causes real confusion first.
+
 ### Enable Banking consent screen shows stale app name "KBC Personal Tracker" (found S8-07)
 
 - **What was deferred:** the real Enable Banking authorization page
@@ -306,18 +341,9 @@ create it early rather than tracking by memory").
   since S8-02/S8-03, or the earlier zero-accounts response may have
   been transient. Not treated as urgent to root-cause now that real
   data flows correctly.
-- **Real gap found alongside this, not blocking:** the `enable_banking_sessions`
-  row's stored `account_uids_encrypted` snapshot for this ING
-  connection still decrypts to an empty list, even though the sync
-  above demonstrably fetched from 6 real ING accounts — the stored
-  snapshot appears to be a stale, write-once value from initial
-  connection rather than something refreshed per sync. Transactions are
-  fetched correctly regardless (the sync path doesn't appear to depend
-  on this stored value being current), so this is cosmetic/informational
-  drift, not a functional bug — flagged here rather than a separate
-  entry since it surfaced as a side effect of closing this one, not
-  independently investigated. Worth a look in a future ticket if anyone
-  is ever confused by `account_uids_encrypted` not matching reality.
+- **Real gap found alongside this, tracked separately:** a stale
+  `account_uids_encrypted` snapshot on this same session row — see
+  its own standalone OPEN entry below, not folded in here.
 - **Status:** CLOSED (S8-08, 2026-08-29). Real ING data now exists and
   both open questions this entry tracked (categorization/data-shape
   handling, cross-institution collision) are answered with real

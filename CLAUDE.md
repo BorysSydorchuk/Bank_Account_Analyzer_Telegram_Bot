@@ -273,6 +273,19 @@ VERIFICATION DEBT LEDGER:
   any ticket's delivery write-up, check WHEN DONE for
   "pending"/"not yet"/"still open" and touch BOTH files if
   found — updating the one that felt natural is not enough.
+- REMINDER (Reviewer finding, caught 3x in one sprint — S8-05,
+  S8-06, S8-08): a newly-discovered-but-deferred item folded
+  into prose inside a DIFFERENT entry (a CLOSED entry's own
+  writeup, an ARCHITECTURE.md paragraph) does not count as
+  logged — it won't surface when someone scans the ledger for
+  open work. Every such item needs its own standalone OPEN
+  entry: what it is, why non-blocking, closure condition, dated
+  status — same four fields as any other entry. Before marking
+  ANY ticket delivered, grep your own diff for language like
+  "found, not blocking," "worth a look," "flagged here rather
+  than a separate entry," or "real gap" — each one is a signal
+  you buried a finding instead of logging it. Give it its own
+  entry or delete the aside.
  
 ================================================================
 PROMPT 5 — SCOPE DISCIPLINE
