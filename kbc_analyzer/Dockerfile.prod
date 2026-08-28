@@ -70,6 +70,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 # but this doesn't rely on that being kept correct forever.
 COPY backend/app ./app
 COPY backend/kbc_analyzer ./kbc_analyzer
+# backend/ops/ (not backend/scripts/ — that's dev-only debug tooling,
+# excluded below): production-safe one-shot operator scripts that must
+# actually exist inside the real container to be runnable via ECS Exec.
+COPY backend/ops ./ops
 COPY backend/alembic.ini .
 
 # S4-09 Item 1's non-root user, carried into both production targets —

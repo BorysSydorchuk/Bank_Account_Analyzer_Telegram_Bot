@@ -866,15 +866,23 @@ without it, "Sign in with Google" would be a standing bypass of the whole
 mechanism for any address never seen before.
 
 **Operating model: a one-command CLI, not an admin UI or role system.**
-`scripts/grant_beta_invite.py`, run inside a real container via ECS Exec
-(`python -m scripts.grant_beta_invite <email>` — must run as a module
+`backend/ops/grant_beta_invite.py`, run inside a real container via ECS
+Exec (`python -m ops.grant_beta_invite <email>` — must run as a module
 from `/app`, not a bare script path, for the same `sys.path[0]` reason
 documented in this sprint's migration/diagnostic scripts), is Borys's
-entire operating surface: one email in, one `beta_invites` row out. This
-app has no admin-role concept at all — deliberately not building one for
-10-20 manual grants, consistent with CLAUDE.md's multi-user-readiness
-rules explicitly deferring general-purpose admin infrastructure. ECS Exec
-is already this project's established pattern for every other one-off
+entire operating surface: one email in, one `beta_invites` row out.
+Lives in `backend/ops/`, not `backend/scripts/` — `scripts/` is dev-only
+debug tooling `.dockerignore` deliberately excludes from the production
+image entirely, so a script that needs to actually run inside a real
+container needs its own directory that `Dockerfile.prod` does copy in
+(a real gap found deploying this exact ticket: the first production
+build shipped without any static frontend at all, having been built
+from the wrong Dockerfile, then a second real gap surfaced once that
+was fixed — `scripts/` silently excluded this file too). This app has
+no admin-role concept at all — deliberately not building one for 10-20
+manual grants, consistent with CLAUDE.md's multi-user-readiness rules
+explicitly deferring general-purpose admin infrastructure. ECS Exec is
+already this project's established pattern for every other one-off
 production operation this sprint (migrations, DB inspection, the S8-06
 pre-check itself) — this is the same operating model, not a new one.
 

@@ -1,7 +1,7 @@
 """add beta_invites table
 
 S8-06: closed-beta gate for registration (10-20 real people, Borys
-grants each one by email — see scripts/grant_beta_invite.py). Every
+grants each one by email — see backend/ops/grant_beta_invite.py). Every
 new account, whether created via password registration or a first
 Google sign-in, must match an unused row here before it's created.
 email is stored lowercased (app/crud.py's beta-invite helpers own

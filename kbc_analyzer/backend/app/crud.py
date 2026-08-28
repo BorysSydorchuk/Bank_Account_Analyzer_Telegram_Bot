@@ -40,7 +40,7 @@ def get_unused_beta_invite_by_email(db: Session, email: str) -> BetaInvite | Non
 
 
 def create_beta_invite(db: Session, email: str) -> BetaInvite:
-    """S8-06. The one write scripts/grant_beta_invite.py performs — Borys's
+    """S8-06. The one write backend/ops/grant_beta_invite.py performs — Borys's
     entire operating surface for granting beta access. Raises on a
     duplicate email via the table's own unique constraint rather than
     checking first, so a second grant attempt for the same address fails

@@ -1,14 +1,20 @@
 """S8-06. Borys's entire operating surface for the closed-beta gate:
 grants one real person access by email, nothing more. Run inside a real
 running container via ECS Exec (never locally — this needs the real
-production DATABASE_URL, and running python scripts/x.py directly adds
-the script's own directory to sys.path instead of /app, breaking the
+production DATABASE_URL, and running python ops/x.py directly adds the
+script's own directory to sys.path instead of /app, breaking the
 `app.*` imports below — run as a module from /app instead):
 
     aws ecs execute-command --region eu-central-1 --profile kbc-deploy \\
       --cluster kbc-analyzer-cluster --task <task-arn> --container web \\
       --interactive --command \\
-      "python -m scripts.grant_beta_invite someone@example.com"
+      "python -m ops.grant_beta_invite someone@example.com"
+
+Lives in backend/ops/, not backend/scripts/ — scripts/ is dev-only debug
+tooling (.dockerignore excludes it entirely from the production image);
+this needs to actually exist inside the real production container to be
+runnable there at all, so it gets its own directory that Dockerfile.prod
+does copy in.
 
 Deliberately a one-shot CLI, not an admin API endpoint — this app has no
 admin-role concept at all (CLAUDE.md's multi-user-readiness rules
@@ -27,7 +33,7 @@ from app.db import SessionLocal
 
 def main() -> None:
     if len(sys.argv) != 2:
-        print("usage: python -m scripts.grant_beta_invite <email>", file=sys.stderr)
+        print("usage: python -m ops.grant_beta_invite <email>", file=sys.stderr)
         raise SystemExit(1)
 
     email = sys.argv[1]
