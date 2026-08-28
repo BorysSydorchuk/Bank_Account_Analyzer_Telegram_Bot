@@ -750,119 +750,104 @@ load (plain `useState`, no persistence), a `useMutation`
 (`hooks/useCompareInsights.ts`) rather than a cached query — nothing else
 in the app reads a comparison result.
 
-## Transactional Email (S7-08)
+## Transactional Email (S7-08, provider switched S8-05)
 
-`mymble.be` is a verified SES domain identity (`infra/ses.tf`,
-Easy DKIM — SES manages the signing key, three DKIM CNAME records
-published in the Route 53 zone this project already controls; verified
-within about a minute, DKIM status `SUCCESS`). `app/email_service.py`'s
-`send_templated_email(to_email, template_name, **template_vars)` is the
-one send path — two templates today (`verify_email`, `password_reset`),
-real HTML + text-fallback bodies, real variable substitution (no
-templating engine dependency for two static strings with one
-substitution each). Real evidence: a real send through this exact code
-path, to a real inbox, confirmed received by Borys — not just an API
-success response, which mail delivery's own failure modes (spam
-folder, bounce) wouldn't necessarily be caught by.
+**Provider: Resend, not SES — switched S8-05 after SES's sandbox
+production-access request was denied and left genuinely unresolvable
+from this environment (see below for the full history).**
+`app/email_service.py`'s `send_templated_email(to_email, template_name,
+**template_vars)` is still the one send path and its public interface
+is unchanged — two templates (`verify_email`, `password_reset`), real
+HTML + text-fallback bodies. Internally it now calls
+`resend.Emails.send({"from": ..., "to": [to_email], "subject": ...,
+"html": ..., "text": ...})` via the official `resend` SDK, reading
+`EMAIL_SENDER_ADDRESS` and `RESEND_API_KEY` from the environment.
+`mymble.be` is verified on Resend's side (`infra/resend.tf`: one DKIM
+TXT record, two SPF CNAMEs delegating to Resend's MTA, one DMARC TXT
+at `p=none`) — verified within Resend's own stated window, confirmed
+by a real send (`resend.Emails.send` returning a real message id),
+not just the dashboard showing "Verified."
 
-**Credentials: an IAM role, not Secrets Manager, and that's the correct
-answer here — not a shortcut.** `infra/ses.tf`'s
-`aws_iam_role_policy.ecs_task_send_email` grants the shared
-`aws_iam_role.ecs_task` (web, worker, migration-runner, redis all
-already use this one role) `ses:SendEmail`/`ses:SendRawEmail`, scoped
-to two identity ARNs — the domain identity and, currently, the sandbox
-test-recipient identity (see below) — never `ses:*`. boto3 resolves
-this automatically via the task's credential provider chain; there is
-no access key or secret anywhere for SES, nothing to rotate or leak,
-a stronger position than every other credential in this project's
-Secrets Manager audit (S7-05), which still holds real secret material
-even if well-protected.
+**Credentials: an API key in Secrets Manager, not an IAM role — a
+real, deliberate tradeoff, not an oversight.** SES's IAM-role auth (no
+stored secret at all) no longer applies; `RESEND_API_KEY` is a real
+secret Resend issued, stored in Secrets Manager and injected into the
+web/worker task definitions (`infra/web.tf`), read via
+`data.aws_secretsmanager_secret.resend_api_key` in `infra/ecs.tf`,
+granted to the shared `ecs_task_execution` role's
+`secretsmanager:GetSecretValue` policy. This is new attack surface
+this app didn't previously have for email (a leaked key sends mail
+until rotated, vs. SES's role-scoped, non-exportable credential) —
+accepted knowingly as the cost of unblocking real registration; the
+key is scoped to sending only (confirmed by testing that it cannot
+read domain/DNS status via the API).
 
-**Sandbox mode — real, unexpected finding from testing, not
-assumption.** This account is in SES's default sandbox mode
+**Real production deploy gap, found and fixed the same day (2026-08-28):**
+rolling out the Resend-carrying image (commit `d74e056`) left the web
+service stuck `IN_PROGRESS` — real ECS service events showed
+`AccessDeniedException` on `secretsmanager:GetSecretValue` for the new
+secret, because the `ecs_task_execution` role's grant for it had been
+written and committed in this same ticket but never actually
+`terraform apply`'d to production (only the deploy *user's* IAM
+changes had gone through the usual admin-bootstrap apply; this
+particular role policy was missed). Applied for real via the admin
+profile — `iam:PutRolePolicy` on another role isn't something
+`kbc-analyzer-deploy` can do — and the stuck task self-healed
+immediately, no further deploy action needed. Both services confirmed
+`rolloutState: COMPLETED` on `kbc-analyzer-web:12` /
+`kbc-analyzer-worker:11`, ALB target health `healthy`, real
+`https://mymble.be/` returns 200.
+
+**Real end-to-end proof, not just a test send:** a genuinely new,
+never-before-seen address (`liyaberry27@gmail.com`) completed real
+registration and real email verification against production — direct
+database query confirms `email_verified: true`, registered
+2026-08-28 11:40:35. This is the actual condition S8-05 existed to
+satisfy: a real stranger, not `boris.sydorchuk@gmail.com` or any
+other pre-verified address, receiving and using a real verification
+email.
+
+**Why SES was abandoned rather than fixed (full history, kept for
+context — the AWS case itself is no longer this project's blocker).**
+The account was in SES's default sandbox mode
 (`ProductionAccessEnabled: false`), which restricts sending to
-verified recipient identities only. Requesting production access via
-`aws sesv2 put-account-details` came back `ReviewDetails.Status:
-DENIED` almost immediately — not the 1-2 day pending wait expected.
-This account has no paid AWS Support plan, so the reason wasn't
-retrievable via API; AWS's actual response (received by email, this
-account being on Basic support) asked for detail the bare API call has
-no fields for — sending frequency, recipient-list handling,
-bounce/complaint/unsubscribe handling, example email content — and
-recommended starting from a verified domain identity, already true
-here. A full reply was submitted to the case via AWS Support Center
-(Basic support blocks posting to a case through the API — confirmed,
-only the console works) citing real, verified facts, including that
-SES's account-level suppression list is already active for both
-`BOUNCE` and `COMPLAINT` (`aws sesv2 get-account` →
-`SuppressionAttributes`, checked before citing it, not assumed). AWS
-states an initial response within 24 hours of that reply.
-**Status as of this writing: still pending** — not yet re-checked
-against a new outcome.
+verified recipient identities only. A production-access request came
+back `ReviewDetails.Status: DENIED` almost immediately (an automated
+first pass asking for more account detail, not a final rejection); a
+full reply citing real account facts was submitted via AWS Support
+Center (Case `178778410400368`) — this account has no paid Support
+plan, so there was no API visibility into the case at all, only the
+console, which this environment cannot reach. AWS's stated 24-hour
+initial-response window passed with the case unchanged; two real
+registration attempts failed in the meantime
+(`liyaberry27@gmail.com`, `secta022024@gmail.com`), with real
+CloudWatch tracebacks confirming the exact mechanism: sandbox mode's
+`ses:SendEmail` IAM check authorizes *both* the sender identity and
+the recipient identity ARN, so an unverified recipient fails with
+`AccessDenied` naming the recipient's own ARN, not a generic
+`MessageRejected`. A fresh `put-account-details` resubmission was
+rejected outright (`ConflictException`) — confirming no API-only path
+remained. Escalated to Borys per the ticket's own trigger; he checked
+the console directly and confirmed AWS had genuinely gone silent, not
+a visibility gap on this environment's side — Basic support carries no
+committed SLA at all, so the wait had no real end date. His call:
+research and adopt a provider switch rather than keep waiting
+unbounded. Three providers were compared on real 2026 pricing,
+new-account gating, and domain-verification speed (Resend, Postmark,
+SendGrid); Resend won on all three — no new-account approval gate
+found, free tier alone covers this app's real volume, fastest
+verification, cleanest diff from the existing `boto3` call.
 
-**Re-checked for real, S8-05 (2026-08-28) — AWS's own 24-hour window has
-now passed with no change, and this has real, ongoing user impact, not
-theoretical.** `aws sesv2 get-account` still shows `ReviewDetails.Status:
-DENIED`, `CaseId: 178778410400368` — identical to S7-08/S7-10, over 24
-hours after the Support Center reply (submitted 2026-08-27 01:05 CEST,
-per git history) that AWS said would get an initial response within 24
-hours. Two more real people have tried to register since and never
-received a verification email — `liyaberry27@gmail.com` (2026-08-27
-22:00) and `secta022024@gmail.com` (2026-08-27 23:07), both confirmed
-still `email_verified: false`. Real CloudWatch Logs traceback for the
-first: `botocore.exceptions.ClientError: An error occurred (AccessDenied)
-when calling the SendEmail operation: ... is not authorized to perform
-'ses:SendEmail' on resource '...identity/liyaberry27@gmail.com'` — the
-precise mechanism named in the finding below, not SES's own
-`MessageRejected`, confirming this is genuinely the recipient-ARN IAM
-quirk, not a different failure mode.
+**`infra/ses.tf` and the SES domain/IAM grants it defined are no
+longer part of the live send path** — left in place rather than torn
+out in this same ticket (out of scope; a cleanup ticket can remove
+dead SES infrastructure explicitly rather than folding it into this
+one).
 
-Attempted a fresh `aws sesv2 put-account-details` resubmission with a
-materially stronger use-case description (explicit mention of the
-already-active suppression list, DKIM status, real current/expected
-volume) — rejected outright with `ConflictException` (empty message),
-confirmed via a direct API call, not assumed. **There is no API-only
-path left to try** — the account is in a state that structurally
-requires the Support Center console specifically, which needs a human
-with console access; this environment has API/CLI credentials only,
-never console/browser login for this AWS account.
-
-**Contingency investigated, per this ticket's own ask — no faster
-AWS-native path exists.** Sandbox mode's per-recipient-verification
-requirement is unrelated to sender-domain verification — `mymble.be`
-being fully DKIM-verified (confirmed live, `VerificationStatus:
-SUCCESS`) has no bearing on it; sandbox always restricts to verified
-*recipients* regardless of sender setup. The only two genuine
-contingencies: (1) wait on the existing AWS case, needs Borys's direct
-console follow-up now that the stated response window has passed with
-no visible change; (2) switch email delivery to a different
-transactional provider entirely (e.g., Postmark, SendGrid, Resend) —
-a real, meaningfully different path since it sidesteps this specific
-SES account's denial, but real engineering effort (a new provider's
-own domain verification, a new SDK replacing `email_service.py`'s
-direct `boto3` SES client, likely 1-2 days of work), not a
-configuration change. Flagged to Borys as a real option, not adopted
-unilaterally — a vendor/cost decision, not an engineering call to make
-alone.
-
-**Real, unrelated-to-production-access finding from the sandbox test
-itself:** IAM's authorization check for `ses:SendEmail` in sandbox mode
-covers *both* the sender identity and the recipient identity ARN, not
-just the sender — confirmed by a real `AccessDenied` error naming the
-recipient's ARN when the IAM policy only granted the domain identity.
-This is why `aws_sesv2_email_identity.test_recipient`'s ARN is also in
-the policy's `Resource` list, not just referenced for its own
-verification requirement. Once production access is granted, sandbox's
-per-recipient verification stops applying to real users, but leaving
-this entry in place causes no harm — it's still just permission to
-send to one already-real, already-verified address.
-
-**Unblocks, does not close, `docs/verification_debt.md`'s email
-verification and password reset entries (both OPEN since S6-08).**
-Both name "no transactional email infrastructure exists" as their
-blocker — that's now false — but closing either needs S7-09's actual
-verification-token/reset-token flow, not just the sending capability
-this ticket built.
+**Closes `docs/verification_debt.md`'s email verification and
+password reset entries.** Both were OPEN pending real
+transactional-email delivery to a genuine stranger; that proof now
+exists (`liyaberry27@gmail.com`, above).
 
 ## Database Tables
 

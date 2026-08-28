@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 
 ================================================================
 TICKET S8-05 — Resolve SES Production Access Blocker
@@ -231,3 +231,57 @@ Sources checked directly, not assumed: [Resend domain docs](https://resend.com/d
 [Postmark getting started](https://postmarkapp.com/support/article/1002-getting-started-with-postmark),
 [SendGrid account review](https://support.sendgrid.com/hc/en-us/articles/360041790293-Account-Under-Review),
 [SendGrid sender identity](https://www.twilio.com/docs/sendgrid/for-developers/sending-email/sender-identity).
+
+--- RESOLVED: REAL END-TO-END PROOF OBTAINED (2026-08-28) ---
+
+Borys confirmed: adopt Resend. Implemented in full — `app/email_service.py`
+rewritten from `boto3` SES calls to `resend.Emails.send(...)`, public
+interface (`send_templated_email`) unchanged so no caller changes needed
+beyond one stale comment in `routers/user_auth.py`; `RESEND_API_KEY`
+stored in Secrets Manager and wired through `infra/web.tf`/`infra/ecs.tf`;
+`infra/resend.tf` added the four real DNS records from Resend's dashboard;
+`boto3`→`resend` swapped in `requirements.txt`; test fixtures
+(`tests/fixtures/fake_resend.py`) and both email test files rewritten for
+the new call shape.
+
+Domain verified on Resend within its own stated window; confirmed with a
+real send returning a real message id, not just the dashboard status.
+Deployed to production (commit `d74e056`) — hit one real gap along the
+way: the ECS task execution role's grant for the new secret had been
+committed but never applied, causing the web service to stick
+`IN_PROGRESS` with a real `AccessDeniedException` on
+`secretsmanager:GetSecretValue`; applied it for real via the admin
+profile, service self-healed immediately. Both services confirmed
+`rolloutState: COMPLETED`, ALB healthy, `https://mymble.be/` returns 200.
+
+**Real end-to-end proof:** `liyaberry27@gmail.com`'s stale unverified row
+(from the earlier SES-blocked attempt) was deleted so the address could
+register fresh. That registration completed for real through Resend:
+direct database query confirms `email_verified: true`,
+`created_at: 2026-08-28 11:40:35` — a genuinely new stranger completing
+real registration and real email verification against production, the
+exact proof this ticket's acceptance criteria required.
+
+**ACCEPTANCE CRITERIA — final status:**
+- Root cause confirmed with real evidence — YES (CloudWatch traceback,
+  above)
+- AWS Support Case followed up on with real, specific content — YES,
+  then correctly abandoned once confirmed unresolvable from this
+  environment (Basic support, no SLA, console-only)
+- A contingency path investigated and either adopted or ruled out with
+  real reasoning — YES, adopted (Resend), real comparison against
+  Postmark/SendGrid documented above
+- A real, dated re-check point set, visible in both ARCHITECTURE.md and
+  verification_debt.md — superseded: no re-check needed, the blocker is
+  resolved, not deferred
+- A genuinely new, never-verified address completes real registration
+  and receives a real verification email — YES,
+  `liyaberry27@gmail.com`, 2026-08-28 11:40:35
+
+`docs/verification_debt.md`'s SES entry and the "real received-email
+confirmation for email verification" entry are both closed in this same
+commit, with the real resolution story. `ARCHITECTURE.md`'s Transactional
+Email section rewritten to describe Resend as the live provider, SES kept
+only as documented history.
+
+Ready for S8-06 whenever you confirm this one.

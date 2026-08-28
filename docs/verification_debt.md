@@ -115,56 +115,6 @@ create it early rather than tracking by memory").
   currently $0, nothing is at risk today); closes once Borys reports the
   credit balance/expiration from the Billing Console.
 
-### SES still in sandbox mode — production access request pending (S7-08)
-
-- **What was deferred:** real users other than the one verified test
-  recipient (`boris.sydorchuk@gmail.com`) cannot receive email from
-  Mymble yet — SES sandbox mode only sends to individually-verified
-  recipient identities. Sandbox-mode sending itself is confirmed
-  working (real email, real receipt, S7-08).
-- **Why:** `aws sesv2 put-account-details` came back
-  `ReviewDetails.Status: DENIED` almost immediately — not a final
-  rejection, but AWS's automated first pass asking for more detail
-  (sending frequency, recipient-list handling, bounce/complaint/
-  unsubscribe handling, example emails). A full reply with real,
-  verified account facts was submitted via AWS Support Center (Case
-  `178778410400368`) — this account has no paid AWS Support plan, so
-  there's no API visibility into the review reasoning or a way to poll
-  case status/communications programmatically; only the console shows
-  it, and only a human can act on it.
-- **What would close it:** AWS's response to that reply (stated as
-  within 24 hours of submission), then — if approved — a follow-up
-  `aws sesv2 put-account-details --production-access-enabled` call (or
-  confirmation the approval already flipped `ProductionAccessEnabled`
-  without one) to move the account out of sandbox for real.
-- **Status (re-confirmed 2026-08-28, S8-05) — no longer non-blocking,
-  real ongoing user impact, escalation trigger hit:** re-checked
-  directly (`aws sesv2 get-account`): still `ProductionAccessEnabled:
-  false`, `ReviewDetails.Status: DENIED`, `CaseId: 178778410400368` —
-  unchanged since S7-08/S7-10, and now more than 24 hours past the
-  point AWS said it would give an initial response to the Support
-  Center reply already submitted (2026-08-27 01:05 CEST). Two real
-  registration attempts have failed for exactly this reason since:
-  `liyaberry27@gmail.com` and `secta022024@gmail.com`, both confirmed
-  still unverified, real `AccessDenied` tracebacks confirmed in
-  CloudWatch Logs (see ARCHITECTURE.md's Auth section for the full
-  entry). Attempted a fresh `put-account-details` resubmission with a
-  stronger use-case description — blocked outright (`ConflictException`,
-  no API-only path left). This account's Support Case is entirely
-  unreachable via API (Basic support tier, `SubscriptionRequiredException`
-  confirmed on both `describe-cases` and `describe-severity-levels`) —
-  **only the AWS Console can read the case or post to it, and this
-  environment has no console access, only CLI credentials.** Per this
-  ticket's own instruction ("if AWS doesn't respond within a short,
-  explicit window, escalate to Borys directly rather than silently
-  waiting") — that window has now passed. Escalated directly, this
-  session, rather than setting a further quiet re-check date.
-- **Re-check point:** Borys checks the Support Center console directly
-  (case `178778410400368`) — either AWS's actual response is sitting
-  there unread by anything with API visibility, or the case genuinely
-  needs a further human reply. No further silent re-checks from this
-  environment until that happens; the API-only path is confirmed
-  exhausted.
 
 ### GOOGLE_CLIENT_SECRET rotation — AWS-side confirmed, Google Console side not independently verifiable from this environment (S7-05)
 
@@ -190,51 +140,31 @@ create it early rather than tracking by memory").
   Closes on Borys's one-line confirmation (or a fresh rotation if the
   confirmation comes back negative).
 
-### Real received-email confirmation for email verification — pending a second SES-verified recipient (S7-09)
+### Real received-email confirmation for email verification (closed 2026-08-28, S8-05)
 
 - **What was deferred:** an actual verification email, received in a
-  real inbox and clicked through for real. Everything up to that
-  point is built and proven at the API level (see the closed entry
-  below), but a real received-email screenshot is a categorically
-  different kind of proof, per this sprint's own standard (S7-08's "an
-  actual email sent and received... not a 'send succeeded' log line
-  alone").
-- **Why:** genuinely narrower than it first looked — password reset
-  (below) was fully confirmed using Borys's own existing account, but
-  that same account is *already verified* (backfilled true by S7-09's
-  migration), so there's nothing left for it to verify. SES sandbox
-  mode only sends to individually-verified recipients, and
-  `boris.sydorchuk@gmail.com` is the only one that exists — a fresh
-  test account can't receive real mail until either SES production
-  access lands (see the still-OPEN entry above) or a second recipient
-  identity is verified.
-- **What would close it:** either SES production access being granted,
-  or verifying a second recipient identity and having that person (or
-  Borys, from a second test account) complete a real registration and
-  click the real verification link.
-- **Status (re-confirmed 2026-08-28, mid S8-02):** OPEN — no longer
-  "only one verified recipient," that's now factually stale. A second
-  SES identity, `liyaberry27@gmail.com`, exists and is genuinely
-  verified (`aws sesv2 get-email-identity`:
-  `VerifiedForSendingStatus: true`, confirmed directly) — created
-  after that account's real registration (2026-08-27) never received
-  its verification email, traced to this exact blocker. **But the
-  actual round-trip this entry needs still hasn't run**: checked the
-  real database directly — `liyaberry27@gmail.com`'s row still shows
-  `email_verified: false`, `created_at` unchanged since the original
-  registration, meaning no new registration or resend has happened
-  since the identity became verified. The precondition (a second
-  verified recipient) is met; the proof itself (a real send, received,
-  clicked) is not. Non-blocking — everything up to real delivery
-  remains proven at the API level (S7-09). No resend-verification-email
-  endpoint exists (flagged separately in `routers/user_auth.py`), and
-  `liyaberry27@gmail.com`'s account row already exists with
-  `email_verified: false`, so a same-email re-registration would just
-  fail on the uniqueness constraint — closing this needs either a
-  fresh registration against a different, newly-verified recipient
-  address, or that existing account's row deleted first so the same
-  address can register again for real. Closes once whichever path
-  actually delivers a real email that's received and clicked through.
+  real inbox and clicked through for real, by someone other than
+  Borys's own already-verified account. Everything up to that point
+  was built and proven at the API level since S7-09; SES sandbox mode
+  (see the now-closed AWS-side entry that used to sit above this one)
+  blocked any real recipient other than pre-verified test identities
+  from ever completing the round-trip.
+- **How it actually closed:** not via SES at all — S8-05 switched the
+  app's transactional email provider to Resend after SES's production
+  access request was denied and became unresolvable from this
+  environment (full history in ARCHITECTURE.md's Transactional Email
+  section). Once `mymble.be` was verified on Resend and deployed to
+  production, `liyaberry27@gmail.com`'s existing unverified row
+  (`email_verified: false`, from the earlier SES-blocked attempt) was
+  deleted so the same address could register fresh. That real
+  registration went through Resend for real: direct database query
+  confirms `email_verified: true`, `created_at: 2026-08-28 11:40:35` —
+  a genuinely new registration, real send, real receipt, real click,
+  not a re-check of stale state.
+- **Status:** CLOSED. The proof this entry existed to get — a real
+  stranger receiving and using a real verification email — now
+  exists, via a different provider than originally planned but
+  satisfying the exact same standard.
 
 ### Date-range validation regression tests — not built (S5-07)
 
