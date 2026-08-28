@@ -32,6 +32,7 @@ from app.db import SessionLocal
 
 
 def main() -> None:
+    """Grant a beta invite to the email passed as the sole CLI argument."""
     if len(sys.argv) != 2:
         print("usage: python -m ops.grant_beta_invite <email>", file=sys.stderr)
         raise SystemExit(1)

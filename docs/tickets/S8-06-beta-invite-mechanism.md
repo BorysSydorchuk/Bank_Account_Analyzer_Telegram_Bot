@@ -83,8 +83,13 @@ against `https://mymble.be` via `aws ecs execute-command` (ECS Exec,
 
 All five steps ran against the real production system with real HTTP
 responses and real database state, not local/staging approximations.
-Nothing deferred — no `docs/verification_debt.md` entry needed for
-this ticket.
+No *verification* was deferred here — every claim above was checked
+live, not structurally. A *fix* was deferred, though: the
+`users.email` case-sensitivity gap this ticket's pre-check found
+(see ARCHITECTURE.md's write-up) is real, out-of-scope-for-S8-06
+technical debt, now tracked as its own OPEN entry in
+`docs/verification_debt.md` ("`users.email` case sensitivity — not
+enforced or normalized").
 
 **Test account cleanup (same session):** the `money.borys.001@gmail.com`
 `users` row created in step 3 was disposable test data, not a real

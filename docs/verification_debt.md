@@ -46,6 +46,41 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### `users.email` case sensitivity — not enforced or normalized (found S8-06)
+
+- **What was deferred:** `users.email` has no case normalization or
+  case-insensitive uniqueness enforcement. Unlike `beta_invites.email`
+  (always stored/matched lowercased, `crud.create_beta_invite`/
+  `get_unused_beta_invite_by_email`), `users.email` accepts whatever
+  case the registration request sends, and lookups (login, invite
+  matching before S8-06's own fix, `get_user_by_email`-style queries)
+  compare it as-is. A real instance of this produced two separate
+  `users` rows for one real person during S8-06's pre-check —
+  `liyaberry27@gmail.com` and `Liyaberry27@gmail.com` — confirmed via
+  direct database query, not inferred.
+- **Why deferred:** out of scope for S8-06, whose job was the invite
+  gate, not general auth hardening. `beta_invites.email` was
+  deliberately normalized in that ticket specifically because an
+  invite silently failing to match a differently-cased real address
+  would defeat the point of a manual allowlist — but fixing
+  `users.email` itself (migration to backfill/dedupe existing rows,
+  case-insensitive unique constraint, normalizing every write and
+  read path) is a materially bigger change that a closed-beta ticket
+  shouldn't absorb as scope creep.
+- **What would close it:** a dedicated auth-hardening ticket that
+  normalizes `users.email` comparison — decide and implement one of:
+  store lowercased at the write path (matching `beta_invites`'
+  pattern) with a migration to dedupe/backfill existing rows, or a
+  case-insensitive unique index/comparison (e.g. `citext` or a
+  functional index) without altering stored casing. Either approach
+  needs a real test proving two differently-cased submissions of the
+  same address are treated as one account.
+- **Status (2026-08-28, found during S8-06):** OPEN. No ticket number
+  assigned yet. Non-blocking for the current closed-beta sprint (10-20
+  manually-granted people, low collision odds) but real — this exact
+  bug already produced a duplicate-account incident, not a
+  hypothetical one.
+
 ### Real ING transaction-data verification — no data available from this test account (S8-02, narrowed S8-03)
 
 - **What was deferred:** verifying the categorization/sync/insights
