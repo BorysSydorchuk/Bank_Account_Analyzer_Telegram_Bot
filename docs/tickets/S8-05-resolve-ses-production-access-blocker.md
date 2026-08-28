@@ -142,3 +142,10 @@ call: he checks the AWS Support Center console himself (case
 cannot reach. Paused here pending his real findings; not proceeding
 with a provider switch investigation unless the console shows the
 case genuinely can't be resolved through AWS.
+
+Borys checked directly, real result: AWS has not responded — genuinely
+still silent, not a visibility gap on this environment's side. This is
+not a new finding changing the diagnosis, just confirmation the wait
+continues. No further escalation trigger has fired yet (that already
+fired once, above); this is Borys reporting back on the escalation, not
+a new stale-ledger cycle.
