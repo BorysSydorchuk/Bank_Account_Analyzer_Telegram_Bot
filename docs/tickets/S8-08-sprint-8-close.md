@@ -218,3 +218,19 @@ end-to-end, but nobody outside this project has actually been invited
 yet.
 
 **Sprint 8 complete pending PM confirmation.**
+
+================================================================
+ADDENDUM — 2026-08-29, post-close
+================================================================
+
+Borys's own real fresh-third-party-registration test (exactly the
+kind of check this ticket's regression sweep couldn't fully replace)
+found a real, severe bug this close missed: categorization was
+completely non-functional for every account except the original
+bootstrap one, because nothing ever seeded a new user's `categories`
+table. Investigated and fixed as its own ticket,
+`docs/tickets/S8-09-fix-missing-category-seeding.md` — not folded in
+here, since this file's own write-up above is already the historical
+record of what S8-08 itself actually covered and found. Left as a
+pointer, not a rewrite, per this ledger's own convention for how
+CLOSED entries preserve history.
