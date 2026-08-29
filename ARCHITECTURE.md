@@ -868,9 +868,9 @@ re-run of the creation script mints a *new* price id that must replace it.
 `app/usage_limits.py` daily caps, not unlimited — caps still exist at both
 tiers, keeping a technical backstop against runaway LLM cost even on a
 compromised paid account. Purely a usage-limit difference for v1, no other
-paid-only feature gated. Not yet wired into `try_record_usage` — that's
-S9-04's job; today every user, free or paid, gets the same S8-04 limits
-regardless of tier.
+paid-only feature gated. Wired into `try_record_usage` by S9-04 — see
+"Tier-based usage gating (S9-04)" below for the actual numbers and live
+evidence.
 
 **The kill switch.** `app_settings` table, row `BILLING_ENABLED` (seeded
 `'false'` — see Database Tables above), read by `app/billing.py`'s
@@ -895,8 +895,14 @@ not exist yet** — S8-05's own real incident (committed IAM grant, never
 applied, silent `AccessDeniedException` in production) is exactly the
 failure mode this note exists to prevent repeating. `STRIPE_PUBLISHABLE_KEY`
 is deliberately not in Secrets Manager — it's meant to be client-visible,
-so it isn't a secret; wired as plain frontend config when S9-05 (Billing
-UI) needs it. `STRIPE_WEBHOOK_SECRET` is a real local value now (S9-03
+so it isn't a secret. **Turned out unused, not just unwired (S9-06
+correction):** S9-05's Billing UI never touches Stripe.js client-side at
+all — checkout and portal are both plain server-created redirect URLs
+(`POST /api/billing/checkout`/`/portal`, `window.location.href =`), so
+there was never a point where the frontend needed this key. Left as a
+real value in `.env`/`.env.example` in case a future ticket adds a
+client-side Stripe Elements flow, but it is not currently read by any
+code in this repo. `STRIPE_WEBHOOK_SECRET` is a real local value now (S9-03
 generated it via `stripe listen --print-secret`) — only in the local
 `.env`, same as the other Stripe credentials; production still needs its
 own real webhook endpoint + secret created in the Stripe Dashboard once
@@ -929,6 +935,16 @@ Stripe's own `stripe_subscription_id`, already persisted from the
 this app has no row for is a safe, logged no-op, never a 500 — Stripe
 retries indefinitely on a non-2xx response, and a crash here would just
 make it retry a payload this app can never satisfy.
+
+**Webhook rate limiting (S9-06, Reviewer finding on S9-03).**
+`app/rate_limit.py`'s `WEBHOOK_RATE_LIMIT` (`60/minute`, IP-keyed, same
+`slowapi` limiter every other rate-limited route uses) sits in front of
+`POST /api/billing/webhook` — a cheap ceiling against a flood of forged
+requests, not the real security gate (signature verification is).
+60/minute is sized to comfortably cover a single real checkout's burst
+of events plus Stripe's own retries. Confirmed live: request 60 against
+the real running server gets a real `400` (signature rejected), request
+61 gets a real `429`.
 
 Two real, empirically-found API surface details, not assumptions:
 `StripeClient`'s top-level `.checkout`/`.subscriptions` shortcuts are
@@ -1901,6 +1917,21 @@ at S5-06. Both providers also implement `stream_complete()` (S4-06, chat) —
 both are now live-verified (Gemini 2026-08-16, Claude 2026-08-18, see
 docs/verification_debt.md's CLOSED section for both).
 
+**Stripe** (Sprint 9) — rely on: customer/subscription/checkout-session
+ids (`cus_...`/`sub_...`/`cs_...`) are Stripe's own primary keys, globally
+unique and stable for the life of the object — this app's `subscriptions`
+table keys identity on them directly (see Database Tables above). Unlike
+Enable Banking's `account_id`, this is a vendor-documented guarantee, not
+an assumption inferred from behavior; it was still empirically exercised
+before being trusted (S9-02→S9-03, a full real checkout→update→cancel
+lifecycle with no id collision) rather than taken purely on faith. Do
+**not** rely on: the exact shape of a `Subscription` object staying fixed
+across API versions — `current_period_end` genuinely moved location
+between versions mid-sprint (see the Billing section's S9-03 entry); code
+reads defensively (`_period_end_from_subscription`) rather than assuming
+today's shape is permanent. Webhook events are signature-verified, never
+trusted on the URL being unguessable alone (see Billing section).
+
 **mkcert certificate**: RETIRED (S7-04). `backend/certs/localhost.pem`/
 `localhost-key.pem` are deleted along with the local catcher server that
 used them — real production HTTPS on `mymble.be`, proven working via a
@@ -2030,7 +2061,13 @@ be waiting on.
   these "blunt beta caps," meant to be replaced by real plan limits once
   real usage patterns exist): `DAILY_LIMITS`/`MONTHLY_LIMITS` are fixed
   per-action constants (`chat`: 50/day, 500/month; `categorize`/
-  `insights`: 10/day, 100/month each), not per-user-tuned. Checked
+  `insights`: 10/day, 100/month each), not per-user-tuned. **As of S9-04,
+  these are unconditional only while the S9-01 billing kill switch is
+  off** (the real production default) — `try_record_usage` checks
+  `is_billing_enabled` first and, if on, applies `PAID_DAILY_LIMITS`/
+  `PAID_MONTHLY_LIMITS` (3x these numbers) to a `tier='paid'` user
+  instead; see the Billing section above for the full mechanism and live
+  evidence. Checked
   *before* the LLM call in every real caller — `routers/chat.py`
   (raises `HTTPException(429, ...)` before the SSE stream opens) and
   `analysis_service.py`'s `categorize_transactions`/`generate_insights`

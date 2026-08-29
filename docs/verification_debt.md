@@ -46,6 +46,36 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### BillingSuccessPage can momentarily outrun the real webhook — no retry/poll (found Reviewer on S9-05, logged S9-06)
+
+- **What was deferred:** `BillingSuccessPage.tsx` (Stripe's real
+  `success_url`) shows a hardcoded "You're on Mymble Pro" message and
+  fires a single `invalidateQueries` on mount with no retry or polling.
+  Its original comment claimed the `checkout.session.completed` webhook
+  (S9-03) had "already happened" by the time Stripe redirects here —
+  Stripe does not guarantee that ordering; the redirect and the webhook
+  delivery are two independent async outcomes of the same checkout
+  completion, and the webhook can genuinely still be in flight when this
+  page mounts.
+- **Why:** Real but rare and self-correcting — in the window where the
+  webhook hasn't landed yet, a visitor who clicks straight back to
+  Settings sees "Free" instead of "Mymble Pro" until something else (a
+  manual reload, TanStack Query's default refetch-on-window-focus)
+  triggers another fetch. No money or access is at stake (the real
+  Stripe subscription is genuinely active either way, matching what
+  `GET /api/billing/status` will report the moment the webhook actually
+  lands) — this is purely a momentary UI staleness window, not a
+  correctness or security issue. The misleading comment asserting the
+  false ordering has been corrected in the same commit that added this
+  entry, even though the underlying behavior wasn't changed.
+- **What would close it:** replace the single `invalidateQueries` call
+  with a short bounded poll/retry (e.g. refetch every 1-2s for up to
+  ~10s, or until `tier === "paid"`) so the page only shows "Welcome
+  aboard" once the real tier flip is confirmed, falling back to a
+  "processing, check back shortly" message if the window is exceeded.
+- **Status (2026-08-29, S9-06):** OPEN — non-blocking; closes whenever a
+  future ticket decides this UX polish is worth building (not scheduled).
+
 ### Settings' Billing card doesn't surface a scheduled (not-yet-effective) cancellation (found S9-05)
 
 - **What was deferred:** when a paid user cancels via the real Stripe
@@ -196,10 +226,11 @@ create it early rather than tracking by memory").
   every sync (if something does eventually read it expecting current
   data) or document plainly that it's a connection-time snapshot only
   and callers should never treat it as live account state.
-- **Status (2026-08-29, found during S8-08):** OPEN. No ticket number
-  assigned yet. Non-blocking — flag for whoever next touches
-  `eb_service.py`/`DatabaseSessionStore` rather than a dedicated fix
-  ticket on its own, unless it causes real confusion first.
+- **Status (re-confirmed 2026-08-29, S9-06 sprint close):** OPEN,
+  unchanged — no one touched `eb_service.py`/`DatabaseSessionStore` this
+  sprint (Sprint 9 was billing-only). No ticket number assigned yet.
+  Non-blocking — flag for whoever next touches that code rather than a
+  dedicated fix ticket on its own, unless it causes real confusion first.
 
 ### Enable Banking consent screen shows stale app name "KBC Personal Tracker" (found S8-07)
 
@@ -218,11 +249,11 @@ create it early rather than tracking by memory").
 - **What would close it:** Borys logs into the Enable Banking developer
   portal and renames the registered application from "KBC Personal
   Tracker" to "Mymble" (or whatever name he prefers now).
-- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN,
+- **Status (re-confirmed 2026-08-29, S9-06 sprint close):** OPEN,
   unchanged — still needs Borys's own Enable Banking developer portal
-  login, which this environment has never had. Cosmetic — doesn't block
-  or break the bank-connection flow — but real. No ticket number
-  assigned yet.
+  login, which this environment has never had. Sprint 9 touched nothing
+  Enable-Banking-related. Cosmetic — doesn't block or break the
+  bank-connection flow — but real. No ticket number assigned yet.
 
 ### `users.email` case sensitivity — not enforced or normalized (found S8-06)
 
@@ -253,12 +284,12 @@ create it early rather than tracking by memory").
   functional index) without altering stored casing. Either approach
   needs a real test proving two differently-cased submissions of the
   same address are treated as one account.
-- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN,
-  unchanged — no one picked this up this sprint. No ticket number
-  assigned yet. Non-blocking for the current closed-beta sprint (10-20
-  manually-granted people, low collision odds) but real — this exact
-  bug already produced a duplicate-account incident, not a
-  hypothetical one.
+- **Status (re-confirmed 2026-08-29, S9-06 sprint close):** OPEN,
+  unchanged — no one picked this up this sprint either (Sprint 9 was
+  billing-only, no auth changes). No ticket number assigned yet.
+  Non-blocking for the current closed-beta sprint (10-20 manually-granted
+  people, low collision odds) but real — this exact bug already produced
+  a duplicate-account incident, not a hypothetical one.
 
 ### AWS account credit balance and expiration — not visible via CLI (S7-10)
 
@@ -284,10 +315,11 @@ create it early rather than tracking by memory").
   budget notification at 100% may fire close to when the credit itself
   runs out, worth knowing in advance rather than discovering via a
   billing surprise.
-- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN,
-  unchanged — non-blocking (net spend is currently $0, nothing is at
-  risk today); closes once Borys reports the credit balance/expiration
-  from the Billing Console.
+- **Status (re-confirmed 2026-08-29, S9-06 sprint close):** OPEN,
+  unchanged — Sprint 9's billing work (Stripe) is unrelated to AWS
+  spend; nothing here changed. Non-blocking (net spend is currently $0,
+  nothing is at risk today); closes once Borys reports the credit
+  balance/expiration from the Billing Console.
 
 
 ### GOOGLE_CLIENT_SECRET rotation — AWS-side confirmed, Google Console side not independently verifiable from this environment (S7-05)
@@ -308,11 +340,12 @@ create it early rather than tracking by memory").
 - **What would close it:** Borys confirms in Console that the secret
   currently in Secrets Manager corresponds to a freshly-generated value
   (not the exposed one), or regenerates it now if it doesn't.
-- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN — still
+- **Status (re-confirmed 2026-08-29, S9-06 sprint close):** OPEN — still
   no Google Cloud Console API/CLI access exists in this environment;
-  nothing about this changed since S7-05/S7-10. Carried forward into
-  Sprint 9. Closes on Borys's one-line confirmation (or a fresh rotation
-  if the confirmation comes back negative).
+  nothing about this changed since S7-05/S7-10, and Sprint 9 never
+  touched Google OAuth. Carried forward past Sprint 9. Closes on Borys's
+  one-line confirmation (or a fresh rotation if the confirmation comes
+  back negative).
 
 ### Date-range validation regression tests — not built (S5-07)
 
@@ -330,9 +363,10 @@ create it early rather than tracking by memory").
   most naturally alongside `test_error_contracts.py` or a new
   `test_date_range.py` — each just needs a live TestClient call with a
   backwards or >365-day range and an assertion on the 400 body.
-- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN — content
+- **Status (re-confirmed 2026-08-29, S9-06 sprint close):** OPEN — content
   unchanged since S6-08; no target session assigned yet, still belongs to
   the Tester's S5-04 follow-on work, same as the sync-lock entry below.
+  Sprint 9 added no new endpoints with date-range params.
 
 ### Sync lock release on two failure early-returns — never empirically triggered (S5-05)
 
@@ -369,9 +403,10 @@ create it early rather than tracking by memory").
   also assert `sync_lock.get_holder()` is `None` after the run, not just
   that `job_store` reports `status: "failed"`. This is Tester-agent scope
   (S5-04's follow-on suite), not something to build here.
-- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN — content
+- **Status (re-confirmed 2026-08-29, S9-06 sprint close):** OPEN — content
   unchanged since S6-08; no target session assigned yet, still belongs to
-  the Tester's S5-04 follow-on work.
+  the Tester's S5-04 follow-on work. Sprint 9 didn't touch
+  `tasks/analysis.py`/`sync_lock.py`.
 
 ### Three regression tests deferred — no frontend test harness yet (S5-04)
 
@@ -397,10 +432,15 @@ create it early rather than tracking by memory").
   banner, one asserting a stalled poll still times out on identical
   payloads, one asserting the api client surfaces an error message from
   either JSON shape.
-- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN —
-  `kbc_analyzer/frontend/package.json` still has no `test` script and no
-  vitest/jest dependency; nothing has changed since S5-04. Flagged to PM
-  for a frontend-test-infrastructure ticket; no target sprint assigned yet.
+- **Status (re-confirmed 2026-08-29, S9-06 sprint close):** OPEN —
+  re-checked directly: `kbc_analyzer/frontend/package.json` still has no
+  `test` script and no vitest/jest dependency, even though Sprint 9 added
+  real frontend code (`BillingSection.tsx`, `useBilling.ts`,
+  `BillingSuccessPage.tsx`/`BillingCancelPage.tsx`) with zero automated
+  frontend tests — verified only by `tsc -b`/`oxlint` (type/lint
+  correctness, not behavior) and manual/live browser evidence. Flagged to
+  PM for a frontend-test-infrastructure ticket; no target sprint assigned
+  yet.
 
 ---
 
@@ -424,9 +464,10 @@ create it early rather than tracking by memory").
   `infra/vpc.tf` for a self-managed NAT instance (EC2 t4g.nano/micro with
   IP forwarding + a route table update), and document the swap's own
   downtime/rollback plan before doing it on a live system.
-- **Status (re-confirmed 2026-08-29, S8-08 sprint close):** OPEN —
-  production has been live since S7-04 (2026-08-26), 3 days as of this
-  close, nowhere near the 4-week stability bar. Closure condition still
+- **Status (re-confirmed 2026-08-29, S9-06 sprint close):** OPEN —
+  production has been live since S7-04 (2026-08-26); as of this
+  re-confirmation (same calendar date as S8-08's own close), still ~3
+  days in, nowhere near the 4-week stability bar. Closure condition still
   makes sense as written — revisit again at the next sprint close.
 
 ---
