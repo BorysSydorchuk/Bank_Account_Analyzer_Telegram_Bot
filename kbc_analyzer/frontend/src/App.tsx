@@ -3,6 +3,8 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom
 
 import { Sidebar } from "@/components/layout/Sidebar"
 import { useCurrentUser } from "@/hooks/useCurrentUser"
+import { BillingCancelPage } from "@/pages/BillingCancelPage"
+import { BillingSuccessPage } from "@/pages/BillingSuccessPage"
 import { ChatPage } from "@/pages/ChatPage"
 import { DashboardPage } from "@/pages/DashboardPage"
 import { FeedbackPage } from "@/pages/FeedbackPage"
@@ -68,6 +70,8 @@ function App() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/billing/success" element={<BillingSuccessPage />} />
+        <Route path="/billing/cancel" element={<BillingCancelPage />} />
         <Route element={<AppShell />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/chat" element={<ChatPage />} />

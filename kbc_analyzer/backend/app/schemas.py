@@ -405,3 +405,20 @@ class CheckoutSessionOut(BaseModel):
     """S9-03: the real Stripe-hosted Checkout URL the frontend redirects to."""
 
     checkout_url: str
+
+
+class BillingStatusOut(BaseModel):
+    """S9-05: everything the Settings page needs to render the right
+    state — the kill switch (whether an "Upgrade" button would lead
+    anywhere real) and the user's own tier/status."""
+
+    billing_enabled: bool
+    tier: Literal["free", "paid"]
+    status: str | None
+
+
+class PortalSessionOut(BaseModel):
+    """S9-05: the real Stripe Customer Portal URL the frontend redirects
+    a paid user to for cancel/manage."""
+
+    portal_url: str

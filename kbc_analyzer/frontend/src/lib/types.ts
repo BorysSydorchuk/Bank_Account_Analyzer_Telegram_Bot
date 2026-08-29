@@ -259,3 +259,20 @@ export interface ComparisonResponse {
   delta: ComparisonDelta
 }
 
+// S9-05 — Billing
+export type SubscriptionTier = "free" | "paid"
+
+export interface BillingStatus {
+  billing_enabled: boolean
+  tier: SubscriptionTier
+  status: string | null
+}
+
+export interface CheckoutSessionResponse {
+  checkout_url: string
+}
+
+export interface PortalSessionResponse {
+  portal_url: string
+}
+

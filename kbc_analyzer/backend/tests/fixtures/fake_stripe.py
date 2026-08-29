@@ -51,20 +51,31 @@ class _FakeSubscriptionsAPI:
         return self._fake_client.subscription_objects[subscription_id]
 
 
+class _FakePortalSessionsAPI:
+    def __init__(self, fake_client: "FakeStripeClient"):
+        self._fake_client = fake_client
+
+    def create(self, params: dict):
+        self._fake_client.created_portal_params.append(params)
+        return SimpleNamespace(url="https://billing.stripe.com/test_fake_portal_session")
+
+
 class FakeStripeClient:
     """Mirrors real usage via `client.v1.checkout.sessions`/`client.v1
-    .subscriptions` — the SDK's newer `.v1` namespace, not the deprecated
-    top-level shortcuts (`client.checkout`/`client.subscriptions`) this
-    module used until a live DeprecationWarning surfaced during this
-    ticket's real checkout test.
+    .subscriptions`/`client.v1.billing_portal.sessions` — the SDK's newer
+    `.v1` namespace, not the deprecated top-level shortcuts
+    (`client.checkout`/`client.subscriptions`) this module used until a
+    live DeprecationWarning surfaced during S9-03's real checkout test.
     """
 
     def __init__(self):
         self.created_checkout_params: list[dict] = []
+        self.created_portal_params: list[dict] = []
         self.subscription_objects: dict[str, _FakeStripeObject] = {}
         self.v1 = SimpleNamespace(
             checkout=SimpleNamespace(sessions=_FakeCheckoutSessionsAPI(self)),
             subscriptions=_FakeSubscriptionsAPI(self),
+            billing_portal=SimpleNamespace(sessions=_FakePortalSessionsAPI(self)),
         )
 
     def add_subscription(self, subscription_id: str, **fields) -> None:

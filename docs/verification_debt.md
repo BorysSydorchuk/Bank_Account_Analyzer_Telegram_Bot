@@ -46,6 +46,36 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Settings' Billing card doesn't surface a scheduled (not-yet-effective) cancellation (found S9-05)
+
+- **What was deferred:** when a paid user cancels via the real Stripe
+  Customer Portal, Stripe's default behavior is `cancel_at_period_end`
+  (access continues until the paid period actually ends), not an
+  immediate downgrade — confirmed live during this ticket's own real
+  cancel-flow test. The resulting `customer.subscription.updated` webhook
+  correctly keeps `tier='paid'`/`status='active'` (accurate — the
+  subscription genuinely is still active). But `app/models.py`'s
+  `Subscription` table has no column recording "scheduled to cancel," so
+  Mymble's own Settings page still shows plain "Mymble Pro" with no
+  indication a cancellation is pending — a user who cancels and doesn't
+  scroll back into the Stripe portal itself has no way to see that from
+  this app's own UI.
+- **Why:** Non-blocking — Stripe's own portal page already tells the user
+  clearly ("will be canceled Sept 29") at the moment they cancel, so
+  there's no functional gap today, only a missed opportunity for Mymble's
+  own UI to reflect the same fact without a portal round-trip. This
+  ticket's acceptance criteria only asked for "current plan, upgrade
+  button, cancel/manage button" — a pending-cancellation indicator is
+  additional scope, not something to add unprompted.
+- **What would close it:** add a `cancel_at_period_end` boolean (or reuse
+  `current_period_end` alongside a status check) to `subscriptions`,
+  populate it from the `customer.subscription.updated` event's own
+  `cancel_at_period_end` field (already present in the real webhook
+  payload, just not read today), and show "Cancels on {date}" in
+  `BillingSection` when true.
+- **Status (2026-08-29, S9-05):** OPEN — non-blocking; closes whenever a
+  future ticket decides this is worth building (not scheduled).
+
 ### `invoice.payment_failed` for a real *tracked* subscription — not empirically exercised (found S9-03)
 
 - **What was deferred:** S9-03's real webhook evidence for

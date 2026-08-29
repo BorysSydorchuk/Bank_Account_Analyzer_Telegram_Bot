@@ -1,8 +1,10 @@
 import type {
   AmountFilter,
+  BillingStatus,
   Budget,
   CachedInsightsResponse,
   Category,
+  CheckoutSessionResponse,
   ChatHistoryEntry,
   ChatUsage,
   ComparisonResponse,
@@ -11,6 +13,7 @@ import type {
   JobStatus,
   PatchSettingsResponse,
   PatchTransactionRequest,
+  PortalSessionResponse,
   ReauthorizeResponse,
   SettingsResponse,
   StatisticsResponse,
@@ -139,6 +142,19 @@ export function resetPassword(token: string, password: string) {
     method: "POST",
     body: JSON.stringify({ token, password }),
   })
+}
+
+// S9-05 — Billing
+export function getBillingStatus() {
+  return request<BillingStatus>("/api/billing/status")
+}
+
+export function createCheckoutSession() {
+  return request<CheckoutSessionResponse>("/api/billing/checkout", { method: "POST" })
+}
+
+export function createPortalSession() {
+  return request<PortalSessionResponse>("/api/billing/portal", { method: "POST" })
 }
 
 export function sendFeedback(message: string) {

@@ -853,7 +853,7 @@ password reset entries.** Both were OPEN pending real
 transactional-email delivery to a genuine stranger; that proof now
 exists (`lifeliyaberry27@gmail.com`, above).
 
-## Billing (S9-01/S9-02/S9-03/S9-04, in progress — Sprint 9)
+## Billing (S9-01/S9-02/S9-03/S9-04/S9-05, in progress — Sprint 9)
 
 **Stripe, test mode only. No live-mode object has been created and none
 should be until Borys deliberately activates the account.** Real test-mode
@@ -979,6 +979,32 @@ cap with a new message mentioning upgrading; flipped to `tier='paid'`, the
 same user succeeded 30/30 times on insights (well past the free cap of
 10) and, on hitting *that* cap, got the original non-upgrade wording —
 only a free-tier user with billing on ever sees the upgrade mention.
+
+**Billing UI (S9-05).** A `BillingSection` card in `/settings`
+(`GET /api/billing/status`, `POST /api/billing/checkout` from S9-03,
+`POST /api/billing/portal`) shows exactly one of three states, never a
+button that leads nowhere: free + billing off → an honest note that
+billing isn't active yet during the beta; free + billing on → "Upgrade
+to Mymble Pro" (real Checkout, S9-03); paid → "Manage subscription" (real
+Stripe Customer Portal), **shown regardless of the kill switch** — a real
+paying customer must always be able to reach their own real subscription
+to cancel it, confirmed live by leaving billing off for a paid test user
+and still seeing the button. `/billing/success`/`/billing/cancel` are
+Stripe's real redirect targets; success invalidates the cached billing
+status so the new tier shows immediately, no polling.
+
+The Stripe account had no Customer Portal configuration at all (a real
+premise-check finding — `billing_portal.sessions.create` fails without
+one) — `scripts/create_stripe_portal_configuration.py` created the real
+one now in use (`bpc_1U9km2...`, is_default). Confirmed live end-to-end:
+a real browser completed a real Checkout (`4242...` test card) for the
+throwaway S9-03 test account, the Settings page immediately showed
+"Mymble Pro," a real click into the real portal showed the real payment
+method and paid invoice, and a real in-portal cancellation correctly
+scheduled `cancel_at_period_end` rather than cancelling immediately — the
+real `customer.subscription.updated` webhook it fired kept `tier='paid'`/
+`status='active'` (accurate: the subscription is still genuinely active
+until 2026-09-29), the same real webhook infrastructure S9-03 built.
 
 ## Beta Invite Mechanism (S8-06)
 
@@ -1207,7 +1233,8 @@ matter).
 **Authenticated (`get_current_user`) — every other route**, spanning
 `analysis.py` (`POST /api/analysis/categorize`,
 `POST /api/analysis/insights`), `billing.py` (`POST /api/billing/checkout`,
-S9-03), `budgets.py`, `categories.py`,
+S9-03; `GET /api/billing/status`, `POST /api/billing/portal`, S9-05),
+`budgets.py`, `categories.py`,
 `chat.py`, `feedback.py`, `insights.py`, `jobs.py`, `settings.py`,
 `statistics.py`, and the rest of `transactions.py`/`user_auth.py`
 (`/me`, `/set-password`, `/google/link`). All scoped to

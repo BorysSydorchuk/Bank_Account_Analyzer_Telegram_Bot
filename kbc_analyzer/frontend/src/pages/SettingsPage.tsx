@@ -1,5 +1,6 @@
 import { AccountSection } from "@/components/settings/AccountSection"
 import { BankConnectionSection } from "@/components/settings/BankConnectionSection"
+import { BillingSection } from "@/components/settings/BillingSection"
 import { BudgetsSection } from "@/components/settings/BudgetsSection"
 import { CategoriesSection } from "@/components/settings/CategoriesSection"
 import { ProviderSection } from "@/components/settings/ProviderSection"
@@ -13,6 +14,7 @@ export function SettingsPage() {
       <main className="flex-1 overflow-y-auto bg-background p-6">
         <div className="flex max-w-2xl flex-col gap-6">
           <AccountSection />
+          <BillingSection />
           <ProviderSection />
           <BankConnectionSection />
           <CategoriesSection />

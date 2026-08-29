@@ -27,10 +27,11 @@ from sqlalchemy.orm import Session
 
 from .. import crud
 from ..auth.dependency import get_current_user
+from ..billing import is_billing_enabled
 from ..db import get_db
 from ..models import User
 from ..rate_limit import WEBHOOK_RATE_LIMIT, limiter
-from ..schemas import CheckoutSessionOut
+from ..schemas import BillingStatusOut, CheckoutSessionOut, PortalSessionOut
 from ..stripe_client import get_stripe_client
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,47 @@ def create_checkout_session(current_user: User = Depends(get_current_user)) -> C
         "cancel_url": f"{frontend_origin}/billing/cancel",
     })
     return CheckoutSessionOut(checkout_url=session.url)
+
+
+@router.get("/status", response_model=BillingStatusOut)
+def get_billing_status(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> BillingStatusOut:
+    """Everything the Settings page (S9-05) needs to decide what to show:
+    the kill switch (so it never offers an "Upgrade" button that leads
+    nowhere while billing is off) and this user's own tier/status.
+    """
+    subscription = crud.get_subscription(db, current_user.id)
+    return BillingStatusOut(
+        billing_enabled=is_billing_enabled(db),
+        tier=crud.get_user_tier(db, current_user.id),
+        status=subscription.status if subscription is not None else None,
+    )
+
+
+@router.post("/portal", response_model=PortalSessionOut)
+def create_portal_session(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> PortalSessionOut:
+    """Creates a real Stripe Customer Portal session for cancel/manage
+    (S9-05) — deliberately not gated on the billing kill switch: a real
+    paying customer must always be able to reach their own real Stripe
+    subscription to cancel it, regardless of whether usage-limit
+    enforcement (S9-04) happens to be on. Gated on actually having a
+    Stripe customer instead — a user who has never paid has nothing to
+    manage.
+    """
+    subscription = crud.get_subscription(db, current_user.id)
+    if subscription is None or subscription.stripe_customer_id is None:
+        raise HTTPException(status_code=400, detail="No billing account found for this user.")
+
+    client = get_stripe_client()
+    frontend_origin = os.environ["FRONTEND_ORIGIN"]
+    session = client.v1.billing_portal.sessions.create({
+        "customer": subscription.stripe_customer_id,
+        "return_url": f"{frontend_origin}/settings",
+    })
+    return PortalSessionOut(portal_url=session.url)
 
 
 @router.post("/webhook")
