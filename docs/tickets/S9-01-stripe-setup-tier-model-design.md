@@ -113,12 +113,13 @@ enforcement), so today's flag state has zero observable effect anywhere.
 Regression test coverage added: `tests/test_billing.py` (3 new tests).
 Full backend suite: 153/153 passing (150 pre-existing + 3 new).
 
-**Flagged mid-ticket, not blocking:**
-- Stripe's best-practices skill recommends a *restricted* API key
-  (`rk_test_...`, scoped permissions) over the full secret key Borys
-  generated from the Dashboard. Not switched — Borys's original key
-  works fine for now; suggest revisiting before this goes anywhere near
-  live mode.
+**Flagged mid-ticket, now tracked as its own ledger entries (correction —
+initially buried as prose here instead of a standalone entry, same
+pattern as S8-05/S8-06/S8-08; see this ticket's AMENDMENT below):**
+- `docs/verification_debt.md`: "Stripe key is a full secret key, not a
+  scoped restricted key" — Stripe's best-practices skill recommends a
+  restricted key (`rk_test_...`) over the full secret key Borys generated.
+  Non-blocking in test mode; closes before live mode.
 - `infra/ecs.tf`/`infra/web.tf` now declare Secrets Manager wiring for
   `STRIPE_SECRET_KEY` (matching the `RESEND_API_KEY` pattern), but the
   real AWS secret doesn't exist yet and `terraform apply` has not run —
@@ -135,3 +136,16 @@ Full backend suite: 153/153 passing (150 pre-existing + 3 new).
   switch's default-off/no-deploy-to-flip guarantee).
 
 Do not start S9-02 until confirmed.
+
+================================================================
+AMENDMENT (2026-08-29) — RAK finding was buried in prose, corrected
+================================================================
+Borys caught, before confirming this ticket, that the restricted-API-key
+recommendation above had been folded into a "Flagged mid-ticket, not
+blocking" aside in this ticket's own WHEN DONE rather than given its own
+standalone `docs/verification_debt.md` entry — the exact pattern already
+named and supposedly fixed after S8-05/S8-06/S8-08. Given its own entry:
+"Stripe key is a full secret key, not a scoped restricted key" (OPEN,
+closes before live mode). See that session's response to this ticket for
+the root-cause analysis of why the standing reminder didn't catch it a
+fourth time.

@@ -46,6 +46,32 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Stripe key is a full secret key, not a scoped restricted key (S9-01)
+
+- **What was deferred:** `STRIPE_SECRET_KEY` (both in local `.env` and the
+  Secrets Manager value Borys still needs to create per the entry below)
+  is a full `sk_test_...` secret key with unrestricted permissions on the
+  Stripe account, not a `rk_test_...` restricted key scoped to only the
+  operations this app actually performs (create Product/Price, create
+  Checkout Sessions, read subscription/webhook events).
+- **Why:** Stripe's own best-practices guidance is to default to a
+  restricted key wherever possible — a compromised RAK can do far less
+  damage than a compromised secret key, since it only has the permissions
+  explicitly granted. Non-blocking today because this is test mode only
+  (no real money, no real customer data at risk) and the key currently
+  only exists in a gitignored local `.env`, never committed or exposed
+  client-side.
+- **What would close it:** before any live-mode Stripe use, create a
+  restricted key in the Stripe Dashboard scoped to exactly the API calls
+  this integration needs (catalog write for Product/Price setup, Checkout
+  Session write, webhook/event read), swap it in for the current secret
+  key, and confirm no `403` errors result from real exercised flows
+  (Stripe's own documented RAK migration procedure: watch Workbench
+  request logs on the old key to catalog needed permissions, test the new
+  RAK against them, only then retire the old key).
+- **Status (2026-08-29, S9-01):** OPEN — non-blocking in test mode;
+  closes before Borys flips this to live mode, not before then.
+
 ### Stripe secret key — Secrets Manager wiring committed but not applied to production (S9-01)
 
 - **What was deferred:** `infra/ecs.tf`/`infra/web.tf` now declare and
