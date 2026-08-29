@@ -853,7 +853,7 @@ password reset entries.** Both were OPEN pending real
 transactional-email delivery to a genuine stranger; that proof now
 exists (`lifeliyaberry27@gmail.com`, above).
 
-## Billing (S9-01, in progress — Sprint 9)
+## Billing (S9-01/S9-02, in progress — Sprint 9)
 
 **Stripe, test mode only. No live-mode object has been created and none
 should be until Borys deliberately activates the account.** Real test-mode
@@ -898,6 +898,17 @@ is deliberately not in Secrets Manager — it's meant to be client-visible,
 so it isn't a secret; wired as plain frontend config when S9-05 (Billing
 UI) needs it. `STRIPE_WEBHOOK_SECRET` doesn't exist yet at all — generated
 by S9-03 when the real webhook endpoint is created.
+
+**Subscription schema and tier reads (S9-02).** `subscriptions` table (see
+Database Tables above) holds each user's current tier and Stripe ids —
+migration `59a0e1c55d1a`, applied against the real dev database with all 5
+existing beta users and 412 existing transactions confirmed untouched.
+`crud.get_user_tier(db, user_id)` is the one place tier gets read: no row
+→ `"free"`, otherwise the row's `tier` column — confirmed live against all
+5 real existing users, every one reads `"free"` with zero Stripe objects
+created for any of them. Nothing writes to this table yet (S9-03's webhook
+handler is what will), so today every row-less read is the only path any
+code actually takes.
 
 ## Beta Invite Mechanism (S8-06)
 
@@ -1031,6 +1042,7 @@ needs Borys's own portal login, not a code change.
 | `enable_banking_sessions` | One Enable Banking (KBC) bank connection per user (S7-06) | `user_id` UUID PK + FK → `users(id)` — one row per user, not a surrogate id, since one user has exactly one connection today; `session_id_encrypted`/`account_uids_encrypted` Fernet-encrypted (`app/crypto.py`, same pattern as `settings`' API keys); `valid_until` plain (needed for expiry comparisons); replaces the single global `eb_session.json` file — see the Auth section for the full story, including the real production gap this closed as a side effect |
 | `usage_events` | One row per LLM-calling action actually taken (S8-04) — see Invariants below | `user_id` UUID FK → `users(id)`, NOT NULL; no PK beyond `id`; indexed on `(user_id, action, created_at)` for the rolling-window COUNT queries in `app/usage_limits.py` |
 | `app_settings` | Genuinely global (not per-user) key/value config, e.g. the Sprint 9 billing kill switch (S9-01) | `key` TEXT PK, no `user_id` at all — deliberately a separate table from `settings` above, not a NULL-user_id row in it (see `app/models.py`'s `AppSetting` docstring); read via `crud.get_app_setting`/written via `crud.set_app_setting`, both immediate — no caching, so a direct SQL `UPDATE` takes effect on the very next read with no app restart |
+| `subscriptions` | Per-user Stripe subscription state / tier (S9-02) | `user_id` UUID PK + FK → `users(id)` — one row per user who has ever touched billing, not a history log (same shape as `enable_banking_sessions`); `stripe_customer_id`/`stripe_subscription_id` both nullable + UNIQUE, unset until a user starts checkout; `tier` NOT NULL, default `'free'`, `CHECK (tier IN ('free', 'paid'))`; `status` free-text, no CHECK — mirrors Stripe's own (larger, evolving) status vocabulary rather than hardcoding a closed set; no row at all is the normal state for a free user — `crud.get_user_tier` reads that absence as `"free"` |
 
 `manually_edited`: true once a human has set category/subcategory/
 description by hand; the categorization agent excludes these rows even

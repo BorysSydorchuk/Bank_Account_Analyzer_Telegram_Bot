@@ -99,6 +99,33 @@ create it early rather than tracking by memory").
   once Borys has run both commands and the live task-definition check
   above confirms the secret actually resolves.
 
+### `subscriptions.stripe_customer_id`/`stripe_subscription_id` uniqueness — vendor-documented, not yet empirically exercised (found S9-02)
+
+- **What was deferred:** `app/models.py`'s `Subscription.stripe_customer_id`
+  and `stripe_subscription_id` are both declared UNIQUE, keying identity on
+  Stripe's own ids — but no real Stripe webhook payload has ever been
+  received (S9-03 is what creates the webhook endpoint at all), so the
+  "these ids are stable and never reused" guarantee has only been validated
+  via (a) vendor documentation, not (b) an empirical test against this
+  project's own integration.
+- **Why:** CLAUDE.md's External System Assumptions rule requires one of
+  vendor docs, an empirical test, or an explicit stated-and-accepted risk
+  before building identity/uniqueness on an external system's values — this
+  project was burned once already doing exactly this with Enable Banking's
+  `account_id` (not stable across reconnects, a real S3-08/S4-01 production
+  incident). Stripe customer/subscription ids are a materially different,
+  better-documented case (they're Stripe's own primary keys, not a mutable
+  session artifact like `account_id` was), so this is judged low-risk, but
+  "low-risk" isn't the same as "empirically confirmed" — logging it rather
+  than asserting it's fine from memory of the Enable Banking incident.
+- **What would close it:** once S9-03's webhook endpoint exists and has
+  processed at least one real test-mode `checkout.session.completed` event,
+  confirm the received `customer`/`subscription` ids match the ones already
+  stored (no collision, no silent overwrite of a different user's row).
+- **Status (2026-08-29, S9-02):** OPEN — non-blocking today (no webhook
+  exists yet, so nothing writes to these columns in production); closes
+  when S9-03 processes its first real webhook event.
+
 ### `account_uids_encrypted` stale-decryption — stored snapshot doesn't match real account state (found S8-08)
 
 - **What was deferred:** the `enable_banking_sessions` row for

@@ -291,3 +291,48 @@ class AppSetting(Base):
     key = Column(Text, primary_key=True)
     value = Column(Text, nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    # Fixed two-tier model per the Sprint 9 plan ("simple two-tier — free,
+    # paid — not usage-based, not multiple paid tiers"), so a CHECK
+    # constraint on `tier` is safe and worth having: this set isn't expected
+    # to grow the way `status` below is.
+    __table_args__ = (CheckConstraint("tier IN ('free', 'paid')", name="ck_subscriptions_tier"),)
+
+    # S9-02: `user_id` is the primary key, not a surrogate id — same shape as
+    # `EnableBankingSession` above and for the same reason: this row tracks
+    # one user's *current* subscription state, not a history log, so there's
+    # exactly one row per user who has ever touched billing. S9-03's webhook
+    # handler updates it in place as Stripe's real subscription state changes
+    # (checkout completed, canceled, payment failed), rather than inserting
+    # a new row per event.
+    #
+    # No row at all is the normal, expected state for every free user who
+    # has never started checkout — `crud.get_user_tier` reads that absence
+    # as "free" (see its docstring). A row can still exist for a currently-
+    # free user (e.g. `status='canceled'` after a paid subscription lapsed)
+    # — `tier` is what's authoritative for access, not row presence.
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
+    # Nullable — assigned only once a user actually starts checkout (S9-03).
+    # Unique because Stripe customer/subscription ids are per-account,
+    # never shared: one Stripe customer belongs to exactly one of our users.
+    stripe_customer_id = Column(Text, unique=True)
+    stripe_subscription_id = Column(Text, unique=True)
+    tier = Column(Text, nullable=False, server_default="free")
+    # No CHECK constraint here, unlike `tier` — this mirrors Stripe's own
+    # subscription status vocabulary (active, canceled, past_due, trialing,
+    # unpaid, incomplete, ...), which this app doesn't own and shouldn't
+    # hardcode a closed set for; a status Stripe adds later would otherwise
+    # need a schema migration just to be storable. Null until a Stripe
+    # subscription object exists.
+    status = Column(Text)
+    # The end of the currently-paid period — lets S9-04 grant paid access
+    # through a period a user has already paid for even if a webhook is
+    # delayed or briefly missed, rather than cutting access off exactly at
+    # cancellation time.
+    current_period_end = Column(DateTime(timezone=True))
+    canceled_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

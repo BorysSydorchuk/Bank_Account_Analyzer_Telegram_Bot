@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from .agents.categorization import CATEGORIES
 from .colors import BACKUP_PALETTE
-from .models import AppSetting, BetaInvite, Budget, Category, Insight, Setting, Transaction, User
+from .models import AppSetting, BetaInvite, Budget, Category, Insight, Setting, Subscription, Transaction, User
 
 
 def get_user_by_google_id(db: Session, google_id: str) -> User | None:
@@ -722,3 +722,20 @@ def set_app_setting(db: Session, key: str, value: str) -> None:
     )
     db.execute(stmt)
     db.commit()
+
+
+def get_subscription(db: Session, user_id: UUID) -> Subscription | None:
+    """The user's subscription row, or None if they've never touched checkout
+    (S9-02) — the normal state for every free user. Use get_user_tier for
+    the free/paid decision itself; this is for callers that need the
+    Stripe ids/status/dates too (S9-03's webhook handler, a future billing
+    settings page)."""
+    return db.execute(select(Subscription).where(Subscription.user_id == user_id)).scalar_one_or_none()
+
+
+def get_user_tier(db: Session, user_id: UUID) -> str:
+    """"free" or "paid". A user with no subscriptions row at all reads as
+    "free" — Stripe objects are only ever created once a user actually
+    starts checkout (S9-03), never up front."""
+    subscription = get_subscription(db, user_id)
+    return subscription.tier if subscription is not None else "free"
