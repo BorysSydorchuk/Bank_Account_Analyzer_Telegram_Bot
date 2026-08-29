@@ -1,6 +1,7 @@
 """Database read/write helpers for transactions — the Postgres-backed replacement for
 kbc_analyzer.cache for anything reachable through the API.
 """
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Session
 from .agents.categorization import CATEGORIES
 from .colors import BACKUP_PALETTE
 from .models import AppSetting, BetaInvite, Budget, Category, Insight, Setting, Subscription, Transaction, User
+
+logger = logging.getLogger(__name__)
 
 
 def get_user_by_google_id(db: Session, google_id: str) -> User | None:
@@ -739,3 +742,79 @@ def get_user_tier(db: Session, user_id: UUID) -> str:
     starts checkout (S9-03), never up front."""
     subscription = get_subscription(db, user_id)
     return subscription.tier if subscription is not None else "free"
+
+
+def upsert_subscription_from_checkout(
+    db: Session,
+    *,
+    user_id: UUID,
+    stripe_customer_id: str,
+    stripe_subscription_id: str,
+    tier: str,
+    status: str,
+    current_period_end: datetime | None,
+) -> None:
+    """S9-03: the one place a subscriptions row is first created — called
+    only from the `checkout.session.completed` webhook handler, never from
+    the checkout-creation endpoint itself (see app/routers/billing.py's
+    module docstring for why). Upsert, not insert, so a redelivered webhook
+    (Stripe explicitly does not guarantee exactly-once delivery) is a safe
+    no-op rather than a conflict error.
+    """
+    stmt = pg_insert(Subscription).values(
+        user_id=user_id,
+        stripe_customer_id=stripe_customer_id,
+        stripe_subscription_id=stripe_subscription_id,
+        tier=tier,
+        status=status,
+        current_period_end=current_period_end,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[Subscription.user_id],
+        set_={
+            "stripe_customer_id": stmt.excluded.stripe_customer_id,
+            "stripe_subscription_id": stmt.excluded.stripe_subscription_id,
+            "tier": stmt.excluded.tier,
+            "status": stmt.excluded.status,
+            "current_period_end": stmt.excluded.current_period_end,
+        },
+    )
+    db.execute(stmt)
+    db.commit()
+
+
+def update_subscription_by_stripe_subscription_id(
+    db: Session,
+    *,
+    stripe_subscription_id: str,
+    tier: str | None = None,
+    status: str | None = None,
+    current_period_end: datetime | None = None,
+    canceled_at: datetime | None = None,
+) -> None:
+    """Partial update for the webhook events that fire *after* checkout
+    (subscription updated/canceled, payment failed) — these never carry our
+    own user_id, only Stripe's own subscription id, which checkout.session
+    .completed already persisted via upsert_subscription_from_checkout.
+    Logs and no-ops (does not raise) if no matching row exists yet — a real
+    possibility if Stripe redelivers/reorders events, and a 500 here would
+    make Stripe retry a webhook this app can never actually satisfy.
+    """
+    row = db.execute(
+        select(Subscription).where(Subscription.stripe_subscription_id == stripe_subscription_id)
+    ).scalar_one_or_none()
+    if row is None:
+        logger.warning(
+            "Webhook referenced unknown stripe_subscription_id %s — no matching row, ignoring",
+            stripe_subscription_id,
+        )
+        return
+    if tier is not None:
+        row.tier = tier
+    if status is not None:
+        row.status = status
+    if current_period_end is not None:
+        row.current_period_end = current_period_end
+    if canceled_at is not None:
+        row.canceled_at = canceled_at
+    db.commit()

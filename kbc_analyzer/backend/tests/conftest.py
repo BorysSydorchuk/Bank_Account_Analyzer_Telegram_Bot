@@ -98,6 +98,18 @@ os.environ.setdefault("RESEND_API_KEY", "test-resend-api-key")
 # S8-07: routers/feedback.py reads this directly at call time, same
 # syntactically-present-for-the-fake reasoning as the two above.
 os.environ.setdefault("FEEDBACK_RECIPIENT_EMAIL", "borys-test@example.com")
+# Stripe (S9-01/S9-03): forced, not setdefault — .env already has real
+# test-mode values for local dev, but tests must never depend on whatever
+# happens to be in a developer's .env at the time (the webhook secret in
+# particular: tests compute their own HMAC signatures against a known
+# fixed value, which would silently break if this picked up .env's real,
+# rotatable secret instead). app/stripe_client.get_stripe_client is
+# monkeypatched by fixtures/fake_stripe.py for every test that would
+# otherwise make a real Stripe API call, so this string never needs to be
+# a real key — same reasoning as the Enable Banking/Google values above.
+os.environ["STRIPE_SECRET_KEY"] = "sk_test_fake_key_for_tests_only"
+os.environ["STRIPE_PRICE_ID_PRO"] = "price_test_fake"
+os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_test_fake_secret_for_tests_only"
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402
@@ -111,6 +123,7 @@ pytest_plugins = [
     "tests.fixtures.fake_llm_provider",
     "tests.fixtures.fake_enable_banking",
     "tests.fixtures.fake_resend",
+    "tests.fixtures.fake_stripe",
 ]
 
 

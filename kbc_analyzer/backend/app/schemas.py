@@ -399,3 +399,9 @@ class UserOut(BaseModel):
     id: UUID
     email: str
     email_verified: bool
+
+
+class CheckoutSessionOut(BaseModel):
+    """S9-03: the real Stripe-hosted Checkout URL the frontend redirects to."""
+
+    checkout_url: str

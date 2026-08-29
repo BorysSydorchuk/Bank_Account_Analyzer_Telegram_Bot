@@ -46,6 +46,43 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### `invoice.payment_failed` for a real *tracked* subscription — not empirically exercised (found S9-03)
+
+- **What was deferred:** S9-03's real webhook evidence for
+  `invoice.payment_failed` came from `stripe trigger invoice
+  .payment_failed`, whose fixture creates its own throwaway one-off
+  invoice with no `subscription` field — so it exercised
+  `app/routers/billing.py`'s "invoice unrelated to any subscription"
+  early-return branch, not the "known subscription id, no matching row"
+  branch, and not the "known subscription id WITH a matching row → set
+  `past_due`" branch either (the actual acceptance-criterion scenario:
+  "webhook correctly updates subscription status for ... failed
+  payment"). That specific branch is only covered by a realistic unit
+  test (`tests/test_billing_webhook.py::test_payment_failed_marks
+  _subscription_past_due`), not a live Stripe-delivered event.
+- **Why:** Getting a *real* renewal-failure event tied to a real tracked
+  subscription requires either a Stripe Test Clock (an accelerated
+  billing cycle against a customer with a payment method that fails on
+  renewal) or waiting a real ~30-day billing period — both meaningfully
+  more setup than this ticket's other three real-evidence flows (checkout,
+  update, cancel), which were each a single direct API call or browser
+  action. Judged not worth the added complexity given the unit test
+  exercises the identical code path against a realistic Stripe event
+  shape (real field names, real access patterns via the same
+  `_FakeStripeObject` that already caught two real bugs during this
+  ticket — see docs/tickets/S9-03-stripe-checkout-webhook-handling.md's
+  KEY DECISIONS).
+- **What would close it:** create a Stripe Test Clock, attach a customer
+  with a payment method documented to fail on renewal (not on initial
+  charge), complete a real checkout against that clock, advance the clock
+  past the billing period, and confirm the real resulting
+  `invoice.payment_failed` event sets that user's real row to
+  `status='past_due'`.
+- **Status (2026-08-29, S9-03):** OPEN — non-blocking; the code path is
+  unit-tested against a realistic event shape, just not proven against a
+  live Stripe delivery. Closes whenever this specific gap is worth the
+  Test Clock setup — no sprint currently scheduled to require it.
+
 ### Stripe key is a full secret key, not a scoped restricted key (S9-01)
 
 - **What was deferred:** `STRIPE_SECRET_KEY` (both in local `.env` and the
@@ -98,33 +135,6 @@ create it early rather than tracking by memory").
   switch defaults off and nothing reads Stripe in production yet); closes
   once Borys has run both commands and the live task-definition check
   above confirms the secret actually resolves.
-
-### `subscriptions.stripe_customer_id`/`stripe_subscription_id` uniqueness — vendor-documented, not yet empirically exercised (found S9-02)
-
-- **What was deferred:** `app/models.py`'s `Subscription.stripe_customer_id`
-  and `stripe_subscription_id` are both declared UNIQUE, keying identity on
-  Stripe's own ids — but no real Stripe webhook payload has ever been
-  received (S9-03 is what creates the webhook endpoint at all), so the
-  "these ids are stable and never reused" guarantee has only been validated
-  via (a) vendor documentation, not (b) an empirical test against this
-  project's own integration.
-- **Why:** CLAUDE.md's External System Assumptions rule requires one of
-  vendor docs, an empirical test, or an explicit stated-and-accepted risk
-  before building identity/uniqueness on an external system's values — this
-  project was burned once already doing exactly this with Enable Banking's
-  `account_id` (not stable across reconnects, a real S3-08/S4-01 production
-  incident). Stripe customer/subscription ids are a materially different,
-  better-documented case (they're Stripe's own primary keys, not a mutable
-  session artifact like `account_id` was), so this is judged low-risk, but
-  "low-risk" isn't the same as "empirically confirmed" — logging it rather
-  than asserting it's fine from memory of the Enable Banking incident.
-- **What would close it:** once S9-03's webhook endpoint exists and has
-  processed at least one real test-mode `checkout.session.completed` event,
-  confirm the received `customer`/`subscription` ids match the ones already
-  stored (no collision, no silent overwrite of a different user's row).
-- **Status (2026-08-29, S9-02):** OPEN — non-blocking today (no webhook
-  exists yet, so nothing writes to these columns in production); closes
-  when S9-03 processes its first real webhook event.
 
 ### `account_uids_encrypted` stale-decryption — stored snapshot doesn't match real account state (found S8-08)
 
@@ -392,6 +402,25 @@ create it early rather than tracking by memory").
 ---
 
 ## CLOSED (recent)
+
+### `subscriptions.stripe_customer_id`/`stripe_subscription_id` uniqueness — vendor-documented, not yet empirically exercised (found S9-02, closed S9-03)
+
+- **What was deferred:** the UNIQUE constraint on both Stripe id columns
+  keyed identity on Stripe's own ids without an empirical test against
+  this project's own integration — only vendor documentation backed it.
+- **How it closed:** S9-03 built the real webhook endpoint and drove a
+  real, complete test-mode lifecycle through it — real Checkout (Stripe's
+  hosted page, Stripe's own `4242...` test card, a real browser), a real
+  cancellation via the Stripe API, and a real unrelated `invoice
+  .payment_failed` triggered via the Stripe CLI. `checkout.session
+  .completed` stored a real `cus_...`/`sub_...` pair; `customer
+  .subscription.updated` and `.deleted` (both delivered for real via
+  `stripe listen`, forwarded to the local backend) matched and updated
+  that same row by `stripe_subscription_id` with no collision. No
+  duplicate-id conflict, no cross-user overwrite, across a real multi-event
+  lifecycle for one real subscription — the guarantee this entry existed
+  to check.
+- **Status:** CLOSED (2026-08-29, S9-03).
 
 ### New registrations get zero categories — categorization silently discards every result for every non-bootstrap user (found post-S8-08, closed S8-09)
 

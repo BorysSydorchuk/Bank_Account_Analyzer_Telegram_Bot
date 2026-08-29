@@ -853,7 +853,7 @@ password reset entries.** Both were OPEN pending real
 transactional-email delivery to a genuine stranger; that proof now
 exists (`lifeliyaberry27@gmail.com`, above).
 
-## Billing (S9-01/S9-02, in progress — Sprint 9)
+## Billing (S9-01/S9-02/S9-03, in progress — Sprint 9)
 
 **Stripe, test mode only. No live-mode object has been created and none
 should be until Borys deliberately activates the account.** Real test-mode
@@ -896,19 +896,71 @@ applied, silent `AccessDeniedException` in production) is exactly the
 failure mode this note exists to prevent repeating. `STRIPE_PUBLISHABLE_KEY`
 is deliberately not in Secrets Manager — it's meant to be client-visible,
 so it isn't a secret; wired as plain frontend config when S9-05 (Billing
-UI) needs it. `STRIPE_WEBHOOK_SECRET` doesn't exist yet at all — generated
-by S9-03 when the real webhook endpoint is created.
+UI) needs it. `STRIPE_WEBHOOK_SECRET` is a real local value now (S9-03
+generated it via `stripe listen --print-secret`) — only in the local
+`.env`, same as the other Stripe credentials; production still needs its
+own real webhook endpoint + secret created in the Stripe Dashboard once
+this app is actually deployed with billing enabled (not yet — tracked
+alongside the rest of the production-wiring gap above).
 
 **Subscription schema and tier reads (S9-02).** `subscriptions` table (see
 Database Tables above) holds each user's current tier and Stripe ids —
 migration `59a0e1c55d1a`, applied against the real dev database with all 5
 existing beta users and 412 existing transactions confirmed untouched.
 `crud.get_user_tier(db, user_id)` is the one place tier gets read: no row
-→ `"free"`, otherwise the row's `tier` column — confirmed live against all
-5 real existing users, every one reads `"free"` with zero Stripe objects
-created for any of them. Nothing writes to this table yet (S9-03's webhook
-handler is what will), so today every row-less read is the only path any
-code actually takes.
+→ `"free"`, otherwise the row's `tier` column.
+
+**Checkout and webhook handling (S9-03).** `app/routers/billing.py`:
+`POST /api/billing/checkout` (authenticated) creates a real Stripe-hosted
+Checkout Session for the S9-01 price and returns its URL; it writes
+nothing to `subscriptions` itself — only a confirmed webhook event ever
+creates or updates a row, so an abandoned checkout leaves no trace.
+`POST /api/billing/webhook` (public — see Public Route Enumeration below)
+verifies Stripe's signature (`stripe.Webhook.construct_event`,
+`STRIPE_WEBHOOK_SECRET`) before touching anything, and handles
+`checkout.session.completed`, `customer.subscription.updated`,
+`customer.subscription.deleted`, and `invoice.payment_failed` — every
+other event type is acknowledged (200) but ignored. Matching back to a
+user happens via `client_reference_id`, set to the user's own id at
+Checkout Session creation (Stripe's own documented mechanism for this);
+later events (subscription updated/deleted, payment failed) match by
+Stripe's own `stripe_subscription_id`, already persisted from the
+`checkout.session.completed` row. An event referencing a subscription id
+this app has no row for is a safe, logged no-op, never a 500 — Stripe
+retries indefinitely on a non-2xx response, and a crash here would just
+make it retry a payload this app can never satisfy.
+
+Two real, empirically-found API surface details, not assumptions:
+`StripeClient`'s top-level `.checkout`/`.subscriptions` shortcuts are
+deprecated in this SDK version in favor of `.v1.checkout`/`.v1
+.subscriptions` (this code uses the latter); and this account's real,
+current Stripe API version has moved `current_period_end` off the
+top-level `Subscription` object onto each subscription item —
+`_period_end_from_subscription` reads the item-level value, falling back
+from the (now-empty) top-level field first for forward compatibility.
+Both were caught only by testing against the real live API, not by
+reading the SDK's type stubs.
+
+**Real evidence, a complete live lifecycle, 2026-08-29.** A throwaway test
+account registered through the real `/api/auth/register` flow completed a
+real Stripe-hosted Checkout (real browser, Stripe's own `4242 4242 4242
+4242` test card) — `checkout.session.completed` delivered via `stripe
+listen`, real signature verified, row created with real `cus_.../sub_...`
+ids, `tier='paid'`, `status='active'`. A real API-triggered subscription
+update (`customer.subscription.updated`) then a real cancellation
+(`customer.subscription.deleted`, via `client.v1.subscriptions.cancel`)
+both delivered and applied correctly — `current_period_end` populated,
+then `tier='free'`/`status='canceled'`/`canceled_at` set. A real,
+Stripe-CLI-triggered `invoice.payment_failed` event (unrelated to this
+subscription — the CLI's fixture creates its own throwaway one-off
+invoice with no `subscription` field) was delivered, signature-verified,
+and correctly no-op'd without disturbing the existing row — the "invoice
+unrelated to any subscription" branch, not the "unknown subscription id"
+branch; the latter is covered by `tests/test_billing_webhook.py`'s
+`test_payment_failed_for_unknown_subscription_is_a_safe_no_op` instead,
+against a realistic Stripe event shape. Two real adversarial calls (no
+signature header; a forged signature) both got a real `400 Invalid
+signature.` from the live endpoint.
 
 ## Beta Invite Mechanism (S8-06)
 
@@ -1132,10 +1184,12 @@ matter).
 | `POST /api/auth/verify-email` | Single-use token is the credential, not a session (S7-09) |
 | `POST /api/auth/request-password-reset` | Always the same generic response regardless of whether the email exists (enumeration-avoidance, S6-04/S7-09) |
 | `POST /api/auth/reset-password` | Single-use token is the credential |
+| `POST /api/billing/webhook` (S9-03) | No session possible — Stripe itself is the caller. Gated by Stripe's own signature scheme (`STRIPE_WEBHOOK_SECRET`) instead, verified before any other code runs; a missing/forged signature gets a real `400`, confirmed live (see Billing section above) |
 
 **Authenticated (`get_current_user`) — every other route**, spanning
 `analysis.py` (`POST /api/analysis/categorize`,
-`POST /api/analysis/insights`), `budgets.py`, `categories.py`,
+`POST /api/analysis/insights`), `billing.py` (`POST /api/billing/checkout`,
+S9-03), `budgets.py`, `categories.py`,
 `chat.py`, `feedback.py`, `insights.py`, `jobs.py`, `settings.py`,
 `statistics.py`, and the rest of `transactions.py`/`user_auth.py`
 (`/me`, `/set-password`, `/google/link`). All scoped to

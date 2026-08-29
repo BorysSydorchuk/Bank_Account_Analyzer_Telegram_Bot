@@ -22,6 +22,7 @@ from .rate_limit import limiter
 from .routers import (
     analysis,
     auth,
+    billing,
     budgets,
     categories,
     chat,
@@ -78,6 +79,7 @@ app.include_router(insights.router)
 app.include_router(budgets.router)
 app.include_router(chat.router)
 app.include_router(feedback.router)
+app.include_router(billing.router)
 
 
 # Currently unreachable — S4-02 moved the Enable Banking fetch into the background
