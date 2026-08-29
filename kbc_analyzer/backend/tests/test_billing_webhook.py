@@ -13,10 +13,26 @@ import json
 import time
 import uuid
 
+import pytest
+
 from app import crud
 from app.models import User
+from app.rate_limit import limiter
 
 WEBHOOK_SECRET = "whsec_test_fake_secret_for_tests_only"
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """slowapi's in-memory limiter is keyed on remote address, and
+    Starlette's TestClient reports a fixed address ("testclient") for
+    every request — every test in this file would otherwise share one
+    WEBHOOK_RATE_LIMIT bucket across the whole pytest run, not just within
+    each test. Same fixture as tests/test_email_password_auth.py uses for
+    LOGIN_RATE_LIMIT/REGISTER_RATE_LIMIT, for the identical reason.
+    """
+    limiter.reset()
+    yield
 
 
 def _sign(payload: bytes, secret: str = WEBHOOK_SECRET, timestamp: int | None = None) -> str:
@@ -246,3 +262,26 @@ def test_unhandled_event_type_is_acknowledged_not_processed(client):
         "data": {"object": {"id": "cus_irrelevant"}},
     })
     assert response.status_code == 200
+
+
+def test_webhook_rate_limit_returns_429_after_too_many_calls(client):
+    """WEBHOOK_RATE_LIMIT (60/minute) is a ceiling in front of real
+    signature verification against a flood of forged requests — not a
+    defense on its own, but real and enforced. A forged-signature payload
+    is used here (cheaper than signing 61 real payloads) since the rate
+    limiter runs before the route body, so it rejects on request count
+    alone regardless of what the body/signature contain."""
+    event = {"type": "checkout.session.completed", "data": {"object": {}}}
+    payload = json.dumps(event).encode()
+
+    responses = [
+        client.post(
+            "/api/billing/webhook",
+            content=payload,
+            headers={"stripe-signature": "t=0,v1=forged", "content-type": "application/json"},
+        )
+        for _ in range(61)
+    ]
+
+    assert all(r.status_code == 400 for r in responses[:60])
+    assert responses[60].status_code == 429

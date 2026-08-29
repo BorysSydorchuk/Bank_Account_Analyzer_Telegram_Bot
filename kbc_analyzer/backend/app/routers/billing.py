@@ -29,6 +29,7 @@ from .. import crud
 from ..auth.dependency import get_current_user
 from ..db import get_db
 from ..models import User
+from ..rate_limit import WEBHOOK_RATE_LIMIT, limiter
 from ..schemas import CheckoutSessionOut
 from ..stripe_client import get_stripe_client
 
@@ -92,6 +93,7 @@ def create_checkout_session(current_user: User = Depends(get_current_user)) -> C
 
 
 @router.post("/webhook")
+@limiter.limit(WEBHOOK_RATE_LIMIT)
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)) -> dict:
     """No auth dependency — see this module's docstring for why signature
     verification, not a session, is this endpoint's real gate. Reads the

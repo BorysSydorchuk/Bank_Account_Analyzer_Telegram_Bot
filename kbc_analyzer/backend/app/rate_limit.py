@@ -41,3 +41,16 @@ REGISTER_RATE_LIMIT = "5/minute"
 # reveal anything (see routers/user_auth.py's request_password_reset),
 # making it exactly the kind of probe-able surface those two already are.
 REQUEST_PASSWORD_RESET_RATE_LIMIT = "5/minute"
+
+# S9-03/S9-04 (Reviewer finding on S9-03, out of scope there): this endpoint
+# is public by necessity — Stripe itself is the caller, with no session to
+# key on — same IP-keyed reasoning as LOGIN/REGISTER/REQUEST_PASSWORD_RESET
+# above, but a much higher ceiling. Real signature verification is the
+# actual security gate (app/routers/billing.py); this is a cheap ceiling in
+# front of it against a flood of forged requests, not a defense against a
+# determined attacker on its own. A single real checkout can legitimately
+# fire several events in quick succession (checkout completed, subscription
+# created, subscription updated, invoice paid), plus Stripe's own retries
+# on a slow response — 60/minute comfortably covers that without throttling
+# real Stripe traffic.
+WEBHOOK_RATE_LIMIT = "60/minute"
