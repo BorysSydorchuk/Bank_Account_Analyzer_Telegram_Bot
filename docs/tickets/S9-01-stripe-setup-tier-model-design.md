@@ -1,4 +1,4 @@
-Status: in-progress
+Status: delivered
 
 ================================================================
 TICKET S9-01 — Stripe Setup & Tier Model Design
@@ -66,3 +66,72 @@ AMENDMENT (2026-08-29) — decisions confirmed by Borys pre-build
   unlimited — caps still apply at a higher threshold, per
   Recommended option (keeps a technical backstop against runaway
   LLM API cost even on a paid/compromised account).
+
+================================================================
+WHEN DONE (2026-08-29)
+================================================================
+
+**Real Stripe object evidence:** created via
+`scripts/create_stripe_products.py` against the real Stripe test-mode
+API (StripeClient, not the deprecated global `stripe.api_key =` pattern
+— corrected per the Stripe best-practices skill mid-ticket):
+
+    [stripe] Product created — id=prod_V9tx2wdtpeQNpp name='Mymble Pro'
+    [stripe] Price created   — id=price_1U9a9xPEsUgc23DfwIN1Jnzj amount=9.99 EUR/month
+
+`STRIPE_PRICE_ID_PRO` recorded in `.env`/`.env.example`. Test-mode
+confirmed defensively — the script refuses to run against anything not
+prefixed `sk_test_`/`rk_test_`, so it cannot accidentally touch live mode.
+
+**Confirmed free-vs-paid distinction:** paid tier = higher
+`app/usage_limits.py` daily caps, not unlimited (Borys's call, keeps a
+cost backstop even on a compromised paid account). Price: €9.99/month
+(Borys's call). Purely usage-limit gating for v1, no other paid-only
+feature. Full detail in ARCHITECTURE.md's new Billing section.
+
+**Kill switch mechanism and default-off confirmation:** new `app_settings`
+table (global, no `user_id` — kept separate from the per-user `settings`
+table on purpose, see `app/models.py`'s `AppSetting` docstring), migration
+`a2b6e91d4f37` applied for real:
+
+    key              | value | updated_at
+    BILLING_ENABLED  | false | 2026-08-29 00:33:25.969004+00
+
+`app/billing.py`'s `is_billing_enabled(db)` proven live, not just by
+code review:
+
+    billing enabled (seeded false): False
+    billing enabled (after flip to true): True
+    billing enabled (flipped back to false): False
+    unknown key default: false
+
+Chosen over an env var because a settings-table row is flippable by
+Borys with a direct SQL `UPDATE` against production — no new ECS task
+definition revision, no deploy. Confirmed inert: nothing in the app
+reads `is_billing_enabled` yet (S9-04 is what wires it into real
+enforcement), so today's flag state has zero observable effect anywhere.
+Regression test coverage added: `tests/test_billing.py` (3 new tests).
+Full backend suite: 153/153 passing (150 pre-existing + 3 new).
+
+**Flagged mid-ticket, not blocking:**
+- Stripe's best-practices skill recommends a *restricted* API key
+  (`rk_test_...`, scoped permissions) over the full secret key Borys
+  generated from the Dashboard. Not switched — Borys's original key
+  works fine for now; suggest revisiting before this goes anywhere near
+  live mode.
+- `infra/ecs.tf`/`infra/web.tf` now declare Secrets Manager wiring for
+  `STRIPE_SECRET_KEY` (matching the `RESEND_API_KEY` pattern), but the
+  real AWS secret doesn't exist yet and `terraform apply` has not run —
+  this environment has no AWS credentials. Logged as its own entry in
+  `docs/verification_debt.md` ("Stripe secret key — Secrets Manager
+  wiring committed but not applied to production"), explicitly calling
+  out S8-05's own real incident (same category of gap: Terraform
+  committed, never applied, silent prod `AccessDeniedException`) as the
+  risk this must not repeat. Non-blocking today because nothing in
+  production reads Stripe yet.
+- ARCHITECTURE.md updated in this same commit (new `app_settings` table
+  row, new Billing section) per the architecture-documentation rule —
+  this ticket changed a table and added a new invariant (the kill
+  switch's default-off/no-deploy-to-flip guarantee).
+
+Do not start S9-02 until confirmed.

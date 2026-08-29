@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from .agents.categorization import CATEGORIES
 from .colors import BACKUP_PALETTE
-from .models import BetaInvite, Budget, Category, Insight, Setting, Transaction, User
+from .models import AppSetting, BetaInvite, Budget, Category, Insight, Setting, Transaction, User
 
 
 def get_user_by_google_id(db: Session, google_id: str) -> User | None:
@@ -701,6 +701,23 @@ def upsert_setting(db: Session, user_id: UUID, key: str, value: str) -> None:
     stmt = pg_insert(Setting).values(user_id=user_id, key=key, value=value)
     stmt = stmt.on_conflict_do_update(
         index_elements=[Setting.user_id, Setting.key],
+        set_={"value": stmt.excluded.value},
+    )
+    db.execute(stmt)
+    db.commit()
+
+
+def get_app_setting(db: Session, key: str, default: str) -> str:
+    """Read one global (not per-user) app_settings value, or `default` if the row doesn't exist yet."""
+    row = db.execute(select(AppSetting).where(AppSetting.key == key)).scalar_one_or_none()
+    return row.value if row is not None else default
+
+
+def set_app_setting(db: Session, key: str, value: str) -> None:
+    """Upsert one global app_settings row (e.g. flipping the S9-01 billing kill switch)."""
+    stmt = pg_insert(AppSetting).values(key=key, value=value)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[AppSetting.key],
         set_={"value": stmt.excluded.value},
     )
     db.execute(stmt)

@@ -46,6 +46,33 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Stripe secret key — Secrets Manager wiring committed but not applied to production (S9-01)
+
+- **What was deferred:** `infra/ecs.tf`/`infra/web.tf` now declare and
+  wire a `kbc-analyzer/stripe-secret-key` Secrets Manager secret (same
+  pattern as `RESEND_API_KEY`), but the real AWS secret has never been
+  created and `terraform apply` has never run against this change — this
+  environment has no AWS credentials configured (`aws sts
+  get-caller-identity` fails with "Unable to locate credentials"), so
+  neither step could be done from here.
+- **Why:** creating the real secret and applying Terraform both need
+  Borys's own AWS credentials; the actual `sk_test_...` value also should
+  never pass through this session/chat to get created remotely even if
+  credentials existed. S9-01's own scope is design + real Stripe
+  test-mode objects, not a live AWS deploy.
+- **What would close it:** Borys runs `aws secretsmanager create-secret
+  --name kbc-analyzer/stripe-secret-key --secret-string <real sk_test_...
+  value>` himself, then `terraform apply` in `infra/`. **S8-05's own real
+  incident is the exact risk here** — that ticket's IAM grant was
+  committed but never applied, and production silently threw
+  `AccessDeniedException` on the next deploy. Confirm with a live `aws ecs
+  describe-task-definition` check (S7-05's own audit standard) once
+  applied, not just a clean `terraform apply` exit code.
+- **Status (2026-08-29, S9-01):** OPEN — non-blocking today (billing kill
+  switch defaults off and nothing reads Stripe in production yet); closes
+  once Borys has run both commands and the live task-definition check
+  above confirms the secret actually resolves.
+
 ### `account_uids_encrypted` stale-decryption — stored snapshot doesn't match real account state (found S8-08)
 
 - **What was deferred:** the `enable_banking_sessions` row for

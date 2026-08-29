@@ -274,3 +274,20 @@ class UsageEvent(Base):
     # keys, not a first-class entity with its own table (a fixed, tiny set).
     action = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    # S9-01: genuinely app-wide config (e.g. BILLING_ENABLED), not a per-user
+    # value — deliberately a separate table from `settings` above rather than
+    # a NULL-user_id row squeezed into it. `settings` was widened at S6-02
+    # specifically so nothing is shared across users (a shared LLM key was a
+    # real billing hole); overloading it with a no-user row would rebuild
+    # exactly the ambiguity that widening was meant to remove, and its
+    # (user_id, key) primary key has user_id NOT NULL, so there's no clean
+    # sentinel value anyway. This is a flag Borys flips for everyone at
+    # once, not a preference — no FK to users at all.
+    key = Column(Text, primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

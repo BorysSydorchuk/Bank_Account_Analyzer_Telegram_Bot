@@ -853,6 +853,52 @@ password reset entries.** Both were OPEN pending real
 transactional-email delivery to a genuine stranger; that proof now
 exists (`lifeliyaberry27@gmail.com`, above).
 
+## Billing (S9-01, in progress — Sprint 9)
+
+**Stripe, test mode only. No live-mode object has been created and none
+should be until Borys deliberately activates the account.** Real test-mode
+objects created via `scripts/create_stripe_products.py`
+(`app/billing.py`/`app/crud.py` for the kill switch): Product
+`prod_V9tx2wdtpeQNpp` ("Mymble Pro"), Price `price_1U9a9xPEsUgc23DfwIN1Jnzj`
+(€9.99/month, recurring, confirmed by Borys 2026-08-29). The price ID is
+config, not a secret — `STRIPE_PRICE_ID_PRO` in `.env`/`.env.example`; a
+re-run of the creation script mints a *new* price id that must replace it.
+
+**Free vs. paid distinction (confirmed by Borys):** paid tier gets higher
+`app/usage_limits.py` daily caps, not unlimited — caps still exist at both
+tiers, keeping a technical backstop against runaway LLM cost even on a
+compromised paid account. Purely a usage-limit difference for v1, no other
+paid-only feature gated. Not yet wired into `try_record_usage` — that's
+S9-04's job; today every user, free or paid, gets the same S8-04 limits
+regardless of tier.
+
+**The kill switch.** `app_settings` table, row `BILLING_ENABLED` (seeded
+`'false'` — see Database Tables above), read by `app/billing.py`'s
+`is_billing_enabled(db)`. Chosen over an env var specifically so Borys can
+flip it with a direct SQL `UPDATE` against production, no code deploy —
+env vars require a new task definition revision to change on ECS,
+`app_settings` doesn't. Nothing in the app reads this flag yet (confirmed
+live: flipping it in a local test between `true`/`false` and back had no
+observable effect anywhere — S9-04 is what actually wires it into
+enforcement), so its current state is provably inert either way.
+
+**Credentials — test-mode keys, real evidence, production wiring pending
+(see `docs/verification_debt.md`).** `STRIPE_SECRET_KEY`/
+`STRIPE_PUBLISHABLE_KEY` are real Stripe test-mode keys, currently only in
+the local `.env` (gitignored), matching this project's local-dev pattern
+for every other credential. `infra/ecs.tf`/`infra/web.tf` now declare a
+`data.aws_secretsmanager_secret.stripe_secret_key` (`kbc-analyzer/stripe-secret-key`)
+and grant it to the web task def only (worker never calls Stripe) — same
+shape as `RESEND_API_KEY`. **Unlike that S8-05 precedent, this Terraform
+change has NOT been `terraform apply`'d, and the actual AWS secret does
+not exist yet** — S8-05's own real incident (committed IAM grant, never
+applied, silent `AccessDeniedException` in production) is exactly the
+failure mode this note exists to prevent repeating. `STRIPE_PUBLISHABLE_KEY`
+is deliberately not in Secrets Manager — it's meant to be client-visible,
+so it isn't a secret; wired as plain frontend config when S9-05 (Billing
+UI) needs it. `STRIPE_WEBHOOK_SECRET` doesn't exist yet at all — generated
+by S9-03 when the real webhook endpoint is created.
+
 ## Beta Invite Mechanism (S8-06)
 
 Registration is closed-beta gated: both new-account paths — password
@@ -983,6 +1029,8 @@ needs Borys's own portal login, not a code change.
 | `insights` | Generated AI insight cards per date range | `user_id` UUID FK → `users(id)`, NOT NULL (S6-02); `crud.list_insights`/`replace_insights` both scoped by it (S6-06) — the `(date_from, date_to)` index itself stays unchanged, scoping happens in the query's `WHERE`, not the index shape; **delete-and-replace** per range on every successful sync — no history retained |
 | `budgets` | Monthly spending limit per category (S4-05) | `category` FK composite → `categories(user_id, name)` `ON UPDATE CASCADE` (S6-02); `amount` CHECK `> 0`; `user_id` UUID FK → `users(id)`, NOT NULL as of S6-02 (was nullable, always `NULL`, through Sprint 5 — the first table built multi-user-ready); `UNIQUE NULLS NOT DISTINCT (user_id, category, period)` |
 | `enable_banking_sessions` | One Enable Banking (KBC) bank connection per user (S7-06) | `user_id` UUID PK + FK → `users(id)` — one row per user, not a surrogate id, since one user has exactly one connection today; `session_id_encrypted`/`account_uids_encrypted` Fernet-encrypted (`app/crypto.py`, same pattern as `settings`' API keys); `valid_until` plain (needed for expiry comparisons); replaces the single global `eb_session.json` file — see the Auth section for the full story, including the real production gap this closed as a side effect |
+| `usage_events` | One row per LLM-calling action actually taken (S8-04) — see Invariants below | `user_id` UUID FK → `users(id)`, NOT NULL; no PK beyond `id`; indexed on `(user_id, action, created_at)` for the rolling-window COUNT queries in `app/usage_limits.py` |
+| `app_settings` | Genuinely global (not per-user) key/value config, e.g. the Sprint 9 billing kill switch (S9-01) | `key` TEXT PK, no `user_id` at all — deliberately a separate table from `settings` above, not a NULL-user_id row in it (see `app/models.py`'s `AppSetting` docstring); read via `crud.get_app_setting`/written via `crud.set_app_setting`, both immediate — no caching, so a direct SQL `UPDATE` takes effect on the very next read with no app restart |
 
 `manually_edited`: true once a human has set category/subcategory/
 description by hand; the categorization agent excludes these rows even

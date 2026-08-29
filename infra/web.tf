@@ -64,6 +64,9 @@ resource "aws_ecs_task_definition" "web" {
         { name = "SETTINGS_SECRET", valueFrom = data.aws_secretsmanager_secret.settings_secret.arn },
         { name = "GOOGLE_CLIENT_SECRET", valueFrom = data.aws_secretsmanager_secret.google_client_secret.arn },
         { name = "EB_PRIVATE_KEY_CONTENT", valueFrom = data.aws_secretsmanager_secret.eb_private_key.arn },
+        # S9-01: worker task def deliberately doesn't get this — billing
+        # calls only happen from request/webhook handlers, both web-only.
+        { name = "STRIPE_SECRET_KEY", valueFrom = data.aws_secretsmanager_secret.stripe_secret_key.arn },
       ]
       logConfiguration = {
         logDriver = "awslogs"

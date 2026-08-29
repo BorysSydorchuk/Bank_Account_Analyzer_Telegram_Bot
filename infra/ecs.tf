@@ -83,6 +83,18 @@ data "aws_secretsmanager_secret" "resend_api_key" {
   name = "kbc-analyzer/resend-api-key"
 }
 
+# S9-01: same pattern — created directly via `aws secretsmanager
+# create-secret`, real Stripe test-mode secret key never touches Terraform
+# state. STRIPE_PUBLISHABLE_KEY is deliberately not here — it's meant to be
+# client-visible (Stripe.js reads it in the browser), so it's not a secret
+# and doesn't belong in Secrets Manager; wired as plain frontend config
+# when S9-05 (Billing UI) actually needs it. STRIPE_WEBHOOK_SECRET is also
+# not here yet — S9-03 generates it when the real webhook endpoint is
+# created, not before.
+data "aws_secretsmanager_secret" "stripe_secret_key" {
+  name = "kbc-analyzer/stripe-secret-key"
+}
+
 resource "aws_iam_role_policy" "ecs_task_execution_read_app_secrets" {
   name = "${var.project_name}-execution-read-app-secrets"
   role = aws_iam_role.ecs_task_execution.id
@@ -99,6 +111,7 @@ resource "aws_iam_role_policy" "ecs_task_execution_read_app_secrets" {
         data.aws_secretsmanager_secret.eb_private_key.arn,
         data.aws_secretsmanager_secret.database_url.arn,
         data.aws_secretsmanager_secret.resend_api_key.arn,
+        data.aws_secretsmanager_secret.stripe_secret_key.arn,
       ]
     }]
   })
