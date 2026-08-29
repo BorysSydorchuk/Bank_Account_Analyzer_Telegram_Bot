@@ -853,7 +853,7 @@ password reset entries.** Both were OPEN pending real
 transactional-email delivery to a genuine stranger; that proof now
 exists (`lifeliyaberry27@gmail.com`, above).
 
-## Billing (S9-01/S9-02/S9-03, in progress — Sprint 9)
+## Billing (S9-01/S9-02/S9-03/S9-04, in progress — Sprint 9)
 
 **Stripe, test mode only. No live-mode object has been created and none
 should be until Borys deliberately activates the account.** Real test-mode
@@ -961,6 +961,24 @@ branch; the latter is covered by `tests/test_billing_webhook.py`'s
 against a realistic Stripe event shape. Two real adversarial calls (no
 signature header; a forged signature) both got a real `400 Invalid
 signature.` from the live endpoint.
+
+**Tier-based usage gating (S9-04).** `app/usage_limits.py`'s
+`try_record_usage` now checks `is_billing_enabled` before anything else:
+if off, tier is never even looked up — behavior (including exact message
+wording) is byte-for-byte S8-04's original, confirmed by
+`tests/test_usage_limits.py` passing completely unmodified, and live
+against the real dev database (a real user hit exactly the 50/day chat
+cap and got the original `"...beta limit... Try again tomorrow."`
+message). If on, `crud.get_user_tier` decides which cap applies:
+`DAILY_LIMITS`/`MONTHLY_LIMITS` (free — the same S8-04 numbers) or
+`PAID_DAILY_LIMITS`/`PAID_MONTHLY_LIMITS` (paid — 3x free, Borys's call:
+150/30/30 daily, 1500/300/300 monthly) — still a real ceiling, not
+unlimited, per S9-01's confirmed distinction. Confirmed live: the same
+real user, with billing flipped on, hit the free-tier 10/day categorize
+cap with a new message mentioning upgrading; flipped to `tier='paid'`, the
+same user succeeded 30/30 times on insights (well past the free cap of
+10) and, on hitting *that* cap, got the original non-upgrade wording —
+only a free-tier user with billing on ever sees the upgrade mention.
 
 ## Beta Invite Mechanism (S8-06)
 
