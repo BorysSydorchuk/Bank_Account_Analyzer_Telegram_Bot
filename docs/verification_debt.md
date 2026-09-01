@@ -474,6 +474,53 @@ create it early rather than tracking by memory").
 
 ## CLOSED (recent)
 
+### Redis-auth rollout caused ~40 min of degraded production Redis access via two unrelated pre-existing bugs (found and closed same-day, S10-02)
+
+- **What happened:** S10-02 turned on `requirepass` for production
+  Redis. The web/worker deploy meant to pick up the new authenticated
+  `REDIS_URL` failed its first two attempts, so the *old*,
+  unauthenticated web task (`kbc-analyzer-web:16`, running since
+  2026-08-29) kept serving all production traffic — now unable to
+  authenticate to a Redis that suddenly required a password. Real
+  user impact would have been silent Redis-call failures (session
+  creation, sync locking) on that task; no evidence any real user hit
+  one during the window (low pre-launch beta traffic).
+- **Root cause 1 (blocked the deploy, unrelated to Redis):**
+  `infra/web.tf` has referenced `data
+  .aws_secretsmanager_secret.stripe_secret_key` since S9-01, but the
+  real secret was never created in AWS (ARCHITECTURE.md already noted
+  this). This failed `terraform plan` outright for the whole root
+  module. Fixed: created `kbc-analyzer/stripe-secret-key` for real,
+  from the Stripe test-mode key already in local `.env` (S9-03) —
+  closes that S9-01/S9-06 gap too.
+- **Root cause 2 (caused the actual `:17` deploy failures):**
+  `kbc-analyzer/database-url`'s embedded password was stale against
+  RDS's auto-rotated master password (`manage_master_user_password`).
+  Live-confirmed via a diagnostic ECS Exec session (no credentials
+  printed): `password authentication failed for user "kbc"`. This
+  made `/health` return `OperationalError` → `503`, so ECS kept
+  rejecting the new task and never cut over — meanwhile the *old* task
+  had already lost working Redis auth. Fixed: read the current
+  password from the AWS-managed RDS secret, rebuilt
+  `kbc-analyzer/database-url` from it (the pattern ARCHITECTURE.md
+  already documents), verified live (`DB_OK`), redeployed.
+- **How it actually closed (S10-02, 2026-09-01):** both secrets fixed,
+  `kbc-analyzer-web` and `kbc-analyzer-worker` redeployed to the
+  authenticated-Redis task definitions, `rolloutState: COMPLETED`
+  confirmed via `aws ecs describe-services`, old task fully drained. A
+  clean `terraform plan` afterward shows no remaining drift. Real
+  evidence for all of the above is in
+  `docs/tickets/S10-02-redis-authentication.md`'s DELIVERY section.
+- **Why this is worth its own entry, not just prose in S10-02's
+  writeup:** two genuinely separate pre-existing bugs, discovered only
+  because this ticket's own change exposed them — each could recur
+  independently (a future `terraform apply` touching web.tf without
+  first checking Secrets Manager state; RDS's password will rotate
+  again) if nobody knows to check for them.
+- **Status:** CLOSED (S10-02, 2026-09-01). Both root causes fixed with
+  real evidence; production confirmed stable and stateless-drift-free
+  afterward.
+
 ### `subscriptions.stripe_customer_id`/`stripe_subscription_id` uniqueness — vendor-documented, not yet empirically exercised (found S9-02, closed S9-03)
 
 - **What was deferred:** the UNIQUE constraint on both Stripe id columns

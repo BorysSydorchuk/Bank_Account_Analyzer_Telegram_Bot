@@ -40,9 +40,6 @@ resource "aws_ecs_task_definition" "web" {
       environment = [
         { name = "FRONTEND_ORIGIN", value = "https://mymble.be" },
         { name = "COOKIE_SECURE", value = "true" },
-        { name = "REDIS_URL", value = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.internal.name}:6379/0" },
-        { name = "CELERY_BROKER_URL", value = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.internal.name}:6379/0" },
-        { name = "CELERY_RESULT_BACKEND", value = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.internal.name}:6379/1" },
         { name = "GOOGLE_CLIENT_ID", value = var.google_client_id },
         { name = "GOOGLE_REDIRECT_URI", value = "https://mymble.be/api/auth/google/callback" },
         { name = "EB_REDIRECT_URL", value = "https://mymble.be/api/auth/enable-banking/callback" },
@@ -55,6 +52,12 @@ resource "aws_ecs_task_definition" "web" {
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = data.aws_secretsmanager_secret.database_url.arn },
+        # S10-02: was a plain `environment` value (no auth) until this
+        # ticket — now sourced from Secrets Manager, password embedded,
+        # same assembled-URL pattern as DATABASE_URL above.
+        { name = "REDIS_URL", valueFrom = data.aws_secretsmanager_secret.redis_url.arn },
+        { name = "CELERY_BROKER_URL", valueFrom = data.aws_secretsmanager_secret.redis_url.arn },
+        { name = "CELERY_RESULT_BACKEND", valueFrom = data.aws_secretsmanager_secret.redis_result_backend_url.arn },
         # S8-05: switched email delivery from SES (IAM role auth, zero
         # stored credentials) to Resend, after SES production access was
         # denied and the follow-up Support Case went unanswered past its

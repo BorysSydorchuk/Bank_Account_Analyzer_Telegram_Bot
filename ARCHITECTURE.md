@@ -285,7 +285,17 @@ and a final snapshot on destroy both on — this instance holds real
 migrated financial data, not throwaway test data. Master credentials are
 AWS-managed (`manage_master_user_password`, an auto-rotated Secrets
 Manager secret) — this project never holds the master password itself,
-anywhere.
+anywhere. **Standing invariant (learned S10-02):** because of that
+auto-rotation, `kbc-analyzer/database-url` — the manually-assembled
+secret the app actually reads — can silently go stale whenever RDS
+rotates the real master password underneath it; nothing currently
+re-syncs it automatically. A password-authentication failure on a
+*fresh* deploy (while already-open connections on an older, still-running
+task keep working) is the signature of this happening — see
+`docs/verification_debt.md`'s S10-02 entry for a real instance. Re-sync
+by reading `aws_db_instance.main.master_user_secret[0].secret_arn`'s
+current value and rewriting `kbc-analyzer/database-url` from it, same
+username/host/port/dbname, before assuming any other cause.
 
 | Resource | Identifier |
 |---|---|
@@ -295,6 +305,7 @@ anywhere.
 | Redis (self-hosted, Fargate, S7-01's decision) | ECS service `kbc-analyzer-redis`, own task, no ALB |
 | Redis reachable at | `redis.kbc-analyzer.internal:6379` (AWS Cloud Map private DNS, namespace `kbc-analyzer.internal`) — not a raw task IP, which changes on every task replacement |
 | Redis security group | `sg-0fe7c9d8fb1dfe17e` — inbound 6379 from the app SG only, no CIDR ranges at all |
+| Redis auth (S10-02) | `requirepass`, password in Secrets Manager (`kbc-analyzer/redis-password`), injected into the Redis task's own startup command; every consumer (web, worker) reads a pre-assembled, password-embedded `REDIS_URL`/`CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` from Secrets Manager too, same `valueFrom` pattern as `DATABASE_URL` |
 | App security group (placeholder) | `sg-016088c92a7c160f7` — represents whatever runs the Fargate web/worker services (not created until a later ticket) and one-off in-VPC tasks; RDS/Redis name only this SG as their allowed source |
 | ECS cluster | `kbc-analyzer-cluster` |
 
@@ -313,6 +324,27 @@ Redis via real function calls, not just a container health check.
 `rate_limit.py` is explicitly **not** Redis-backed (in-memory, see this
 file's Auth section) — nothing to verify there; the gap is tracked in
 `docs/backlog.md`, not silently assumed fixed.
+
+**Redis authentication (S10-02).** Self-hosted Redis had no auth at all
+from S7-03 through Sprint 9 — reachable by anything inside the app
+security group with no credential check. `requirepass` is now on, sourced
+from Secrets Manager the same way every other credential here is
+(`infra/redis.tf`'s container `secrets` field sets `REDIS_PASSWORD`,
+consumed by a shell-form `command` at container start so the real value
+never appears in the task definition or Terraform state). Real local
+evidence (docker-compose, S10-02 ticket): an unauthenticated `redis-cli
+PING` returns `NOAUTH Authentication required.`; the same command with
+`-a <password>` returns `PONG`. All four real consumers — `session.py`,
+`tokens.py`, `sync_lock.py`/`job_store.py` (via a real `/api/transactions/sync`
+call, Celery actually received and ran the task), and the Celery
+broker/backend themselves — confirmed working end-to-end against the
+authenticated instance, not just a container health check. **ElastiCache
+remains the AWS-native upgrade path** if the AWS-to-cheaper-platform
+migration tracked in `docs/verification_debt.md` (S10-11) doesn't happen
+on schedule — it would replace this self-hosted container with a managed,
+Multi-AZ-capable Redis without changing anything on the application side
+beyond the connection string, since the app already only ever talks to
+Redis via `REDIS_URL`-style env vars, never anything AWS-specific.
 
 **How this was actually run:** RDS and Redis sit in private subnets with
 no route from outside AWS at all — a security group can't fix that,
@@ -405,7 +437,10 @@ bootstrap and main config's local cache) holds only ARNs and metadata,
 never secret material. Every non-secret env var (`GOOGLE_CLIENT_ID`,
 `ENABLEBANKING_APP_ID`, `FRONTEND_ORIGIN`, `EB_REDIRECT_URL`, etc.) is
 plain task-definition `environment`, correctly separated from the four
-real secrets above.
+real secrets above. (S9-01 added a fifth, `STRIPE_SECRET_KEY`; S10-02
+added three more, covering Redis auth — see that ticket's own section
+above. This paragraph's "four" reflects the state at S7-05 and is kept
+as-written rather than silently inflated with each later addition.)
 
 **GOOGLE_CLIENT_SECRET exposure (S7-04) — resolved.** S7-04 disclosed
 that this value was printed in full via an `od -c` debug inspection of
@@ -882,18 +917,19 @@ live: flipping it in a local test between `true`/`false` and back had no
 observable effect anywhere — S9-04 is what actually wires it into
 enforcement), so its current state is provably inert either way.
 
-**Credentials — test-mode keys, real evidence, production wiring pending
-(see `docs/verification_debt.md`).** `STRIPE_SECRET_KEY`/
+**Credentials — test-mode keys, real evidence.** `STRIPE_SECRET_KEY`/
 `STRIPE_PUBLISHABLE_KEY` are real Stripe test-mode keys, currently only in
 the local `.env` (gitignored), matching this project's local-dev pattern
-for every other credential. `infra/ecs.tf`/`infra/web.tf` now declare a
+for every other credential. `infra/ecs.tf`/`infra/web.tf` declare a
 `data.aws_secretsmanager_secret.stripe_secret_key` (`kbc-analyzer/stripe-secret-key`)
 and grant it to the web task def only (worker never calls Stripe) — same
-shape as `RESEND_API_KEY`. **Unlike that S8-05 precedent, this Terraform
-change has NOT been `terraform apply`'d, and the actual AWS secret does
-not exist yet** — S8-05's own real incident (committed IAM grant, never
-applied, silent `AccessDeniedException` in production) is exactly the
-failure mode this note exists to prevent repeating. `STRIPE_PUBLISHABLE_KEY`
+shape as `RESEND_API_KEY`. **Update (S10-02, 2026-09-01):** this Terraform
+change sat un-applied from S9-01 through Sprint 9's close — exactly the
+S8-05 failure mode (committed IAM grant, never applied) — until it
+blocked an unrelated S10-02 `terraform plan` outright. The real AWS
+secret now exists (created from the same local test-mode key) and the
+grant is live and applied; see `docs/verification_debt.md`'s S10-02 entry
+for the full incident. `STRIPE_PUBLISHABLE_KEY`
 is deliberately not in Secrets Manager — it's meant to be client-visible,
 so it isn't a secret. **Turned out unused, not just unwired (S9-06
 correction):** S9-05's Billing UI never touches Stripe.js client-side at

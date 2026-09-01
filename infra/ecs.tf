@@ -95,6 +95,28 @@ data "aws_secretsmanager_secret" "stripe_secret_key" {
   name = "kbc-analyzer/stripe-secret-key"
 }
 
+# S10-02: same pattern — created directly via `aws secretsmanager
+# create-secret`, real password/URLs never touch Terraform state.
+# redis_password is the bare password, injected only into the Redis task
+# itself (infra/redis.tf) for its own --requirepass startup flag.
+# redis_url/redis_result_backend_url are the full connection strings (db 0
+# and db 1 respectively) with that same password already embedded, injected
+# into web/worker as REDIS_URL/CELERY_BROKER_URL and CELERY_RESULT_BACKEND —
+# ECS `secrets` can only set an env var to a secret's whole value, not
+# concatenate a secret into a larger string, so the assembled URL has to be
+# its own secret, same reasoning as database_url above.
+data "aws_secretsmanager_secret" "redis_password" {
+  name = "kbc-analyzer/redis-password"
+}
+
+data "aws_secretsmanager_secret" "redis_url" {
+  name = "kbc-analyzer/redis-url"
+}
+
+data "aws_secretsmanager_secret" "redis_result_backend_url" {
+  name = "kbc-analyzer/redis-result-backend-url"
+}
+
 resource "aws_iam_role_policy" "ecs_task_execution_read_app_secrets" {
   name = "${var.project_name}-execution-read-app-secrets"
   role = aws_iam_role.ecs_task_execution.id
@@ -112,6 +134,9 @@ resource "aws_iam_role_policy" "ecs_task_execution_read_app_secrets" {
         data.aws_secretsmanager_secret.database_url.arn,
         data.aws_secretsmanager_secret.resend_api_key.arn,
         data.aws_secretsmanager_secret.stripe_secret_key.arn,
+        data.aws_secretsmanager_secret.redis_password.arn,
+        data.aws_secretsmanager_secret.redis_url.arn,
+        data.aws_secretsmanager_secret.redis_result_backend_url.arn,
       ]
     }]
   })

@@ -17,9 +17,6 @@ resource "aws_ecs_task_definition" "worker" {
         "${local.materialize_eb_key} && exec celery -A app.celery_app worker --loglevel=info"
       ]
       environment = [
-        { name = "REDIS_URL", value = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.internal.name}:6379/0" },
-        { name = "CELERY_BROKER_URL", value = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.internal.name}:6379/0" },
-        { name = "CELERY_RESULT_BACKEND", value = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.internal.name}:6379/1" },
         { name = "ENABLEBANKING_APP_ID", value = var.enablebanking_app_id },
         { name = "ENABLEBANKING_PRIVATE_KEY_PATH", value = "/tmp/private.pem" },
       ]
@@ -27,6 +24,12 @@ resource "aws_ecs_task_definition" "worker" {
         { name = "DATABASE_URL", valueFrom = data.aws_secretsmanager_secret.database_url.arn },
         { name = "SETTINGS_SECRET", valueFrom = data.aws_secretsmanager_secret.settings_secret.arn },
         { name = "EB_PRIVATE_KEY_CONTENT", valueFrom = data.aws_secretsmanager_secret.eb_private_key.arn },
+        # S10-02: was a plain `environment` value (no auth) until this
+        # ticket — now sourced from Secrets Manager, password embedded,
+        # same assembled-URL pattern as DATABASE_URL above.
+        { name = "REDIS_URL", valueFrom = data.aws_secretsmanager_secret.redis_url.arn },
+        { name = "CELERY_BROKER_URL", valueFrom = data.aws_secretsmanager_secret.redis_url.arn },
+        { name = "CELERY_RESULT_BACKEND", valueFrom = data.aws_secretsmanager_secret.redis_result_backend_url.arn },
       ]
       logConfiguration = {
         logDriver = "awslogs"

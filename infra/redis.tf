@@ -42,6 +42,14 @@ resource "aws_ecs_task_definition" "redis" {
       name      = "redis"
       image     = "redis:7-alpine"
       essential = true
+      # S10-02: requirepass takes a literal argument, not an env var
+      # reference — ECS's `secrets` field can only inject REDIS_PASSWORD as
+      # a container env var, so the shell form of command expands it at
+      # container start instead of Terraform ever seeing the real value.
+      command = ["sh", "-c", "exec redis-server --requirepass \"$REDIS_PASSWORD\""]
+      secrets = [
+        { name = "REDIS_PASSWORD", valueFrom = data.aws_secretsmanager_secret.redis_password.arn },
+      ]
       portMappings = [{
         containerPort = 6379
         protocol      = "tcp"
