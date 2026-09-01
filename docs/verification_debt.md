@@ -511,6 +511,15 @@ create it early rather than tracking by memory").
   clean `terraform plan` afterward shows no remaining drift. Real
   evidence for all of the above is in
   `docs/tickets/S10-02-redis-authentication.md`'s DELIVERY section.
+  Both fixes were flagged and **approved by Borys, 2026-09-01,
+  in-session**, before either was applied.
+- **Ticket disposition:** S10-02's "zero downtime beyond the known
+  no-redundancy limitation" acceptance criterion FAILED as originally
+  written (this incident exceeded that baseline) — amended in the
+  ticket and accepted as a documented deviation given the existing
+  no-redundancy architecture, not sent back for mitigation. See
+  `docs/tickets/S10-02-redis-authentication.md`'s AMENDED/CONFIRMED
+  notes.
 - **Why this is worth its own entry, not just prose in S10-02's
   writeup:** two genuinely separate pre-existing bugs, discovered only
   because this ticket's own change exposed them — each could recur

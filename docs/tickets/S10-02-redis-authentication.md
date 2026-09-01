@@ -28,6 +28,20 @@ ACCEPTANCE CRITERIA:
   already causes (this project's known no-redundancy limitation,
   unchanged by this ticket)
 
+  **AMENDED (2026-09-01, post-delivery, Borys):** this criterion
+  FAILED as originally written — actual outcome was ~40 minutes of
+  degraded Redis-dependent functionality (session creation, sync
+  locking) on the live web task during this specific deploy, not
+  "zero beyond a normal deploy's restart-only impact." Root-caused
+  to two unrelated pre-existing blockers (an un-applied Stripe
+  secret, a stale `DATABASE_URL` password) that were found and
+  resolved live during the same session — see DELIVERY below.
+  Accepted as a documented deviation given this project's existing
+  no-redundancy architecture (a single web/worker/Redis task each,
+  no standby to fail over to during any deploy that can't complete
+  cleanly on the first attempt) — not treated as a new problem
+  requiring its own mitigation ticket.
+
 WHEN DONE:
 - Real evidence of auth enforcement and continued functionality
 - Do not start S10-03 until confirmed
@@ -135,7 +149,13 @@ committed config matches live infrastructure exactly.
 ### Unrelated incident found and fixed mid-ticket (flagged and approved live)
 
 Two things outside this ticket's stated scope came up; both were
-flagged to Borys before acting, per PROMPT 5, and approved:
+flagged to Borys before acting, per PROMPT 5, and approved live in
+this session before any fix was made — **approved by Borys,
+2026-09-01, in-session**, via two separate AskUserQuestion prompts
+(one per finding below), each answered "Yes, do it now" before the
+corresponding fix was applied. Recorded here as the closure of
+Finding 1's flag, since neither fix's own commit message names the
+approval explicitly:
 
 1. **`infra/web.tf` referenced a Stripe secret that was never created
    in AWS** (`kbc-analyzer/stripe-secret-key`, added S9-01, never
@@ -181,10 +201,22 @@ Both are worth a standalone ledger mention even though fixed in-ticket
   three secrets, `valueFrom` only, created via CLI, never in
   Terraform state or application code.
 - **Zero downtime/session loss beyond the known no-redundancy
-  limitation:** the incident above went beyond that baseline — it
-  wasn't just "a restart drops in-memory state," it was roughly 40
-  minutes of degraded Redis-dependent functionality on the live web
-  task while two unrelated deploy blockers got resolved. Flagged
-  above and in the ledger rather than glossed over.
+  limitation:** **FAIL, accepted as a documented deviation
+  (2026-09-01, Borys) — not sent back for mitigation.** Actual
+  outcome was roughly 40 minutes of degraded Redis-dependent
+  functionality on the live web task while two unrelated,
+  pre-existing deploy blockers got resolved live (see the AMENDED
+  acceptance-criterion note above and the incident section above).
+  Accepted given this project's existing no-redundancy architecture
+  rather than treated as a new problem to solve.
 
-Ready for S10-03 whenever you confirm this one.
+## CONFIRMED (2026-09-01, Borys)
+
+S10-02 confirmed delivered with the one documented, accepted
+deviation above (the ~40-minute degraded-Redis window, root-caused
+and fixed live). Not reopened as a mitigation ticket — the two root
+causes are closed, and the residual risk (RDS master-password
+rotation silently staling `DATABASE_URL` again) is now a standing
+invariant in ARCHITECTURE.md, not new open work.
+
+Ready for S10-03.
