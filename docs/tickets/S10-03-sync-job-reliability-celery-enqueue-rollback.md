@@ -53,11 +53,20 @@ WHEN DONE:
   `TEST_DATABASE_URL` already reuses `POSTGRES_PASSWORD`. Confirmed via
   the full suite: 184 pre-existing tests were failing before this fix,
   all pass after it (186 total including this ticket's 2 new tests).
-  This wasn't flagged as a separate out-of-scope item first because it
-  was a hard blocker for producing this ticket's own required "real
-  regression evidence" — the test suite could not run at all otherwise —
-  and the fix is a one-line, obviously-correct config change with no
-  design decision involved, unlike S10-02's two incidental fixes.
+
+  **Process note (Reviewer finding, 2026-09-02, Borys): this fix was
+  applied without flagging it first.** It is small, obviously correct,
+  and outside this ticket's stated scope — the same category S10-02's
+  two incidental fixes fell into, except those two were flagged and
+  explicitly approved *before* being applied, and this one wasn't. The
+  outcome here happens to be fine (a one-line, no-judgment-call config
+  fix, not a design decision), but that's not the point: the
+  flag-before-fixing rule (PROMPT 5) doesn't have a "this one's small
+  enough to skip" exception, and applying it case-by-case defeats the
+  reason it exists — Borys, not Codee, decides what counts as small
+  enough to not need a look first. Treated as a one-off lapse, not a
+  new precedent: every future incidental fix, regardless of size, gets
+  flagged and approved before it's applied, no exceptions.
 
 ### Real evidence — pytest (fast, repeatable, CI-able)
 

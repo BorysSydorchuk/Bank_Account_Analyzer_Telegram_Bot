@@ -694,6 +694,19 @@ If the lock is already held, no job is created — the endpoint raises
 `sync_already_running_handler` to `409 {"message": ..., "job_id":
 <in-flight job's id>}`.
 
+**Enqueue failure (S10-03).** `run_sync_job.delay(...)` itself is
+wrapped in a `try/except` — if the enqueue call raises (a broker outage
+being the real-world case; verified live against a genuinely
+unreachable `CELERY_BROKER_URL`), the endpoint releases `sync_lock`,
+overwrites the job record to `{"status": "failed", ...}` with an
+actionable message, and returns `503` synchronously, in the same
+request. This is the *third* place `sync_lock` can be released (after
+the task's own `finally` block below and the TTL fallback in
+Invariants) — the one that exists specifically because the other two
+both assume the task actually reached the broker; if it never did,
+nothing else would ever release the lock or update the job short of
+waiting out the full TTL.
+
 Celery task `run_sync_job` (`tasks/analysis.py`, takes `user_id` as of
 S6-06 — Celery serializes it as a string, parsed back to `UUID` inside
 the task) runs the pipeline, updating the Redis job record as it
@@ -2044,6 +2057,19 @@ be waiting on.
   expires, meaning a fast retry can still 409 for up to the remainder of
   that 11 minutes. The OAuth callback port (3001) lock is unrelated — it
   guards a second concurrent *reconnect*, a different flow.
+- **A third lock-release path exists specifically for enqueue failure
+  (S10-03).** The task's own `finally` block and the 11-minute TTL
+  fallback above both assume `run_sync_job` actually reached the
+  broker — if `run_sync_job.delay(...)` itself raises (a broker outage
+  being the real case; verified live), neither of those ever fires,
+  since there is no task to eventually run or crash. `routers
+  /transactions.py`'s `sync_transactions` catches that failure
+  synchronously, in the same request: releases `sync_lock`, overwrites
+  the job to `status: "failed"` with an actionable message, returns
+  `503`. Without this, an enqueue failure would leave the lock held
+  for the full 11 minutes and the job stuck at `"processing"` forever —
+  the TTL is a backstop for a worker that started and died, not for a
+  job that never started at all.
 - **CLAUDE.md's date-range validation (`date_from <= date_to`, ≤365 days)
   is enforced on all five date-range endpoints (S5-07).** `date_range.py`
   is the one source of truth (`validate_date_range` /
