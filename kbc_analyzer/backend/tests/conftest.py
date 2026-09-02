@@ -59,7 +59,13 @@ assert TEST_DATABASE_URL != _DEV_DATABASE_URL, (
 # is exercised as-is. Index 15 is never used by the dev app (job_store.py
 # and celery_app.py both default to indexes 0/1), so it can never collide
 # with real job data even if both stacks run at once.
-TEST_REDIS_URL = os.getenv("TEST_REDIS_URL", "redis://localhost:6379/15")
+# S10-02: the local Redis container now requires a password (requirepass) —
+# reuse the same REDIS_PASSWORD .env already defines for the dev stack, same
+# as TEST_DATABASE_URL above reuses POSTGRES_PASSWORD, so this doesn't need
+# its own separate credential.
+_REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+_redis_auth = f":{_REDIS_PASSWORD}@" if _REDIS_PASSWORD else ""
+TEST_REDIS_URL = os.getenv("TEST_REDIS_URL", f"redis://{_redis_auth}localhost:6379/15")
 
 # ── 2. Point the app at test infrastructure BEFORE any app.* import ────────
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL

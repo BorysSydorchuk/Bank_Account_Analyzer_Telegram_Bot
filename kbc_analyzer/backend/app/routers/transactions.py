@@ -1,5 +1,6 @@
 """POST /api/transactions/sync, GET /api/transactions, GET /api/transactions/search,
 and PATCH /api/transactions/{id}."""
+import logging
 import math
 from datetime import date
 from typing import Literal
@@ -19,6 +20,14 @@ from ..sync_lock import SyncAlreadyRunningError
 from ..tasks.analysis import run_sync_job
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
+logger = logging.getLogger(__name__)
+
+# S10-03: the enqueue error message shown to both the job's own `error`
+# field and the request's own HTTPException detail — the client sees this
+# either way, whether it reads it from the failed 503 response or (if it
+# raced ahead and already started polling GET /api/jobs/{job_id}) from the
+# job record itself.
+_ENQUEUE_FAILED_MESSAGE = "Could not start the sync job. Please try again shortly."
 
 
 @router.post("/sync", response_model=SyncResponse)
@@ -68,7 +77,29 @@ def sync_transactions(
             "message": "Fetching transactions from KBC...",
         },
     )
-    run_sync_job.delay(job_id, body.date_from.isoformat(), body.date_to.isoformat(), str(current_user.id))
+    # S10-03: a broker outage (or anything else .delay() can raise) used to
+    # leave this job stuck at "processing" forever and the lock held for its
+    # full 11-minute TTL — nothing would ever pick the job back up to mark it
+    # failed, since the task was never actually enqueued for a worker to run.
+    # Releasing the lock and marking the job failed here, synchronously, is
+    # the only place that can happen: this request is the only code that
+    # knows the enqueue itself failed.
+    try:
+        run_sync_job.delay(job_id, body.date_from.isoformat(), body.date_to.isoformat(), str(current_user.id))
+    except Exception:
+        logger.exception("Failed to enqueue sync job %s for user %s", job_id, current_user.id)
+        sync_lock.release(job_id, current_user.id)
+        job_store.set_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "user_id": str(current_user.id),
+                "status": "failed",
+                "stage": "fetching",
+                "error": _ENQUEUE_FAILED_MESSAGE,
+            },
+        )
+        raise HTTPException(status_code=503, detail=_ENQUEUE_FAILED_MESSAGE)
 
     return SyncResponse(job_id=job_id, status="processing")
 
