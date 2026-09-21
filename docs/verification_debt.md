@@ -82,8 +82,18 @@ create it early rather than tracking by memory").
   Terraform. Live `desired_count`/DB instance state now differs from
   whatever `infra/*.tf` declares. A `terraform apply` for an unrelated
   change during the pause window risks silently reverting these actions
-  without anyone noticing — check `terraform plan` for
-  ECS/RDS drift before applying anything else while this is open.
+  without anyone noticing — **standing rule while this entry is OPEN
+  (Borys, 2026-09-21): run `terraform plan` before any apply and
+  confirm it shows drift on ECS `desired_count`/RDS instance state
+  first; if a real apply is needed, either `-target` it to exclude the
+  paused resources or re-run the pause commands immediately after.**
+  Attempted a real `terraform plan` to capture the drift as evidence
+  here — blocked by four required vars
+  (`budget_notification_email`, `google_client_id`,
+  `enablebanking_app_id`, `ses_test_recipient_email`) with no tracked
+  `.tfvars` or `TF_VAR_*` values available in this session; not
+  fabricated. Re-run and capture real output once those values are
+  supplied.
 - **What would close it:** all four resources restored (RDS
   `start-db-instance`, then ECS `desired_count=1` on redis, worker, web
   in that order — redis/worker before web so `/health` hits a live DB
