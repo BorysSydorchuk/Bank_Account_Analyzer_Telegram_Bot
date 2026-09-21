@@ -278,6 +278,14 @@ page. More robust than hardcoding `mymble.be` into the image: works
 unchanged if the domain ever changes, and doesn't require rebuilding
 images per-environment.
 
+**Currently paused (2026-09-21) — AWS free-tier credit exhaustion.** ECS
+`kbc-analyzer-web`/`worker`/`redis` are at `desired_count=0` and RDS
+`kbc-analyzer-db` is stopped; the site is offline and no live production
+verification is possible until this is reversed. See
+`docs/verification_debt.md`'s OPEN entry for the full incident, restore
+steps, and the credential/Terraform-drift caveats this created. NAT
+Gateway and ALB are untouched and still billing.
+
 **RDS & Redis (provisioned, S7-03):** real bank data now lives on AWS
 for the first time. RDS PostgreSQL 16, `db.t4g.micro`, Single-AZ, 20 GB
 gp3, private subnets only (`aws_db_subnet_group`), deletion protection

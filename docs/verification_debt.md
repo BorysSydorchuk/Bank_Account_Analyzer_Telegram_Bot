@@ -46,6 +46,58 @@ create it early rather than tracking by memory").
 
 ## OPEN
 
+### Production paused (ECS zero, RDS stopped) due to AWS free-tier credit exhaustion — kbc-admin-temp used for 2 of 4 actions (2026-09-21)
+
+- **What happened:** AWS free-plan credits down to ~$13 remaining against
+  the ~$100-150/mo gross burn rate documented at S7-10 (net billed shows
+  $0 only because credits fully cover the gross spend — that offset is
+  about to run out, not a sign the app is actually free to run). Borys
+  approved, in-session (2026-09-21), a temporary reversible pause of
+  compute: ECS `kbc-analyzer-web`, `kbc-analyzer-worker`,
+  `kbc-analyzer-redis` set to `desired_count=0`, and RDS
+  `kbc-analyzer-db` stopped via `rds:StopDBInstance`. A pre-pause AWS
+  scan (ECS clusters/services, EC2 instances, RDS snapshots, NAT
+  Gateways, ALBs — all via `kbc-analyzer-deploy`, read-only) found no
+  leftover/unexpected resources; the credit burn matches the documented
+  S7-10 baseline, nothing rogue was running.
+- **Credential deviation:** web and worker were scaled via
+  `kbc-analyzer-deploy`, within its documented scope. Redis's service
+  ARN was not included in `kbc-analyzer-deploy`'s `ecs:UpdateService`
+  grant, and `rds:StopDBInstance` isn't granted to it at all — both
+  calls returned `AccessDeniedException`. Executed instead under
+  `kbc-admin-temp` (`KBC_analyser_deploy`, `AdministratorAccess`), which
+  ARCHITECTURE.md's S8-01 note documents as reserved for IAM changes
+  only. This is a **one-off emergency deviation**, flagged and approved
+  by Borys in-session (2026-09-21) before either call ran — not a new
+  precedent. Routine deploy work continues to use `kbc-analyzer-deploy`.
+- **Deliberately not touched:** NAT Gateway and ALB. Both bill
+  regardless of idle state and can only stop costing via deletion, not
+  a reversible pause — deleting either would cut outbound internet
+  access from private subnets (NAT) or take `mymble.be` fully offline
+  (ALB), and restoring either means recreating a resource via Terraform,
+  not flipping a switch back. Excluded from this action pending
+  separate, explicit approval.
+- **Terraform drift introduced:** all four changes were imperative AWS
+  CLI calls (`ecs update-service`, `rds stop-db-instance`), not
+  Terraform. Live `desired_count`/DB instance state now differs from
+  whatever `infra/*.tf` declares. A `terraform apply` for an unrelated
+  change during the pause window risks silently reverting these actions
+  without anyone noticing — check `terraform plan` for
+  ECS/RDS drift before applying anything else while this is open.
+- **What would close it:** all four resources restored (RDS
+  `start-db-instance`, then ECS `desired_count=1` on redis, worker, web
+  in that order — redis/worker before web so `/health` hits a live DB
+  and broker immediately) **and** either the credit situation resolved
+  or the pause deliberately continued as an accepted operating state
+  with a new, explicit decision recorded here.
+- **Known constraint while open:** AWS auto-restarts a stopped RDS
+  instance after 7 days regardless of manual action — if the pause is
+  still needed past that point, RDS will need to be re-stopped
+  manually.
+- **Status:** OPEN (2026-09-21). Production is currently fully paused —
+  no live verification against production is possible for S10-03 or any
+  other in-flight ticket until this closes.
+
 ### BillingSuccessPage can momentarily outrun the real webhook — no retry/poll (found Reviewer on S9-05, logged S9-06)
 
 - **What was deferred:** `BillingSuccessPage.tsx` (Stripe's real
